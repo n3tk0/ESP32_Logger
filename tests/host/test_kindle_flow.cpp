@@ -248,7 +248,7 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
         // measured as fitting — the estimate is pessimistic by design.
         int at = 0;
         for (int r = 0; r < f.gridNRows; r++) {
-            const int cellW = KDF_COL_L / f.gridRows[r] - KDF_CELL_PAD;
+            const int cellW = f.colLW / f.gridRows[r] - KDF_CELL_PAD;
             const int floorV = (f.gridRows[0] >= 3) ? 27 : 34;
             for (int c = 0; c < f.gridRows[r]; c++, at++) {
                 const int w = f.gridValSz * in.gridAdv[at] / 1000;
@@ -260,7 +260,8 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
     }
 
     // ── The indoor row ──
-    CHECK(f.inRuleY > KDF_CL_Y + f.clSize);
+    if (in.clock) CHECK(f.inRuleY > KDF_CL_Y + f.clSize);
+    else          CHECK_EQ(f.inLabY, KDF_TOP_Y);
     if (in.nIn) {
         CHECK(f.inValSz1 > 0);
         CHECK(f.inValY >= f.inLabY + f.labSz + 18);
@@ -269,7 +270,7 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
             CHECK(in.nIn >= 2);
             CHECK(f.inVal2Y >= f.inValY + f.inValSz1 + f.labSz + 4);
             CHECK(f.inVal2Y + f.inValSz <= bot);
-            CHECK(f.inValSz1 * in.inAdv[0] / 1000 <= KDF_COL_R - KDF_CELL_PAD);
+            CHECK(f.inValSz1 * in.inAdv[0] / 1000 <= f.inW - 12 - KDF_CELL_PAD);
         } else {
             CHECK(f.inValY + f.inValSz1 <= bot);
             CHECK_EQ(f.inVal2Y, f.inValY + f.inValSz1 - f.inValSz);
@@ -284,14 +285,83 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
     } else {
         CHECK_EQ(f.inValSz1, 0);
     }
-    CHECK_EQ(f.sepH, f.topBot - KDF_TOP_Y - 10);
+    // Nothing in the right column: the outdoor one takes the page's width.
+    if (!in.clock && !in.nIn) {
+        CHECK_EQ(f.colLW, 564);
+        CHECK_EQ(f.sepH, 0);
+    } else {
+        CHECK_EQ(f.colLW, KDF_COL_L);
+        CHECK_EQ(f.sepH, f.topBot - KDF_TOP_Y - 10);
+    }
+    CHECK_EQ(f.battX, f.colLX + f.colLW - 48);
+}
+
+/// The same for the landscape page, 800 x 600.
+static void checkLand(const KdFlowIn& in, const KdFlow& f, int footY) {
+    g_cases++;
+    CHECK(f.land);
+    CHECK_EQ(f.pageW, 800);
+    CHECK_EQ(f.pageH, 600);
+    CHECK_EQ(f.footY, footY);
+    // ── The top row, and nothing over it when both are off ──
+    if (in.clock || in.week) {
+        CHECK(f.topRowY > KDF_TOP_Y);
+        CHECK_EQ(f.groupY, f.topRowY + 8);
+        if (in.clock) CHECK(f.clY + f.clH <= f.topRowY);
+        if (in.week)  CHECK(f.wkY + 58 <= f.topRowY);   // WK_CELL_H
+        if (in.clock && in.week) CHECK(f.clX + f.clW <= f.wkX + 4);
+        CHECK(f.wkX + 7 * f.wkCellW <= KDF_LAND_X1);
+    } else {
+        CHECK_EQ(f.topRowY, 0);
+        CHECK_EQ(f.groupY, KDF_TOP_Y);
+    }
+    // ── The band and the footer ──
+    CHECK_EQ(f.rule3Y + (in.forecast ? KDF_FC_H : 0), footY);
+    CHECK_EQ(f.olN, 5);
+    CHECK(f.olX[4] + 88 <= KDF_LAND_X1 + 4);        // OL_PLATE_W
+    // ── The readings beside the chart ──
+    CHECK_EQ(f.topBot, f.rule3Y);
+    if (in.chart) {
+        CHECK(f.colLX + f.colLW < f.sepX);
+        CHECK(f.sepX < f.grX);
+        CHECK(f.grX + f.grW <= KDF_LAND_X1);
+        CHECK(f.grY > f.groupY);
+        CHECK(f.grH >= 150);
+        CHECK(f.grY + f.grH + KDF_CHART_BELOW <= f.rule3Y);
+        CHECK_EQ(f.sepY + f.sepH, f.rule3Y - 8);
+    } else {
+        CHECK_EQ(f.grH, 0);
+        CHECK_EQ(f.sepH, 0);
+        CHECK_EQ(f.colLX + f.colLW, KDF_LAND_X1);
+    }
+    // Six readings, the indoor row, the top row and the band on the browser's
+    // shorter page is the tightest this gets: the headline gives way first.
+    CHECK(f.heroSz >= kdfScale(88, KDF_LAND_GROW_MIN) && f.heroSz <= 104);
+    CHECK(f.subY > f.heroY + f.heroSz);
+    const int outBot = f.inRuleY - 8;
+    if (in.nGrid) {
+        CHECK(f.gridY + (f.gridNRows - 1) * f.gridRowH + f.labSz + 4 + f.gridValSz <= outBot);
+        CHECK(f.gridValSz <= f.heroSz * 60 / 100);
+    }
+    // ── The indoor row, one line under the outdoor one ──
+    CHECK_EQ(f.inX, f.colLX);
+    CHECK_EQ(f.inW, f.colLW);
+    CHECK(!f.inStack);
+    if (in.nIn) {
+        CHECK_EQ(f.inRuleY, f.rule3Y - KDF_IN_H);
+        CHECK(f.inValY + f.inValSz1 <= f.rule3Y - 8);
+        CHECK(f.inLabY > f.inRuleY);
+    } else {
+        CHECK_EQ(f.inRuleY, f.rule3Y);
+        CHECK_EQ(f.inValSz1, 0);
+    }
 }
 
 static void test_every_combination() {
     const unsigned grid[6] = { advPress(), advDew(), advCo2(), advHum(), advAqi(), advTemp() };
     const unsigned wide[6] = { 3600, 3400, 3200, 3000, 2800, 2600 };   // long units, big numbers
     const unsigned ind[3]  = { advTemp(), advHum(), advAqi() };
-    for (int mask = 0; mask < 16; mask++)
+    for (int mask = 0; mask < 64; mask++)
     for (int set = 0; set < 2; set++)
     for (int ng = 0; ng <= 6; ng++)
     for (int ni = 0; ni <= 3; ni++) {
@@ -300,11 +370,20 @@ static void test_every_combination() {
         in.forecast = mask & 2;
         in.week     = mask & 4;
         in.sub      = mask & 8;
+        in.clock    = !(mask & 16);
+        in.land     = mask & 32;
         in.nGrid = (uint8_t)ng;
         for (int i = 0; i < ng; i++) in.gridAdv[i] = (uint16_t)(set ? wide[i] : grid[i]);
         in.nIn = (uint8_t)ni;
         for (int i = 0; i < ni; i++) in.inAdv[i] = (uint16_t)(set ? wide[i] : ind[i]);
         const KdFlow f = kdFlowCompute(in);
+        if (in.land) {
+            checkLand(in, f, KDF_LAND_FOOT_Y);
+            const KdFlow h = kdFlowComputeHtml(in);
+            checkLand(in, h, KDF_LAND_FOOT_Y - kdFlowHtmlExtra(h));
+            CHECK_EQ(kdFlowHtmlChartH(h), h.grH);
+            continue;
+        }
         checkPage(in, f);
         // The browser page: the same, less what its sections cost over the
         // panel's — out of the chart when there is one, else the top block.
@@ -358,7 +437,7 @@ static void test_panel_keys() {
     const KdFlow f = kdFlowCompute(defaultPage());
     KdFlowKV kv[KDF_PANEL_KEYS];
     const int n = kdFlowPanelKeys(f, 600, kv);
-    CHECK_EQ(n, KDF_PANEL_KEYS);
+    CHECK_EQ(n, KDF_PANEL_BASE);
     // At 600 they are the design's own numbers — the ordinary page's layout
     // file, key for key, where nothing moved.
     CHECK_EQ(keyOf(kv, n, "RULE2_Y"), 282);
@@ -405,6 +484,34 @@ static void test_panel_keys() {
     in.nGrid = 0;
     kdFlowRowsText(kdFlowCompute(in), rows, sizeof(rows));
     CHECK_STREQ(rows, "");
+
+    // Upright with no clock and no indoor row: the outdoor column's width.
+    in = defaultPage();
+    in.clock = false; in.nIn = 0;
+    KdFlowKV wide[KDF_PANEL_KEYS];
+    const int nw = kdFlowPanelKeys(kdFlowCompute(in), 600, wide);
+    CHECK_EQ(nw, KDF_PANEL_BASE + 2);
+    CHECK_EQ(keyOf(wide, nw, "COL_L_W"), 564);
+    CHECK_EQ(keyOf(wide, nw, "SEP_H"), 0);
+
+    // Landscape: the x too, scaled by the panel's SHORT side.
+    in = defaultPage();
+    in.land = true;
+    const KdFlow l = kdFlowCompute(in);
+    KdFlowKV lk[KDF_PANEL_KEYS];
+    const int nl = kdFlowPanelKeys(l, 600, lk);
+    CHECK(nl > KDF_PANEL_BASE && nl <= KDF_PANEL_KEYS);
+    for (int i = 0; i < nl; i++)
+        for (int j = i + 1; j < nl; j++) CHECK(strcmp(lk[i].key, lk[j].key) != 0);
+    CHECK_EQ(keyOf(lk, nl, "LAND"), 1);
+    CHECK_EQ(keyOf(lk, nl, "OL_N"), 5);
+    CHECK_EQ(keyOf(lk, nl, "GR_W"), 440);
+    CHECK_EQ(keyOf(lk, nl, "FOOT_RULE_Y"), 564);
+    CHECK_EQ(keyOf(lk, nl, "WK_HDG_RULE_W"), 0);
+    KdFlowKV lb[KDF_PANEL_KEYS];
+    kdFlowPanelKeys(l, 1072, lb);
+    CHECK_EQ(keyOf(lb, nl, "FOOT_RULE_Y"), 1008);      // 564 * 1072 / 600
+    CHECK_EQ(keyOf(lb, nl, "GR_W") % 8, 0);
 }
 
 struct Css {

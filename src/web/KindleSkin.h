@@ -362,6 +362,65 @@ inline bool kdStandaloneDecide(uint8_t layoutMode, bool haveForecastModule,
     return now > fetchedAt && (now - fetchedAt) > staleAfterS;
 }
 
+/// The switches the layout and the settings page work from: showFlags, and
+/// the clock as one more bit of it (KSHOW_CLOCK), which the config keeps apart
+/// so that an older config reads as "clock on". See KindleConfig::clockOff.
+inline uint16_t kdShowMask(const KindleConfig& k) {
+    return (uint16_t)((k.showFlags & KSHOW_ALL) | (k.clockOff ? 0 : KSHOW_CLOCK));
+}
+
+/// Which way up the browser page is: its own setting, or the FBInk panel's
+/// when it has none (KindleConfig::pageRot == 0, an older config's value).
+inline uint8_t kdPageRot(const KindleConfig& k) {
+    return (k.pageRot >= 1 && k.pageRot <= KROT_270 + 1) ? (uint8_t)(k.pageRot - 1)
+                                                         : k.rotation;
+}
+
+/// The browser page's rotation as the API spells it: degrees, or -1 for
+/// "the same as the panel".
+inline int kdPageRotDeg(const KindleConfig& k) {
+    return (k.pageRot >= 1 && k.pageRot <= KROT_270 + 1) ? (k.pageRot - 1) * 90 : -1;
+}
+
+/// A rotation in degrees, as the API and the reader's ?rot= spell it, to a
+/// KROT_* value; anything that is not one of the four is `fallback`.
+inline uint8_t kdRotFromDeg(long deg, uint8_t fallback) {
+    switch (deg) {
+        case 0:   return KROT_0;
+        case 90:  return KROT_90;
+        case 180: return KROT_180;
+        case 270: return KROT_270;
+        default:  return fallback;
+    }
+}
+
+/// The stored KindleConfig::pageRot for what a form or a file sends: -1 is
+/// "the same as the panel", 0/90/180/270 a rotation of its own; anything
+/// else keeps `fallback`.
+inline uint8_t kdPageRotFromDeg(long deg, uint8_t fallback) {
+    if (deg == -1) return 0;
+    const uint8_t r = kdRotFromDeg(deg, 0xFF);
+    return r == 0xFF ? fallback : (uint8_t)(r + 1);
+}
+
+/// Days between the FBInk reader setting its clock from the collector's, as
+/// the API, the settings page and the payload's CLOCK_SYNC say it: 0 never.
+inline uint8_t kdClockSyncDays(const KindleConfig& k) {
+    if (k.clockSync == KCLOCK_SYNC_OFF) return 0;
+    if (k.clockSync == 0 || k.clockSync > KCLOCK_SYNC_MAX) return 1;
+    return k.clockSync;
+}
+
+/// And back: days to the stored byte, or `fallback` for a number out of range.
+inline uint8_t kdClockSyncFromDays(long days, uint8_t fallback) {
+    if (days == 0) return KCLOCK_SYNC_OFF;
+    if (days >= 1 && days <= KCLOCK_SYNC_MAX) return (uint8_t)days;
+    return fallback;
+}
+
+/// Whether the page is the landscape one: the reader on its side.
+inline bool kdRotLandscape(uint8_t rot) { return rot == KROT_90 || rot == KROT_270; }
+
 // Applied on the way in from the API and again on the way out to the page.
 // Twice, because a config.bin can also arrive by import or from a firmware
 // that wrote a field this one has since narrowed, and a stylesheet built from
@@ -382,6 +441,14 @@ inline void kdSkinClamp(KindleConfig& k) {
     // Same reasoning, same safe answer: KLAYOUT_AUTO is both the older
     // config's reserved byte and what a value nobody recognises becomes.
     if (k.layoutMode > KLAYOUT_STANDALONE) k.layoutMode = KLAYOUT_AUTO;
+    // Upright is both what an older config holds and the one answer that is
+    // always drawable, so a byte nobody recognises lands there.
+    if (k.rotation > KROT_270)          k.rotation = KROT_0;
+    if (k.pageRot > KROT_270 + 1)       k.pageRot = 0;       // the panel's
+    if (k.clockOff > 1)                 k.clockOff = 1;
+    // Every day — the default, and an older config's 0 — for a byte nobody
+    // recognises: a clock set too often costs nothing, one never set drifts.
+    if (k.clockSync > KCLOCK_SYNC_MAX && k.clockSync != KCLOCK_SYNC_OFF) k.clockSync = 0;
     k.boldZones &= 0x01FF;
     k.showFlags &= KSHOW_ALL;
     k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';

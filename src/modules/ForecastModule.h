@@ -91,8 +91,14 @@ public:
         // strncpy(dst, src, sizeof-1) would cut it after 23 — mid-character,
         // which shows on the panel as one broken glyph and nothing else.
         char     summary[40] = {0};
-        Period   outlook[3];
+        /// FIVE, of which the upright page draws the first three: the
+        /// landscape page has the width for all five, and a fetch that only
+        /// ever asked for three would leave it nothing to put there.
+        Period   outlook[5];
     };
+
+    /// How many outlook columns a fetch fills. See Data::outlook.
+    static constexpr int OUTLOOK_N = 5;
 
     const char* getId()   const override { return "forecast"; }
     const char* getName() const override { return "Weather forecast"; }
@@ -171,7 +177,9 @@ extern ForecastModule forecastModule;
 
 /// Appends the dashboard's forecast section to `out`. Defined here so the
 /// Kindle renderer does not need to know the provider details.
-void appendForecastSection(String& out);
+/// `columns` is how many outlook columns it draws: three on the upright page,
+/// ForecastModule::OUTLOOK_N on the landscape one.
+void appendForecastSection(String& out, int columns = 3);
 
 /// The caption for one outlook column, in the language set now rather than the
 /// one set when the forecast was fetched. See Period::wday.

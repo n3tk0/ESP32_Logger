@@ -785,6 +785,24 @@ with sync_playwright() as p:
     pg.unroute("**/api/espnow/status")
     pg.unroute("**/api/remote/status")
 
+    # A build with neither node feature has no nodes — not a failed count.
+    # The firmware answers 404 now; an older one answered the web UI's own
+    # index.html, and that is not "could not check" either.
+    pg.route("**/api/espnow/status", lambda r: r.fulfill(status=404, content_type="application/json", body='{"ok":false}'))
+    pg.route("**/api/remote/status", lambda r: r.fulfill(status=200, content_type="text/html", body="<!DOCTYPE html><html></html>"))
+    pg.reload()                      # the save above left the form waiting on a restart
+    pg.wait_for_timeout(1500)
+    pg.evaluate("location.hash = 'settings_network'")
+    pg.wait_for_timeout(1200)
+    pg.fill("#net-cSSID", "FifthNet")
+    before = len([u for u in requests if "/save_network" in u])
+    pg.click('#page-settings_network button[type="submit"]')
+    pg.wait_for_timeout(1200)
+    check(len([u for u in requests if "/save_network" in u]) == before + 1,
+          "a build without nodes saves a new network (%r)" % pg.locator("#net-msg").inner_text()[:60])
+    pg.unroute("**/api/espnow/status")
+    pg.unroute("**/api/remote/status")
+
     shot = os.environ.get("SCREENSHOT")
     if shot:
         pg.screenshot(path=shot, full_page=True)

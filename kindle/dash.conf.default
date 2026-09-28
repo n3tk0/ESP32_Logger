@@ -236,5 +236,27 @@ AUTO_FIND=1
 # The two fixed choices are also how you see the other page from a desk.
 LAYOUT=auto
 
+# ── Which way up ─────────────────────────────────────────────────────────────
+# In degrees clockwise. 0 is upright with the USB port at the bottom; 90 lies
+# the Kindle on its side with the port on the right, 270 with it on the left,
+# and those two draw the landscape page: the clock and the week across the top,
+# the readings beside the chart, five forecast columns. 180 is upside down.
+#
+#   auto        the collector's Rotation setting, the one its browser page
+#               follows too.
+#   0 90 180 270  this Kindle's own, whatever the collector says.
+#
+# The panel turns its framebuffer to draw it. If 90 and 270 come out the wrong
+# way round on your model, set ROTATE_SWAP=1.
+ROTATE=auto
+ROTATE_SWAP=0
+
+# How often this Kindle sets its clock from the collector's, in days: auto
+# follows the Clock sync setting on the collector's Kindle page (every day
+# unless changed), 0 never, or 1 to 60. The clock itself is always drawn from
+# the Kindle's own time, in the collector's time zone; unless this is 0, a
+# clock found more than ten minutes out is set at once.
+CLOCK_SYNC=auto
+
 # Which upgrades this file has had. Written by the dashboard; leave it alone.
 CONF_VER=2

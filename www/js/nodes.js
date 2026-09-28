@@ -100,8 +100,12 @@ function ndIsProblem(n) {
 function ndFetchEspnow() {
   return fetchWithTimeout("/api/espnow/status", {}, 15000)
     .then(function (r) {
+      // A 404, or a 200 that is not JSON (an older firmware answered a route
+      // it lacked with the web UI's own index.html): not in this build. An
+      // error is still an error — the count has to fail, not read as none.
       if (r.status === 404) { ndEspnowAvailable = false; return null; }
       if (!r.ok) throw new Error("HTTP " + r.status);
+      if (!/json/.test(r.headers.get("Content-Type") || "")) { ndEspnowAvailable = false; return null; }
       ndEspnowAvailable = true;
       return r.json();
     })
@@ -111,8 +115,12 @@ function ndFetchEspnow() {
 function ndFetchRemote() {
   return fetchWithTimeout("/api/remote/status", {}, 15000)
     .then(function (r) {
+      // A 404, or a 200 that is not JSON (an older firmware answered a route
+      // it lacked with the web UI's own index.html): not in this build. An
+      // error is still an error — the count has to fail, not read as none.
       if (r.status === 404) { ndRemoteAvailable = false; return null; }
       if (!r.ok) throw new Error("HTTP " + r.status);
+      if (!/json/.test(r.headers.get("Content-Type") || "")) { ndRemoteAvailable = false; return null; }
       ndRemoteAvailable = true;
       return r.json();
     })

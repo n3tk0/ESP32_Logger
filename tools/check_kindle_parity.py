@@ -391,7 +391,7 @@ def main():
         problems.append('parity: no KDF_CHART_MIN in KindleFlow.h — '
                         'the layout no longer states the chart\'s design height')
 
-    svg = re.search(r'const int L = kdPx\((\d+)\), R = CHART_W - kdPx\((\d+)\), '
+    svg = re.search(r'const int L = kdPx\((\d+)\), R = (?:CHART_W|chartW) - kdPx\((\d+)\), '
                     r'T = kdPx\((\d+)\), B = CHART_H - kdPx\((\d+)\);',
                     open(CPP, encoding='utf-8').read())
     mar = re.findall(r'inline int margin([LRTB])\(uint16_t \w\) '

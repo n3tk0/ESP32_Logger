@@ -33,7 +33,12 @@ FIELDS = ['topBot', 'grow', 'labSz', 'heroSz', 'bigSz', 'headGap', 'slashW', 'su
           'clBoxed', 'clRuled', 'clRuledPad', 'clDated', 'clDateSz', 'clDateGap',
           'clGrow', 'clH', 'inRuleY', 'inLabY', 'inValY', 'inVal2Y', 'inValSz1',
           'inValSz', 'inW1Pm', 'inStack', 'sepH', 'chart', 'forecast', 'week',
-          'rule2Y', 'grY', 'grH', 'rule3Y', 'wkRuleY']
+          'rule2Y', 'grY', 'grH', 'rule3Y', 'wkRuleY',
+          # Across, and the landscape page
+          'clock', 'land', 'pageW', 'pageH', 'groupY', 'colLX', 'colLW', 'inX', 'inW',
+          'sepX', 'sepY', 'clX', 'clY', 'clW', 'topRowY', 'rule2X', 'rule2W',
+          'labChartX', 'grX', 'grW', 'keyInX', 'keyBand', 'olN', 'olX', 'wkX', 'wkY',
+          'wkCellW', 'wkHdgY', 'wkRule', 'footY', 'statX', 'battX', 'battY']
 
 PLACES = [
     ('temperature', '8.4', '°', 0), ('temperature', '-12.4', '°', 0),
@@ -73,13 +78,14 @@ def js_engine(js_text):
 
 
 def cases():
-    for mask in range(16):
+    for mask in range(64):
         for w in WIDTHS:
             for ng in range(7):
                 for ni in range(4):
                     yield {
                         'chart': mask & 1, 'fc': (mask >> 1) & 1, 'week': (mask >> 2) & 1,
                         'sub': (mask >> 3) & 1, 'grid': w[:ng], 'in': w[:ni][::-1],
+                        'clk': 1 - ((mask >> 4) & 1), 'land': (mask >> 5) & 1,
                     }
 
 
@@ -93,6 +99,7 @@ def run(js_text):
         for c in all_cases:
             args = ['json', 'chart=%d' % c['chart'], 'fc=%d' % c['fc'],
                     'week=%d' % c['week'], 'sub=%d' % c['sub'],
+                    'clk=%d' % c['clk'], 'land=%d' % c['land'],
                     'grid=' + ','.join(map(str, c['grid'])),
                     'in=' + ','.join(map(str, c['in']))]
             c_out.append(json.loads(subprocess.check_output([exe] + args, text=True)))
@@ -103,7 +110,8 @@ var out = { adv: input.places.map(function (p) {
               return kdFlowWorstAdvance(p[0], p[1], p[2], !!p[3]); }),
             flows: input.cases.map(function (c) {
               return kdFlowCompute({ chart: !!c.chart, forecast: !!c.fc, week: !!c.week,
-                                     sub: !!c.sub, nGrid: c.grid.length, gridAdv: c.grid,
+                                     sub: !!c.sub, clock: !!c.clk, land: !!c.land,
+                                     nGrid: c.grid.length, gridAdv: c.grid,
                                      nIn: c.in.length, inAdv: c.in }); }) };
 process.stdout.write(JSON.stringify(out));
 '''

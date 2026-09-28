@@ -194,6 +194,9 @@ settings screen you were just looking at gives way to the page again by itself.
 | `STATUS` | `1` | Draw this Kindle's battery and power mode at the end of the footer |
 | `AUTO_FIND` | `1` | Look for the collector once if the very first fetch fails |
 | `LAYOUT` | `auto` | The page's shape: `auto` follows the collector, `normal` keeps the forecast band, `standalone` drops it and enlarges the readings |
+| `ROTATE` | `auto` | Which way up, in degrees clockwise: `auto` follows the collector's Rotation setting; `0` upright (USB at the bottom), `90` on its side with the USB port on the right, `180` upside down, `270` on its side with the port on the left. `90` and `270` draw the landscape page |
+| `ROTATE_SWAP` | `0` | `1` if `90` and `270` come out the wrong way round on this model |
+| `CLOCK_SYNC` | `auto` | Days between setting the Kindle's clock from the collector's: `auto` follows the collector's setting (every day unless changed), `0` never, `1`–`60` |
 | `CONF_VER` | `2` | Which one-time upgrades `dash.conf` has had. Written by the dashboard; leave it alone |
 
 `Find collector` writes the addresses that answered to `collectors`, beside
@@ -262,11 +265,39 @@ refresh the forecast for six hours. `LAYOUT=normal` or `LAYOUT=standalone` in
 whatever the network is doing, which is also how you see one page from the
 other's network.
 
+### On its side
+
+The Kindle can stand upright, lie on either side, or stand upside down:
+**Settings → Screen → Rotation** in KUAL, `ROTATE=` in `dash.conf`, or the
+collector's own **Rotation** setting on its Kindle page, which `ROTATE=auto`
+follows. Lying down (90° or 270°) it draws the **landscape page** — the clock
+and the week strip across the top, the outdoor readings with the indoor row
+under them beside a taller chart, five forecast columns instead of three, and
+the footer as before. The tap menu works the same way round.
+
+The dashboard turns the framebuffer (FBInk's `fbdepth`, or the kernel's
+`/sys/class/graphics/fb0/rotate`), checks that the screen came out the right
+shape, and turns it back when it stops. A Kindle that will not turn says so in
+`kual.log` and keeps the upright page. If the page comes out on the wrong side,
+set `ROTATE_SWAP=1` (**Rotation: 90 and 270 swapped** in KUAL).
+
 **The readings grow by a sixth and not by a third** because the band that was
 freed is vertical: every number is limited by the column it sits in, and
 "1008 hPa" three across already fills 87 px of a 90 px cell. The rest of the
 height becomes air around them, which is what a panel read from across a room
 wants anyway.
+
+### Whose clock
+
+The clock on the panel is **the Kindle's own**, drawn every minute from its
+own time, and it keeps going while the collector is away. Every day (or every
+2 days, every week, never — **Settings → Clock sync** in KUAL, `CLOCK_SYNC=` in
+`dash.conf`, or **Set the Kindle's clock** on the collector's Kindle page,
+which also takes any number of days up to 60) the dashboard sets the Kindle's
+clock, and its hardware clock, from the collector's. Unless it is set to
+never, a clock found more than ten minutes out is set at once. The time is shown in the **collector's** time
+zone, so the panel and the collector's web page agree. Each setting is logged
+in `kual.log`.
 
 ### When the collector cannot be reached
 

@@ -792,6 +792,10 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     kd["fbinkResW"]       = config.kindle.fbinkResW;
     kd["outdoorSensor"]   = config.kindle.outdoorSensor;
     kd["indoorSensor"]    = config.kindle.indoorSensor;
+    kd["rotation"]        = config.kindle.rotation * 90;   // degrees, as the API and ?rot= spell it
+    kd["pageRotation"]    = kdPageRotDeg(config.kindle);   // -1: the same as the panel
+    kd["clockOff"]        = config.kindle.clockOff;
+    kd["clockSync"]       = kdClockSyncDays(config.kindle);   // days, 0 never
 
     // ── Network ───────────────────────────────────────────────────────────
     JsonObject net = doc["network"].to<JsonObject>();
@@ -1679,6 +1683,10 @@ class FirstRunGateHandler : public AsyncWebHandler {
 public:
     bool canHandle(AsyncWebServerRequest* r) LOGGER_CANHANDLE_CV override {
         if (!g_setupRequired) return false;
+        // No wizard to send anyone to: the web UI itself is missing, and the
+        // failsafe page on / and /setup is how it gets uploaded. Gating that
+        // too left a firmware-only flash with nothing but a 501.
+        if (!firstRunPageAvailable()) return false;
         const String& url = r->url();
         if (url == "/firstrun" || url == "/firstrun.html")        return false;
         if (url.startsWith("/api/firstrun"))                       return false;
@@ -2519,6 +2527,17 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     SAFE_STRNCPY(config.kindle.outdoorSensor, kd["outdoorSensor"], sizeof(config.kindle.outdoorSensor));
                 if (kd["indoorSensor"].is<const char*>())
                     SAFE_STRNCPY(config.kindle.indoorSensor, kd["indoorSensor"], sizeof(config.kindle.indoorSensor));
+                if (kd["rotation"].is<int>())
+                    config.kindle.rotation = kdRotFromDeg(kd["rotation"].as<int>(),
+                                                          config.kindle.rotation);
+                if (kd["pageRotation"].is<int>())
+                    config.kindle.pageRot = kdPageRotFromDeg(kd["pageRotation"].as<int>(),
+                                                             config.kindle.pageRot);
+                if (kd["clockOff"].is<int>())
+                    config.kindle.clockOff = (uint8_t)kd["clockOff"].as<int>();
+                if (kd["clockSync"].is<int>())
+                    config.kindle.clockSync = kdClockSyncFromDays(kd["clockSync"].as<int>(),
+                                                                  config.kindle.clockSync);
                 // An imported file is not a form: it can carry anything,
                 // including values written by a firmware that had one more
                 // clock style than this one. Clamped here so the renderer
@@ -2958,6 +2977,15 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
         }
         if (fsAvailable && activeFS && activeFS->exists(path)) {
             r->send(*activeFS, path, getMime(path));
+            return;
+        }
+        // AN API ROUTE THIS BUILD DOES NOT HAVE IS A 404, not the SPA shell.
+        // /api/espnow/status in a build without ESP-NOW used to come back as
+        // 200 index.html, which a caller asking "is this here?" read as a
+        // broken answer rather than "no" — and the network handover refused
+        // to save on a collector that simply has no nodes.
+        if (path.startsWith("/api/")) {
+            r->send(404, "application/json", "{\"ok\":false,\"error\":\"not found\"}");
             return;
         }
         if (r->method() == HTTP_GET && path.indexOf('.') < 0) {

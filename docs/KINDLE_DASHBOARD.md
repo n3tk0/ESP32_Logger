@@ -531,7 +531,14 @@ the two cannot disagree about where a thing is.
    the clock and the captions grow together up to the standalone page's sizes,
    a sixth larger, where the width of their column stops them. Whatever is
    left makes the chart taller (`/kindle/graph.bmp?h=N`). With the chart off
-   the readings take all of it.
+   the readings take all of it. On, it is always drawn: with nothing
+   recorded yet it is drawn empty — the grid and the hour axis, no
+   scale down the side, and "The record fills as readings arrive."
+   inside the plot — so the page does not change shape when the first
+   reading lands. For its first two hours the chart is the last two
+   hours in five-minute buckets (`TrendRing::recent()`, axis in minutes,
+   "Last 2 hours"), so a line appears five minutes after the first reading;
+   from the third hour it is the 24-hour chart.
 3. **The grid tries every way of breaking its readings into rows** and keeps
    the one that sets them largest, all at one size. Rows share the height, and
    each is centred in its share, so there is no white row at the bottom.
@@ -568,6 +575,59 @@ rules so the preview shows the page before anything is saved;
 `tools/check_kindle_flow_parity.py` runs both over every combination and fails
 CI on the first number they disagree on. `tools/kindle_preview/preview.py`
 takes `chart=0 fc=0 week=0 grid=N in=N` to render any of them.
+
+### The clock can be switched off
+
+The clock is a switch in the region list like the chart and the week strip.
+Off, upright, the indoor row moves up to the outdoor heading's line and takes
+the clock's height; with the indoor row empty too, the outdoor grid takes the
+whole width. It is kept out of `showFlags` in the config (`clockOff`, and
+`clock` in `/api/kindle/config`) so that a config from before the switch, and
+a settings page from before it, both read as "clock on".
+
+### The reader's clock
+
+The FBInk panel draws its clock from the Kindle's own time, every minute, with
+or without the collector. `/kindle/data` carries `TIME_UTC` (the collector's
+time, only once NTP or the RTC has given it one), `TIME_OFF` (its zone,
+daylight saving included, in seconds east of UTC) and `SYNC_DAYS` (**Set the
+Kindle's clock**, `clock_sync` in `/api/kindle/config`: days, 0 never, 1 by
+default). The script shows the time in `TIME_OFF`'s zone and sets the Kindle's
+system and hardware clocks from `TIME_UTC` once every `SYNC_DAYS` days —
+`CLOCK_SYNC` in `dash.conf` overrides it — or, unless that is never, at once
+when the two are more than ten minutes apart. Only a payload fetched that minute sets the clock; the
+cached one never does. The last setting is remembered in `clocksync` beside
+`dash.conf`.
+
+### On its side: the landscape page
+
+**Rotation** (`rotation` in `/api/kindle/config`: 0, 90, 180 or 270 degrees
+clockwise) turns the FBInk panel's page. The browser page at `/kindle` has a
+rotation of its own, `page_rotation`: -1 (the default, and what an older
+config holds) follows the panel, and 0/90/180/270 turn it independently, so a
+browser on one device can stand one way while the FBInk panel stands another.
+`?rot=` on either request still wins over both. 180° is the ordinary page upside down. 90° and 270°
+are **the landscape page, 800 × 600 design pixels**, laid out by
+`kdFlowLand()`:
+
+| row | what is in it |
+|---|---|
+| top | the clock, and the week strip beside it (either alone is centred or full width; neither, and the row is gone) |
+| middle | the outdoor headline and grid with the indoor row on one line under them, 300 px wide; the chart beside them, the height of the band |
+| band | today's forecast and **five** outlook columns (three upright) |
+| footer | as upright |
+
+The headline is sized to the largest it can be while the grid still sets at
+the upright page's sizes. The panel is scaled by its SHORT side, so the 1072 ×
+1448 Paperwhite draws the same page at 1448 × 1072.
+
+The browser page (`/kindle`, or `/kindle?rot=90` to try one) is drawn upright
+in a box the size of the turned page and rotated with `-webkit-transform`.
+The FBInk reader turns its framebuffer instead and draws in the turned
+coordinates: `/kindle/data` sends `RES_W`/`RES_H` swapped, `PAGE_ROT`, and the
+landscape page's x positions as `LY_*` keys as well as its heights; the chart
+image is fetched as `/kindle/graph.bmp?h=H&w=W`. The reader can override the
+collector with `ROTATE=` in `dash.conf`, sent as `?rot=`.
 
 ## Appearance
 

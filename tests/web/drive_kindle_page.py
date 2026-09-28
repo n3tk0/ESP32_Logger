@@ -94,7 +94,7 @@ with sync_playwright() as p:
     # fighting over the same bit.
     check(pg.locator("#kd-zones input[id^=kd-b-]").count() == 9,
           "every weight bit has a row")
-    check(pg.locator("#kd-zones input[id^=kd-s-]").count() == 8,
+    check(pg.locator("#kd-zones input[id^=kd-s-]").count() == 9,
           "every visibility bit has a row")
     ids = pg.eval_on_selector_all(
         "#kd-zones input[type=checkbox][id]", "els => els.map(e => e.id)")
@@ -712,7 +712,7 @@ with sync_playwright() as p:
         "rule2Y":"RULE2_Y", "grY":"GR_Y", "grH":"GR_H", "rule3Y":"RULE3_Y",
     }
     ordinary = pg.evaluate(
-        "(function(){var i=kdFlowInput(0xFF);i.forecast=true;return kdFlowCompute(i);})()")
+        "(function(){var i=kdFlowInput(0x1FF);i.forecast=true;return kdFlowCompute(i);})()")
     drift = ["%s=%s but %s=%s" % (k, ordinary[k], c, base.get(c))
              for k, c in KEYS.items() if ordinary[k] != base.get(c)]
     check(not drift, "the preview's ordinary page is the layout file's (%s)"
@@ -726,6 +726,99 @@ with sync_playwright() as p:
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(got["layout_mode"] == 2, "and it reaches the device (%r)" % got["layout_mode"])
     check(pg.input_value("#kd-layout") == "2", "and comes back on the re-read")
+
+    # ── Which way up ────────────────────────────────────────────────────────
+    # On its side the preview is the landscape page, 800 wide, with five
+    # outlook columns; the rotation is saved in degrees and read back.
+    pg.select_option("#kd-layout", "1")          # a page with a forecast band
+    pg.select_option("#kd-rot", "90")
+    pg.wait_for_timeout(200)
+    dims = pg.evaluate("(function(){var e=document.getElementById('kd-panel');"
+                       "return [e.style.width, e.style.height];})()")
+    check(dims == ["800px", "600px"], "on its side the preview is 800 x 600 (%r)" % dims)
+    land = pg.evaluate("(function(){var i=kdFlowInput(0x1FF);i.forecast=true;"
+                       "return kdFlowCompute(i);})()")
+    check(land["land"] and land["olN"] == 5 and land["topRowY"] > 0,
+          "and it is the landscape page: the top row, five outlook columns")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("rotation") == 90, "the rotation reaches the device (%r)" % got.get("rotation"))
+    check(got.get("page_rotation") == -1,
+          "and the browser page still follows the panel (%r)" % got.get("page_rotation"))
+
+    # The browser page on a rotation of its own, and back to following.
+    tab(pg, "reader")
+    pg.select_option("#kd-prot", "180")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("page_rotation") == 180 and got.get("rotation") == 90,
+          "the browser page turns on its own, the panel stays (%r, %r)"
+          % (got.get("page_rotation"), got.get("rotation")))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "reader")
+    check(pg.input_value("#kd-prot") == "180", "and it comes back on the re-read")
+    pg.select_option("#kd-prot", "-1")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("page_rotation") == -1, "and Same as the panel goes out as -1")
+
+    # The clock is a region switch like the others, but it goes out as
+    # `clock`, and `show` keeps only the stored bits — a page that posted the
+    # clock's bit in `show` would be clamped away by the firmware and the
+    # clock would come back on.
+    show_before = got["show"]
+    tab(pg, "zones")
+    pg.uncheck("#kd-s-256")
+    pg.wait_for_timeout(200)
+    nock = pg.evaluate("(function(){var i=kdFlowInput(kdMaskOf(KD_SHOW,'kd-s-'));"
+                       "i.forecast=true;return kdFlowCompute(i);})()")
+    check(nock["clock"] is False, "switching the clock off takes it off the preview")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("clock") == 0 and got["show"] == show_before,
+          "the clock goes out as clock=0 and show is untouched (%r, %#x)"
+          % (got.get("clock"), got["show"]))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    check(not pg.is_checked("#kd-s-256") and pg.input_value("#kd-rot") == "90",
+          "and both come back on the re-read")
+
+    # ── Setting the Kindle's clock ──────────────────────────────────────────
+    # The device's every-day answer comes up as the preset; "Every … days"
+    # opens the number beside it, and the number is what is saved.
+    tab(pg, "page")
+    check(pg.input_value("#kd-csync") == "1" and pg.is_hidden("#kd-csync-days"),
+          "the clock is set every day, with the number put away")
+    pg.select_option("#kd-csync", "c")
+    pg.wait_for_timeout(150)
+    check(pg.is_visible("#kd-csync-days"), "Every ... days opens the number")
+    pg.fill("#kd-csync-days", "5")
+    pg.dispatch_event("#kd-csync-days", "change")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("clock_sync") == 5, "and it reaches the device in days (%r)" % got.get("clock_sync"))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "page")
+    check(pg.input_value("#kd-csync") == "c" and pg.input_value("#kd-csync-days") == "5",
+          "a number no preset has comes back as Every ... days")
+    pg.select_option("#kd-csync", "0")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("clock_sync") == 0, "and Never goes out as 0 (%r)" % got.get("clock_sync"))
 
     shot = os.environ.get("SCREENSHOT")
     if shot:

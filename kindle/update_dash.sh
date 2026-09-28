@@ -173,6 +173,34 @@ AUTO_FIND=1
 #               top block takes its 124 px. For a panel on a collector that is
 #               its own access point and is never going to have a forecast.
 LAYOUT=auto
+# WHICH WAY UP THE PAGE IS DRAWN, in degrees clockwise, and who decides.
+#
+#   auto        the collector says, in ROTATE — the Rotation setting on its
+#               Kindle page, which the browser page follows too.
+#   0 90 180 270  this panel's own: 0 upright with the USB port at the
+#               bottom, 90 on its side with the port on the right, 180
+#               upside down, 270 on its side with the port on the left. 90
+#               and 270 draw the landscape page.
+#
+# The framebuffer is what turns: fbdepth sets the panel's rotation and this
+# script draws the page in the turned coordinates. A panel that will not turn
+# says so in kual.log and keeps the upright page.
+ROTATE=auto
+# 1 if 90 and 270 come out the wrong way round on this model — the port on the
+# left when 90 was asked for. Some Kindles number their rotations the other way.
+ROTATE_SWAP=0
+# HOW OFTEN THIS KINDLE SETS ITS CLOCK FROM THE COLLECTOR'S, in days.
+#
+#   auto        the collector says — the Clock sync setting on its Kindle page
+#               (every day unless somebody changed it).
+#   0           never: the Kindle keeps whatever time it has.
+#   1 .. 60     every that many days.
+#
+# Between those the clock is drawn from the Kindle's own time, with or without
+# the collector; the collector's time zone is used either way, so the panel
+# says what the collector's web page says. Unless it is 0, a clock found more
+# than ten minutes out is set at once, whatever the interval.
+CLOCK_SYNC=auto
 # WHICH ONE-TIME MOVES dash.conf HAS ALREADY HAD. A dash.conf with no CONF_VER
 # line predates the marker and is 1; dash.conf.default ships the current one.
 # conf_load() applies each move once and then writes the new number back, so a
@@ -183,7 +211,7 @@ CONF_VER=1
 CONF_VER_NOW=2
 
 conf_keys() {
-    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL MENU_ACT MENU_LBL2 SURE_LBL MODE_LBL WAKE_MENU WAKE_HOLD QUIET_FROM QUIET_TO QUIET_EVERY STATUS AUTO_FIND LAYOUT CONF_VER"
+    echo "HOST FETCH_TIMEOUT CLOCK_EVERY DATA_EVERY GRAPH_EVERY FORECAST_EVERY FULL_EVERY CLOCK_FLASH_EVERY SENSOR_FLASH_EVERY TRACE POWER WIFI_WAIT GUI_STOP CANVAS TOUCH TOUCH_DEV TOUCH_MAXX TOUCH_MAXY TOUCH_SWAP MENU_LBL MENU_ACT MENU_LBL2 SURE_LBL MODE_LBL WAKE_MENU WAKE_HOLD QUIET_FROM QUIET_TO QUIET_EVERY STATUS AUTO_FIND LAYOUT ROTATE ROTATE_SWAP CLOCK_SYNC CONF_VER"
 }
 
 # THE KEYS THAT ARE NOT NUMBERS, in one place because two places drifted.
@@ -198,7 +226,7 @@ conf_keys() {
 conf_is_text() {
     case "$1" in
         HOST|POWER|CANVAS|TOUCH_DEV) return 0 ;;
-        MENU_LBL|MENU_ACT|MENU_LBL2|SURE_LBL|MODE_LBL|LAYOUT) return 0 ;;
+        MENU_LBL|MENU_ACT|MENU_LBL2|SURE_LBL|MODE_LBL|LAYOUT|ROTATE|CLOCK_SYNC) return 0 ;;
     esac
     return 1
 }
@@ -226,6 +254,9 @@ conf_help() {
         TOUCH_MAXY)         echo "Touch panel's full scale down, or 0 if it reports screen pixels" ;;
         TOUCH_SWAP)         echo "1 if the panel reports Y where X is expected" ;;
         LAYOUT)             echo "auto follows the collector; normal keeps the forecast band; standalone drops it and enlarges the readings" ;;
+        ROTATE)             echo "auto follows the collector; 0, 90, 180 or 270 degrees clockwise (90 and 270 lie the Kindle on its side)" ;;
+        ROTATE_SWAP)        echo "1 if 90 and 270 come out the wrong way round on this Kindle" ;;
+        CLOCK_SYNC)         echo "auto follows the collector; 1-60 days between setting this Kindle's clock from the collector's; 0 never" ;;
         MENU_LBL)           echo "The labels on the tap menu, separated by bars" ;;
         MENU_ACT)           echo "What each button does: refresh|wake|forecast|settings|hide|quit" ;;
         MENU_LBL2)          echo "The labels on the settings bar, separated by bars" ;;
@@ -281,6 +312,12 @@ payload_key_ok() {
         # Which shape the page is. Only the collector can know: it is the end
         # that can see whether a forecast is coming.
         PAGE_MODE) return 0 ;;
+        # Which way up the page is, in degrees, as the collector has it; and
+        # whether the clock is on the page at all.
+        PAGE_ROT|SHOW_CLOCK) return 0 ;;
+        # The collector's time, its zone, and how often to set this clock by
+        # them — see clock_sync().
+        TIME_UTC|TIME_OFF|SYNC_DAYS) return 0 ;;
         # Where everything goes: the layout the collector worked out for what
         # is on the page, under the layout file's own names. Applied by
         # flow_apply(), which takes only names it lists and only digits.
@@ -394,6 +431,19 @@ conf_valid() {
                 auto|normal|standalone) return 0 ;;
                 *) return 1 ;;
             esac ;;
+        ROTATE)
+            case "$v" in
+                auto|0|90|180|270) return 0 ;;
+                *) return 1 ;;
+            esac ;;
+        CLOCK_SYNC)
+            # Not through strip_zeros, being a text key for `auto`: so no
+            # leading zero either, which $(( )) would read as octal.
+            case "$v" in
+                auto|0) return 0 ;;
+                ''|0*|*[!0-9]*) return 1 ;;
+            esac
+            [ "${#v}" -le 2 ] && [ "$v" -le 60 ] ;;
         MENU_LBL|MENU_LBL2|SURE_LBL|MODE_LBL)
             # Labels separated by bars. They reach draw_text_reg_inv and
             # nothing else, so the shell metacharacters are what matter — the
@@ -441,7 +491,7 @@ conf_valid() {
             # that actually comes round.
             case "$k" in
                 # A switch, not a tier: 0 or 1, and nothing in between to mean.
-                TRACE|GUI_STOP|TOUCH|TOUCH_SWAP) [ "$v" -le 1 ] ;;
+                TRACE|GUI_STOP|TOUCH|TOUCH_SWAP|ROTATE_SWAP) [ "$v" -le 1 ] ;;
                 WAKE_MENU|STATUS|AUTO_FIND) [ "$v" -le 1 ] ;;
                 # An hour of the day, and the two being equal is how the quiet
                 # hours are turned off — so 0 is a value, not a refusal.
@@ -1368,10 +1418,21 @@ touch_scale() {
         t="$rx"; rx="$ry"; ry="$t"
         t="$mx"; mx="$my"; my="$t"
     fi
-    TAP_X="$rx"; TAP_Y="$ry"
-    [ "$mx" -gt 0 ] 2>/dev/null && TAP_X=$(( rx * ${RES_W:-600} / mx ))
-    [ "$my" -gt 0 ] 2>/dev/null && TAP_Y=$(( ry * ${RES_H:-800} / my ))
-    [ "${TRACE:-0}" = "1" ] && echo "TOUCH: raw $1,$2 -> $TAP_X,$TAP_Y" >&2
+    # The panel's own axes are the UPRIGHT screen's whichever way up the page
+    # is drawn: the touch layer does not turn with the framebuffer. So scale
+    # to the upright size, then turn the point with the page.
+    local w0="${RES_W:-600}" h0="${RES_H:-800}" nx ny
+    if [ "$w0" -gt "$h0" ] 2>/dev/null; then t="$w0"; w0="$h0"; h0="$t"; fi
+    nx="$rx"; ny="$ry"
+    [ "$mx" -gt 0 ] 2>/dev/null && nx=$(( rx * w0 / mx ))
+    [ "$my" -gt 0 ] 2>/dev/null && ny=$(( ry * h0 / my ))
+    case "${ROT_DEG:-0}" in
+        90)  TAP_X="$ny";                TAP_Y=$(( w0 - 1 - nx )) ;;
+        180) TAP_X=$(( w0 - 1 - nx ));   TAP_Y=$(( h0 - 1 - ny )) ;;
+        270) TAP_X=$(( h0 - 1 - ny ));   TAP_Y="$nx" ;;
+        *)   TAP_X="$nx";                TAP_Y="$ny" ;;
+    esac
+    [ "${TRACE:-0}" = "1" ] && echo "TOUCH: raw $1,$2 -> $TAP_X,$TAP_Y (rot ${ROT_DEG:-0})" >&2
     return 0
 }
 
@@ -1837,19 +1898,293 @@ payload_ok() {
     grep -q '^RES_H=' "$1" 2>/dev/null
 }
 
+# ── Which way up ─────────────────────────────────────────────────────────────
+# THE FRAMEBUFFER TURNS, NOT THE DRAWING. FBInk draws in whatever orientation
+# the framebuffer is in, so once the panel is turned every coordinate this
+# script already has is right as it stands: the collector sends the landscape
+# page in landscape coordinates (RES_W=800, RES_H=600) and nothing below knows
+# it is on its side. Only the touch layer does not turn — see touch_scale().
+#
+# Turned with FBInk's fbdepth when there is one (-r, the panel's own number),
+# else by writing the kernel's rotate node; and if that does not come out the
+# right shape, with fbdepth -R, the Linux canonical numbering. Then CHECKED: a Kindle that ignores the
+# request, or turns the wrong way, would otherwise draw an 800 px page onto a
+# 600 px screen for as long as the dashboard ran. What does not check out is
+# undone, logged, and the upright page asked for instead.
+
+#: Degrees the panel is turned to now, by this script. 0 until it turns it.
+ROT_DEG=0
+#: 1 once the panel has refused a turn. The upright page from then on.
+ROT_FAIL=0
+#: The rotation the framebuffer had before this script touched it.
+ROT_ORIG=""
+#: The rotation that draws the page upright: ROT_ORIG, unless the reader was
+#: already on its side when the dashboard started, then the panel's own 0.
+ROT_BASE=""
+ROT_NODE="${ROT_NODE:-/sys/class/graphics/fb0/rotate}"
+
+rot_fbdepth() {
+    local c
+    for c in fbdepth /mnt/us/koreader/fbdepth /mnt/us/libkh/bin/fbdepth; do
+        if command -v "$c" >/dev/null 2>&1; then ROT_BIN="$c"; return 0; fi
+        [ -x "$c" ] && { ROT_BIN="$c"; return 0; }
+    done
+    return 1
+}
+
+# The framebuffer's rotation now, in the panel's own numbering.
+rot_read() {
+    local v
+    v=$(cat "$ROT_NODE" 2>/dev/null | tr -dc '0-9')
+    case "$v" in [0-3]) echo "$v" ;; *) echo 0 ;; esac
+}
+
+# Whether the screen is wider than it is tall, from FBInk's own view of it.
+# 2 when FBInk will not say, which lets the turn through unchecked.
+rot_is_wide() {
+    local e w h
+    e=$(fbink -e 2>/dev/null) || { echo 2; return; }
+    w=$(printf '%s' "$e" | tr ';' '\n' | sed -n 's/^viewWidth=\([0-9]*\).*/\1/p' | head -n 1)
+    h=$(printf '%s' "$e" | tr ';' '\n' | sed -n 's/^viewHeight=\([0-9]*\).*/\1/p' | head -n 1)
+    case "$w$h" in ''|*[!0-9]*) echo 2; return ;; esac
+    [ "$w" -gt "$h" ] && echo 1 || echo 0
+}
+
+# Turn the panel to $1 degrees clockwise from where it started.
+rot_apply() {
+    local deg="$1" q
+    q=$(( deg / 90 ))
+    rot_origin
+    ROT_TOUCHED=1
+    # The two quarter turns the other way round, on a model that numbers them
+    # so — ROTATE_SWAP=1.
+    if [ "${ROTATE_SWAP:-0}" = "1" ]; then
+        case "$q" in 1) q=3 ;; 3) q=1 ;; esac
+    fi
+    local want=$(( (ROT_BASE + q) % 4 ))
+    rot_set_raw "$want" && rot_check "$deg" && return 0
+    # The panel's own numbering did not come out that shape: FBInk's canonical
+    # one, which is the Linux convention whatever the model.
+    if [ "$deg" != "0" ] && rot_fbdepth && "$ROT_BIN" -R "$q" >/dev/null 2>&1; then
+        rot_check "$deg" && return 0
+    fi
+    return 1
+}
+
+# Where the framebuffer started, once. A reader that was left in landscape
+# (its own UI turned) is not "upright" for this page: the panel's 0 is.
+rot_origin() {
+    [ -n "$ROT_ORIG" ] && return 0
+    ROT_ORIG=$(rot_read)
+    ROT_BASE="$ROT_ORIG"
+    [ "$(rot_is_wide)" = "1" ] && ROT_BASE=0
+    # For stop.sh, which has to put it back after a dashboard that died.
+    echo "$ROT_ORIG" > "$TMP/rota" 2>/dev/null
+}
+
+# CHECKED BY ITS SHAPE. Half a turn cannot be told from none this way, and a
+# quarter turn the wrong way round can only be told by eye — which is what
+# ROTATE_SWAP is for.
+rot_check() {
+    case "$1" in
+        90|270) [ "$(rot_is_wide)" != "0" ] ;;
+        0)      [ "$(rot_is_wide)" != "1" ] ;;
+        *)      return 0 ;;
+    esac
+}
+
+rot_set_raw() {
+    if rot_fbdepth; then
+        "$ROT_BIN" -r "$1" >/dev/null 2>&1 && return 0
+    fi
+    [ -w "$ROT_NODE" ] && echo "$1" > "$ROT_NODE" 2>/dev/null
+}
+
+# Back to how the reader was, on the way out.
+rot_restore() {
+    # Whether or not a turn ever succeeded: one that failed half way can
+    # still have left the panel somewhere else.
+    [ -n "$ROT_ORIG" ] || return 0
+    [ "${ROT_TOUCHED:-0}" = "1" ] && rot_set_raw "$ROT_ORIG"
+    ROT_DEG=0
+    rm -f "$TMP/rota" 2>/dev/null
+}
+
+# This panel's own answer, if it has one: ROTATE in dash.conf, or 0 once the
+# panel has refused to turn. Sets ROT_LOCAL; non-zero for "the collector's".
+rot_local() {
+    if [ "${ROT_FAIL:-0}" = "1" ]; then ROT_LOCAL=0; return 0; fi
+    case "${ROTATE:-auto}" in
+        0|90|180|270) ROT_LOCAL="$ROTATE"; return 0 ;;
+    esac
+    return 1
+}
+
+# Turn the panel to the page in hand. The page says which way up it was laid
+# out for (PAGE_ROT); a collector too old to say lays out the upright page,
+# and the panel stays upright for it whatever dash.conf asks.
+rot_sync() {
+    local d="${PAGE_ROT:-0}"
+    case "$d" in 0|90|180|270) ;; *) d=0 ;; esac
+    # Already there — except the first time, when the reader may have been
+    # left on its side and even the upright page needs a turn.
+    local first=0
+    [ -n "$ROT_ORIG" ] || { rot_origin; first=1; }
+    if [ "$d" = "${ROT_DEG:-0}" ]; then
+        [ "$first" = "0" ] && return 0
+        [ "$ROT_BASE" = "$ROT_ORIG" ] && return 0
+    fi
+    if rot_apply "$d"; then
+        ROT_DEG="$d"
+        # Every pixel on the panel is somewhere else now.
+        [ "${HAVE_DATA:-0}" = "1" ] && : > "$TMP/redraw"
+        return 0
+    fi
+    echo "$(date '+%H:%M') rotation: the panel did not turn to $d degrees, drawing the upright page" >&2
+    ROT_FAIL=1
+    # Back to upright, whatever the failed turn left behind — and to where the
+    # reader was if even that does not check out.
+    if [ "$d" = "0" ] || ! rot_apply 0; then
+        [ -n "$ROT_ORIG" ] && rot_set_raw "$ROT_ORIG"
+    fi
+    ROT_DEG=0
+    [ "${HAVE_DATA:-0}" = "1" ] && : > "$TMP/redraw"
+    return 1
+}
+
+# ── Whose time ───────────────────────────────────────────────────────────────
+# THE CLOCK ON THE PANEL IS THIS KINDLE'S, drawn every minute from `date`, and
+# it goes on being drawn while the collector is away. What the collector gives
+# it is a reference: every CLOCK_SYNC days (or SYNC_DAYS, the collector's
+# setting, under auto) the Kindle's clock is set from TIME_UTC, the system
+# clock and — so it survives a sleep or a reboot — the hardware one. And
+# TIME_OFF, the collector's zone, is what the clock is shown in, so the panel
+# and the web page agree whatever zone the Kindle itself was set to.
+
+#: Where the last setting is remembered, across restarts: epoch seconds.
+CLOCK_SYNC_FILE="${DASH_CLOCK_SYNC:-$DASH_DIR/clocksync}"
+#: A clock this far out is set at once, whatever the interval.
+CLOCK_SYNC_FAR=600
+#: The file's value, read once: it changes only when this script writes it.
+CLOCK_SYNC_LAST=""
+CLOCK_SYNC_READ=0
+#: 1 when the last clock_sync() moved the clock.
+CLOCK_JUMPED=0
+
+# A POSIX TZ for an offset EAST of UTC in seconds. The sign is POSIX's, the
+# other way round: UTC+2 is "UTC-2".
+tz_from_off() {
+    local off="$1" sign="-" h m
+    case "$off" in ''|-|*[!0-9-]*|*?-*) return 1 ;; esac
+    [ "$off" -lt 0 ] && { sign="+"; off=$(( -off )); }
+    h=$(( off / 3600 )); m=$(( off % 3600 / 60 ))
+    if [ "$m" -eq 0 ]; then echo "UTC$sign$h"
+    else printf 'UTC%s%d:%02d\n' "$sign" "$h" "$m"; fi
+}
+
+tz_apply() {
+    local tz
+    tz=$(tz_from_off "${TIME_OFF:-}") || return 0
+    [ "$tz" = "${TZ:-}" ] && return 0
+    TZ="$tz"; export TZ
+}
+
+# Days between settings: this panel's own, or the collector's. 0 is never.
+clock_sync_days() {
+    case "${CLOCK_SYNC:-auto}" in
+        auto) SYNC_EVERY="${SYNC_DAYS:-1}" ;;
+        *)    SYNC_EVERY="$CLOCK_SYNC" ;;
+    esac
+    case "$SYNC_EVERY" in ''|*[!0-9]*) SYNC_EVERY=1 ;; esac
+}
+
+# Whether to set the clock now. $1 the Kindle's time, $2 the collector's, $3
+# when it was last set (empty for never), $4 the days between.
+clock_sync_due() {
+    local now="$1" utc="$2" last="$3" days="$4" d
+    [ "${days:-0}" -gt 0 ] 2>/dev/null || return 1
+    d=$(( utc - now )); [ "$d" -lt 0 ] && d=$(( -d ))
+    [ "$d" -gt "$CLOCK_SYNC_FAR" ] && return 0
+    case "$last" in ''|*[!0-9]*) return 0 ;; esac
+    # A remembered setting in the future is a clock that has since gone back.
+    [ "$last" -gt "$(( now + 3600 ))" ] && return 0
+    [ $(( now - last )) -ge $(( days * 86400 )) ]
+}
+
+# Epoch seconds to "YYYY-MM-DD hh:mm:ss" UTC, in shell arithmetic — for a
+# busybox date that will not take -s @seconds.
+epoch_utc() {
+    local t="$1" z era doe yoe y doy mp d m
+    z=$(( t / 86400 + 719468 )); era=$(( z / 146097 ))
+    doe=$(( z - era * 146097 ))
+    yoe=$(( (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 ))
+    y=$(( yoe + era * 400 )); doy=$(( doe - (365 * yoe + yoe / 4 - yoe / 100) ))
+    mp=$(( (5 * doy + 2) / 153 )); d=$(( doy - (153 * mp + 2) / 5 + 1 ))
+    if [ "$mp" -lt 10 ]; then m=$(( mp + 3 )); else m=$(( mp - 9 )); fi
+    [ "$m" -le 2 ] && y=$(( y + 1 ))
+    printf '%04d-%02d-%02d %02d:%02d:%02d\n' "$y" "$m" "$d" \
+        $(( t % 86400 / 3600 )) $(( t % 3600 / 60 )) $(( t % 60 ))
+}
+
+clock_set() {
+    date -u -s "@$1" >/dev/null 2>&1 ||
+        date -u -s "$(epoch_utc "$1")" >/dev/null 2>&1 || return 1
+    # And the hardware clock, or the next suspend or reboot undoes it — in
+    # UTC, which is what the kernel reads it as: a plain -w writes local time,
+    # and TZ is the collector's zone by now.
+    hwclock -u -w >/dev/null 2>&1 || TZ=UTC0 hwclock -w >/dev/null 2>&1
+    return 0
+}
+
+clock_sync() {
+    local utc="${TIME_UTC:-}" now last
+    case "$utc" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$utc" -gt 1000000000 ] || return 0
+    clock_sync_days
+    [ "$SYNC_EVERY" -gt 0 ] 2>/dev/null || return 0
+    if [ "$CLOCK_SYNC_READ" = "0" ]; then
+        CLOCK_SYNC_LAST=$(tr -dc '0-9' < "$CLOCK_SYNC_FILE" 2>/dev/null)
+        CLOCK_SYNC_READ=1
+    fi
+    now=$(date +%s)
+    last="$CLOCK_SYNC_LAST"
+    clock_sync_due "$now" "$utc" "$last" "$SYNC_EVERY" || return 0
+    if [ $(( utc - now )) -ge 2 ] || [ $(( now - utc )) -ge 2 ]; then
+        if ! clock_set "$utc"; then
+            echo "$(date '+%H:%M') clock: could not set the time from the collector" >&2
+            return 1
+        fi
+        echo "$(date '+%H:%M') clock: set from the collector ($(( utc - now )) s)" >&2
+        # Every tier is measured against this clock, and a wake window held
+        # open to an absolute time moves with it — or setting the clock back
+        # an hour reopens a window that had closed, for an hour.
+        [ "${AWAKE_UNTIL:-0}" -gt 0 ] 2>/dev/null &&
+            AWAKE_UNTIL=$(( AWAKE_UNTIL + utc - now ))
+        EPOCH="$utc"
+        CLOCK_JUMPED=1
+    fi
+    CLOCK_SYNC_LAST="$utc"
+    echo "$utc" > "$CLOCK_SYNC_FILE" 2>/dev/null
+    return 0
+}
+
 fetch_data() {
     # Into a scratch file and only into place once it is whole — the same shape
     # as fetch_graph, for the same reason: keeping the last good payload is a
     # better failure than replacing it with part of a new one.
     # The page shape the reader has chosen, if it has: the collector works the
     # layout out for the page this panel will draw, and only this end knows.
-    local q=""
+    local q="" sep="?"
     case "${LAYOUT:-auto}" in
-        normal|standalone) q="?shape=$LAYOUT" ;;
+        normal|standalone) q="?shape=$LAYOUT"; sep="&" ;;
     esac
+    # And which way up, when this panel has its own answer — or cannot turn.
+    rot_local && q="$q${sep}rot=$ROT_LOCAL"
     if wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.new" "$(host_url)/kindle/data$q" \
             2>/dev/null && payload_ok "$TMP/data.new"; then
         mv "$TMP/data.new" "$TMP/data.txt"
+        # The time in it is this minute's, which a cached payload's is not.
+        TIME_FRESH=1
         FAILS=0
         TRUNC_WARNED=0
         return 0
@@ -1981,10 +2316,16 @@ graph_ok() {
 # with no od, or a header that says 0, is let through as before.
 graph_fits() {
     [ "${LAYOUT_FLOW:-0}" = "1" ] || return 0
-    local h
+    local h w
     h=$(od -An -td4 -j22 -N4 "$1" 2>/dev/null | tr -dc '0-9')
     case "$h" in ''|0) return 0 ;; esac
-    [ "$h" = "${GR_H:-}" ]
+    [ "$h" = "${GR_H:-}" ] || return 1
+    # And as wide, on the landscape page, where the chart is beside the
+    # readings: an upright page's image there would run off the screen.
+    [ "${LAND:-0}" = "1" ] || return 0
+    w=$(od -An -td4 -j18 -N4 "$1" 2>/dev/null | tr -dc '0-9')
+    case "$w" in ''|0) return 0 ;; esac
+    [ "$w" = "${GR_W:-}" ]
 }
 
 # Is the chart switched on? Consulted before FETCHING as well as before
@@ -2005,6 +2346,7 @@ fetch_graph() {
     # fixed image, which is what the layout file's GR_H was measured against.
     local q=""
     [ "${LAYOUT_FLOW:-0}" = "1" ] && q="?h=${GR_H}"
+    [ "${LAYOUT_FLOW:-0}" = "1" ] && [ "${LAND:-0}" = "1" ] && q="$q&w=${GR_W}"
     if wget -q -T 15 -O "$TMP/graph.new" "$(host_url)/kindle/graph.bmp$q" 2>/dev/null \
        && graph_ok "$TMP/graph.new"; then
         mv "$TMP/graph.new" "$TMP/graph.bmp"
@@ -2051,9 +2393,13 @@ zones_forget() {
     # a firmware that does not send it would otherwise leave the panel drawing
     # the standalone layout for ever, because load_kv only ever assigns.
     unset PAGE_MODE 2>/dev/null
+    # And which way up, and whether there is a clock: a collector that no
+    # longer says lays out the upright page with one.
+    unset PAGE_ROT SHOW_CLOCK FC3_LABEL FC4_LABEL 2>/dev/null
+    unset TIME_UTC TIME_OFF SYNC_DAYS 2>/dev/null
     # And the layout, for the same reason again: a collector downgraded to a
     # firmware that works none out has to take the panel back to the file's.
-    for z in $FLOW_KEYS GRID_ROWS CH_T CH_B; do unset "LY_$z" 2>/dev/null; done
+    for z in $FLOW_KEYS GRID_ROWS CH_T CH_B CH_L CH_R; do unset "LY_$z" 2>/dev/null; done
     unset CACHED_AT CACHED_ON 2>/dev/null
     return 0
 }
@@ -2071,6 +2417,28 @@ load_data() {
     # other branch, and nothing in the main loop ever called it again: every
     # coordinate stayed unset for as long as the script ran.
     load_layout
+    # LAID OUT FOR A TURN THIS PANEL WOULD NOT MAKE. load_layout() tried, the
+    # framebuffer refused, and the page in hand is the landscape one: ask again
+    # for the upright page, once — fetch_data() says rot=0 from now on.
+    if [ "${ROT_FAIL:-0}" = "1" ] && [ "${PAGE_ROT:-0}" != "0" ] && fetch_data; then
+        zones_forget
+        load_kv "$TMP/data.txt" PAYLOAD || return 1
+        load_layout
+    fi
+    # The collector's zone, from any payload, the cached one included; its
+    # time only from one fetched just now.
+    local tz_was="${TZ:-}"
+    tz_apply
+    CLOCK_JUMPED=0
+    if [ "${TIME_FRESH:-0}" = "1" ]; then
+        TIME_FRESH=0
+        clock_sync
+    fi
+    # The time the caller is about to draw was read before either: read it
+    # again, so this tick draws the new one rather than the next clock tier.
+    if [ "${TZ:-}" != "$tz_was" ] || [ "$CLOCK_JUMPED" = "1" ]; then
+        NOW_TIME=$(now_clock)
+    fi
     HAVE_DATA=1
     DATA_FRESH=1
     EVER_FRESH=1
@@ -2142,7 +2510,13 @@ FLOW_KEYS="GROUP_LAB_SZ HERO_Y HERO_SZ BIG_SZ HEAD_GAP SLASH_W SUB_Y SUB_SZ
  IN_RULE_Y IN_LAB_Y IN_VAL_Y IN_VAL2_Y IN_VAL_SZ IN_VAL_SZ_1 IN_W1 IN_STACK
  RULE2_Y LAB_CHART_Y GR_Y GR_H KEY_Y RULE3_Y
  LAB_FC_Y FC_ICON_Y FC_TEXT_Y FC_TEMP_Y FC_WIND_Y OL0_Y OL1_Y OL2_Y
- WK_HDG_RULE_Y WK_HDG_Y WK_Y FC_BAND"
+ WK_HDG_RULE_Y WK_HDG_Y WK_Y FC_BAND
+ COL_L_W BATT_X
+ LAND TOP_Y COL_L_X COL_R_X COL_R_W SEP_X CL_X CL_Y CL_W TOPROW_Y
+ RULE2_X RULE2_W LAB_CHART_X GR_X GR_W KEY_IN_X KEY_BAND
+ OL_N OL0_X OL1_X OL2_X OL3_X OL4_X OL3_Y OL4_Y RULE3_W
+ WK_X WK_HDG_X WK_CELL_W WK_HDG_RULE_W FOOT_RULE_Y FOOT_RULE_W FOOT_Y
+ STAT_X STAT_Y BATT_Y"
 
 #: 1 when the collector's layout is the one loaded. See flow_apply().
 LAYOUT_FLOW=0
@@ -2152,7 +2526,10 @@ FLOW_SIG=""
 flow_apply() {
     local k v sig=""
     LAYOUT_FLOW=0
-    unset IN_W1 IN_STACK IN_VAL2_Y FC_BAND 2>/dev/null
+    # The keys no layout file carries, which would otherwise outlive the page
+    # that sent them — a landscape page's LAND=1 on the upright one after it.
+    unset IN_W1 IN_STACK IN_VAL2_Y FC_BAND LAND TOPROW_Y KEY_BAND OL_N \
+          OL3_X OL4_X OL3_Y OL4_Y 2>/dev/null
     case "${LY_GR_H:-}" in ''|*[!0-9]*) FLOW_SIG=""; return 0 ;; esac
     # The grid's rows are a list of counts, each divided into the column's
     # width: 1..6 each, separated by single spaces, or the grid is not drawn
@@ -2171,6 +2548,8 @@ flow_apply() {
     # fixed one: /kindle/graph.bmp?h=GR_H is as tall as the chart now is.
     case "${LY_CH_T:-}" in ''|*[!0-9]*) ;; *) CH_T="$LY_CH_T" ;; esac
     case "${LY_CH_B:-}" in ''|*[!0-9]*) ;; *) CH_B="$LY_CH_B" ;; esac
+    case "${LY_CH_L:-}" in ''|*[!0-9]*) ;; *) CH_L="$LY_CH_L" ;; esac
+    case "${LY_CH_R:-}" in ''|*[!0-9]*) ;; *) CH_R="$LY_CH_R" ;; esac
     FLOW_SIG="$sig${LY_GRID_ROWS:-}"
     LAYOUT_FLOW=1
 }
@@ -2182,7 +2561,16 @@ load_layout() {
     [ "$RES_W" -ge 100 ] && [ "$RES_W" -le 4000 ] 2>/dev/null || RES_W=600
     [ "$RES_H" -ge 100 ] && [ "$RES_H" -le 4000 ] 2>/dev/null || RES_H=800
 
-    conf="$DASH_DIR/layout/${RES_W}x${RES_H}.conf"
+    # Turn the panel first, if the page asks for it — see rot_sync().
+    rot_sync
+    # ON ITS SIDE, THE UPRIGHT PANEL'S FILE: the landscape page is that panel
+    # turned, drawn at the same sizes, and the collector's layout moves every
+    # x and y that differs. There is no 800x600.conf to find.
+    if [ "$RES_W" -gt "$RES_H" ]; then
+        conf="$DASH_DIR/layout/${RES_H}x${RES_W}.conf"
+    else
+        conf="$DASH_DIR/layout/${RES_W}x${RES_H}.conf"
+    fi
     if [ -f "$conf" ]; then
         . "$conf"
     else
@@ -2264,6 +2652,36 @@ zones_derive() {
     Z_FC_Y=${RULE3_Y:-490}
     Z_FC_W=$ZW
     Z_FC_H=$(( ZH - ${RULE3_Y:-490} ))
+
+    # Where the offline notice goes: the readings' rectangle.
+    Z_OFF_X=0; Z_OFF_Y=0; Z_OFF_W=$ZW; Z_OFF_H=$Z_SENS_H
+    Z_TOP_H=0
+
+    # ── ON ITS SIDE the chart is BESIDE the readings, not under them ─────────
+    # The top row (the clock and the week strip, to the rule under them) is a
+    # rectangle of its own, redrawn with the readings; the readings are the
+    # left column to the hairline, the chart the rest of the middle band.
+    if [ "${LAND:-0}" = "1" ]; then
+        local top="${TOPROW_Y:-0}" mid
+        Z_TOP_H=0
+        [ "$top" -gt 0 ] 2>/dev/null && Z_TOP_H=$(( top + ${RULE_H:-1} ))
+        mid=$(( ${RULE3_Y:-440} - Z_TOP_H ))
+        Z_SENS_Y=$Z_TOP_H
+        Z_SENS_H=$mid
+        Z_CHART_Y=$Z_TOP_H
+        if [ "${GR_H:-0}" -gt 0 ] 2>/dev/null; then
+            Z_SENS_W=$(( ${SEP_X:-328} + ${SEP_W:-1} ))
+            Z_CHART_X=$Z_SENS_W
+            Z_CHART_W=$(( ZW - Z_SENS_W ))
+            Z_CHART_H=$mid
+        else
+            Z_CHART_H=0
+        fi
+        # Across the whole band, because the notice is a sentence and the
+        # left column is a third of the page. The chart tier leaves it alone
+        # while it stands — see redraw_chart().
+        Z_OFF_Y=$Z_TOP_H; Z_OFF_H=$mid
+    fi
 }
 
 # ── Drawing primitives ───────────────────────────────────────────────────────
@@ -2394,6 +2812,12 @@ draw_text_reg_inv()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "" "$4" INV; }
 
 fill_rect() {
     # $1=x $2=y $3=w $4=h $5=colour
+    #
+    # NOTHING FOR AN EMPTY RECTANGLE. The layout sends 0 for a rule that is not
+    # on the page — the chart's rule and the week strip's on the landscape
+    # page, the hairline between the columns with nothing to separate — and
+    # FBInk reads a zero width or height as "to the edge of the screen".
+    [ "${3:-0}" -gt 0 ] 2>/dev/null && [ "${4:-0}" -gt 0 ] 2>/dev/null || return 0
     fb -q -b -B "$5" -k top="$2",left="$1",width="$3",height="$4"
 }
 
@@ -2545,6 +2969,9 @@ clock_centre_x() {
 draw_clock() {
     local now_time="$1"
     local sz cy
+    # SWITCHED OFF, NOTHING — not even the white fill: upright, the indoor row
+    # has moved up into the clock's rectangle.
+    [ "${SHOW_CLOCK:-1}" = "1" ] || return 0
     # The clearing fill is per-style, not up front: the boxed clock covers the
     # whole rectangle in black anyway, so a white fill before it was a second
     # fbink process a minute — 1440 forks a day on a ten-year-old ARM device —
@@ -2874,7 +3301,11 @@ draw_zones() {
         # separates two things inside one column, where the page's section
         # rules separate the columns from what is under them, and drawn at the
         # heavier weight it read as a third section break.
-        draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYD"
+        # Upright without the clock there is nothing above the row to rule
+        # it off from: it starts at the top, level with the outdoor heading.
+        if [ "${SHOW_CLOCK:-1}" = "1" ] || [ "${LAND:-0}" = "1" ]; then
+            draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYD"
+        fi
         draw_text_reg "$rx" "${IN_LAB_Y:-134}" "$lab_sz" "GRAY7" "$Z_GROUP_IN"
 
         # The first field gets more of the row, not an equal share: it is set
@@ -3027,7 +3458,9 @@ draw_chart_key() {
         # The band clause after it, in the lighter grey the page's .dim sets.
         # It starts where the label ended, which the collector measured for us
         # — see KEY_OUT_ADVW, and draw_field() for why this is not ${#var}.
-        if [ -n "${LBL_KEY_BAND:-}" ] && [ "${KEY_OUT_ADVW:-0}" -gt 0 ] 2>/dev/null; then
+        # Not on the landscape page's narrower chart, which has no room for it.
+        if [ -n "${LBL_KEY_BAND:-}" ] && [ "${KEY_BAND:-1}" = "1" ] &&
+           [ "${KEY_OUT_ADVW:-0}" -gt 0 ] 2>/dev/null; then
             draw_text_reg "$(( tx + sz * KEY_OUT_ADVW / 1000 ))" "$y" "$sz" \
                           "GRAY7" ", $LBL_KEY_BAND"
         fi
@@ -3119,19 +3552,29 @@ draw_chart_body() {
     draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAYA"
     draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
 
-    # NOTHING RECORDED YET IS NOT THE SAME AS NOTHING HAPPENING. The image is
-    # still a grid when the ring is empty, and a grid with no line in it reads
-    # as a sensor that has stopped. The page prints a sentence instead; so does
-    # this. CH_NOTE carries it, so the wording and the language are the page's.
+    # NOTHING RECORDED YET IS NOT THE SAME AS NOTHING HAPPENING, so an empty
+    # record is drawn as the chart it will become — the grid and the hour axis,
+    # no scale down the side (the collector sends none) — with the sentence the
+    # page prints inside the plot. CH_NOTE carries it, so the wording and the
+    # language are the page's. Without the image the sentence stands alone.
+    if graph_fits "$TMP/graph.bmp" && draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
+        draw_chart_axis
+        if [ -n "${CH_NOTE:-}" ]; then
+            # At the axis size plus a little, so the Bulgarian sentence still
+            # fits the narrower chart beside the readings on a turned page.
+            local nsz=$(( ${AX_SZ:-11} + 2 ))
+            draw_text_reg "$(( GR_X + ${CH_L:-40} + 8 ))" \
+                "$(( GR_Y + (${CH_T:-10} + ${CH_B:-174}) / 2 - nsz / 2 ))" \
+                "$nsz" "GRAY5" "$CH_NOTE"
+        fi
+        # Names no line on an empty record: the collector sends CHART_OUT and
+        # CHART_IN as 0 there, and the key draws only what those name.
+        draw_chart_key
+        return 0
+    fi
     if [ -n "${CH_NOTE:-}" ]; then
         draw_text_reg "${GR_X:-20}" "$(( ${GR_Y:-278} + ${GR_H:-200} / 3 ))" \
                       "${LAB_SZ:-16}" "GRAY5" "$CH_NOTE"
-        return 0
-    fi
-
-    if graph_fits "$TMP/graph.bmp" && draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
-        draw_chart_axis
-        draw_chart_key
         return 0
     fi
 
@@ -3201,15 +3644,18 @@ draw_forecast_body() {
         # reason every other width does: FBInk will not say how wide it drew
         # something, and ${#var} counts bytes.
         local i ol_label ol_code ol_temp ol_x ol_y ol_icon ol_icon_y ol_temp_y
-        local plate_w="${OL_PLATE_W:-0}" ol_w
-        for i in 0 1 2; do
+        local plate_w="${OL_PLATE_W:-0}" ol_w ol_n="${OL_N:-3}"
+        # Three upright, five on its side — OL_N, from the collector's layout.
+        case "$ol_n" in [1-5]) ;; *) ol_n=3 ;; esac
+        i=0
+        while [ "$i" -lt "$ol_n" ]; do
             eval "ol_label=\$FC${i}_LABEL"
             eval "ol_code=\${FC${i}_ICON:-\$FC${i}_CODE}"
             eval "ol_temp=\$FC${i}_TEMP"
             eval "ol_x=\$OL${i}_X"
             eval "ol_y=\$OL${i}_Y"
 
-            [ -n "$ol_label" ] || continue
+            if [ -z "$ol_label" ] || [ -z "$ol_x" ]; then i=$((i + 1)); continue; fi
 
             # NOT AN OPTIONAL SHAPE, whatever this guard suggests: ol_centre
             # below centres all three of the label, the icon and the
@@ -3236,6 +3682,7 @@ draw_forecast_body() {
             ol_temp_y=$((ol_y + OL_TEMP_OFFSET))
             ol_centre "$ol_x" "$(( OL_TEMP_SZ * ol_w / 1000 ))"
             draw_text_bold "$CENTRE_X" "$ol_temp_y" "$OL_TEMP_SZ" "BLACK" "${ol_temp}°"
+            i=$((i + 1))
         done
     fi
 
@@ -3249,75 +3696,81 @@ draw_forecast_body() {
     # branch that is harder to reach by hand, the switch turned off, is the one
     # a later change to the footer would miss. Which is exactly the class of
     # silent divergence this file has spent the last few commits removing.
-    if [ "${SHOW_WEEK:-1}" = "1" ]; then
-
-        # Week heading (month)
-        if [ -n "${WK_MON_MONTH:-}" ]; then
-            draw_hline "${WK_HDG_RULE_X:-$FOOT_RULE_X}" "${WK_HDG_RULE_Y:-$WK_Y}" \
-                       "${WK_HDG_RULE_W:-$FOOT_RULE_W}" "GRAYA"
-            local wk_heading="$WK_MON_MONTH"
-            [ -n "${WK_SUN_MONTH:-}" ] && wk_heading="$wk_heading – $WK_SUN_MONTH"
-            draw_text_reg "${WK_HDG_X:-$WK_X}" "${WK_HDG_Y:-$WK_Y}" \
-                          "${WK_HDG_SZ:-$LAB_SZ}" "GRAY7" "$wk_heading"
-        fi
-
-        # Week strip
-        local wk_x="$WK_X" wk_name wk_day wk_bg i wk_nw wk_dw wk_nx wk_dx
-        for i in 0 1 2 3 4 5 6; do
-            eval "wk_name=\$WK${i}_NAME"
-            eval "wk_day=\$WK${i}_DAY"
-
-            # CENTRED IN THE CELL, and the number set REGULAR. .wd is
-            # text-align:center and .wd-d carries no font-weight, so the page draws
-            # seven centred regular numerals; the panel drew seven bold ones hard
-            # against the left edge of their cells, which on a row of identical
-            # boxes is the one place a misalignment cannot hide. The widths are the
-            # collector's — see draw_field() for why they are not ${#var}.
-            # CENTRED IN THE CELL VERTICALLY TOO, not only across it. The two
-            # offsets in the layout were tuned when a box was exactly its
-            # design size; text_geom() made the day's box 27 px instead of 24,
-            # so the pair ended up 5 px from the top of the cell and 2 from the
-            # bottom — the one row of identical boxes where three pixels of
-            # list is visible. The layout keeps the SPACING between the two
-            # rows; where the pair sits is derived, so it stays centred
-            # whatever TEXT_PX_MILLE is set to.
-            wk_gap=$(( WK_DAY_OFFSET - WK_NAME_OFFSET ))
-            wk_dh=$(( WK_DAY_SZ * TEXT_PX_MILLE / 1000 ))
-            wk_top=$(( WK_Y + (WK_CELL_H - wk_gap - wk_dh) / 2 ))
-            [ "$wk_top" -lt "$WK_Y" ] && wk_top="$WK_Y"
-            box_top "$wk_top" "$WK_NAME_SZ";            wk_ny="$BOX_TOP"
-            box_top "$(( wk_top + wk_gap ))" "$WK_DAY_SZ"; wk_dy="$BOX_TOP"
-
-            eval "wk_nw=\$WK${i}_NAMEW; wk_dw=\$WK${i}_DAYW"
-            centre_in "$wk_x" "$WK_CELL_W" "$(( WK_NAME_SZ * ${wk_nw:-0} / 1000 ))"
-            wk_nx="$CENTRE_X"
-            centre_in "$wk_x" "$WK_CELL_W" "$(( WK_DAY_SZ * ${wk_dw:-0} / 1000 ))"
-            wk_dx="$CENTRE_X"
-
-            if [ "$i" = "$WK_TODAY" ]; then
-                # Today: knocked out of a black plate — and drawn ON that
-                # plate, not bgless over it. Bgless left an empty black
-                # rectangle where the date should be: the one cell on the
-                # screen that has to be legible, reading as a hole. See
-                # draw_text().
-                fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
-                draw_text_reg_inv "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "$wk_name"
-                draw_text_reg_inv "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "$wk_day"
-            else
-                wk_bg="GRAYE"
-                { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
-                fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
-                draw_text_reg "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "GRAY7" "$wk_name"
-                draw_text_reg "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "BLACK" "$wk_day"
-            fi
-            wk_x=$((wk_x + WK_CELL_W))
-        done
-
-    fi   # SHOW_WEEK
+    # Upright it is part of this band; on its side it is beside the clock,
+    # in the top row — see draw_top_row().
+    if [ "${SHOW_WEEK:-1}" = "1" ] && [ "${LAND:-0}" != "1" ]; then
+        draw_week
+    fi
 
     draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAYA"
     draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
     draw_status
+}
+
+# ── The week strip ───────────────────────────────────────────────────────────
+draw_week() {
+
+    # Week heading (month)
+    if [ -n "${WK_MON_MONTH:-}" ]; then
+        draw_hline "${WK_HDG_RULE_X:-$FOOT_RULE_X}" "${WK_HDG_RULE_Y:-$WK_Y}" \
+                   "${WK_HDG_RULE_W:-$FOOT_RULE_W}" "GRAYA"
+        local wk_heading="$WK_MON_MONTH"
+        [ -n "${WK_SUN_MONTH:-}" ] && wk_heading="$wk_heading – $WK_SUN_MONTH"
+        draw_text_reg "${WK_HDG_X:-$WK_X}" "${WK_HDG_Y:-$WK_Y}" \
+                      "${WK_HDG_SZ:-$LAB_SZ}" "GRAY7" "$wk_heading"
+    fi
+
+    # Week strip
+    local wk_x="$WK_X" wk_name wk_day wk_bg i wk_nw wk_dw wk_nx wk_dx
+    for i in 0 1 2 3 4 5 6; do
+        eval "wk_name=\$WK${i}_NAME"
+        eval "wk_day=\$WK${i}_DAY"
+
+        # CENTRED IN THE CELL, and the number set REGULAR. .wd is
+        # text-align:center and .wd-d carries no font-weight, so the page draws
+        # seven centred regular numerals; the panel drew seven bold ones hard
+        # against the left edge of their cells, which on a row of identical
+        # boxes is the one place a misalignment cannot hide. The widths are the
+        # collector's — see draw_field() for why they are not ${#var}.
+        # CENTRED IN THE CELL VERTICALLY TOO, not only across it. The two
+        # offsets in the layout were tuned when a box was exactly its
+        # design size; text_geom() made the day's box 27 px instead of 24,
+        # so the pair ended up 5 px from the top of the cell and 2 from the
+        # bottom — the one row of identical boxes where three pixels of
+        # list is visible. The layout keeps the SPACING between the two
+        # rows; where the pair sits is derived, so it stays centred
+        # whatever TEXT_PX_MILLE is set to.
+        wk_gap=$(( WK_DAY_OFFSET - WK_NAME_OFFSET ))
+        wk_dh=$(( WK_DAY_SZ * TEXT_PX_MILLE / 1000 ))
+        wk_top=$(( WK_Y + (WK_CELL_H - wk_gap - wk_dh) / 2 ))
+        [ "$wk_top" -lt "$WK_Y" ] && wk_top="$WK_Y"
+        box_top "$wk_top" "$WK_NAME_SZ";            wk_ny="$BOX_TOP"
+        box_top "$(( wk_top + wk_gap ))" "$WK_DAY_SZ"; wk_dy="$BOX_TOP"
+
+        eval "wk_nw=\$WK${i}_NAMEW; wk_dw=\$WK${i}_DAYW"
+        centre_in "$wk_x" "$WK_CELL_W" "$(( WK_NAME_SZ * ${wk_nw:-0} / 1000 ))"
+        wk_nx="$CENTRE_X"
+        centre_in "$wk_x" "$WK_CELL_W" "$(( WK_DAY_SZ * ${wk_dw:-0} / 1000 ))"
+        wk_dx="$CENTRE_X"
+
+        if [ "$i" = "$WK_TODAY" ]; then
+            # Today: knocked out of a black plate — and drawn ON that
+            # plate, not bgless over it. Bgless left an empty black
+            # rectangle where the date should be: the one cell on the
+            # screen that has to be legible, reading as a hole. See
+            # draw_text().
+            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
+            draw_text_reg_inv "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "$wk_name"
+            draw_text_reg_inv "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "$wk_day"
+        else
+            wk_bg="GRAYE"
+            { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
+            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
+            draw_text_reg "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "GRAY7" "$wk_name"
+            draw_text_reg "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "BLACK" "$wk_day"
+        fi
+        wk_x=$((wk_x + WK_CELL_W))
+    done
 }
 
 # ── The four repaints ────────────────────────────────────────────────────────
@@ -3328,6 +3781,7 @@ draw_forecast_body() {
 
 redraw_clock() {
     # $1=HH:MM  $2=1 to flash this rectangle
+    [ "${SHOW_CLOCK:-1}" = "1" ] || return 0
     draw_clock "$1"
     refresh_zone "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" "${2:-0}"
 }
@@ -3347,8 +3801,34 @@ redraw_sensors() {
     fi
     fill_rect "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" WHITE
     draw_sensors_body
-    draw_clock "$1"                 # inside this rectangle, so it goes with it
+    if [ "${LAND:-0}" = "1" ] && [ "${Z_TOP_H:-0}" -gt 0 ] 2>/dev/null; then
+        # The clock is in the top row on its side, with the week strip — and
+        # ONE refresh for both, so a flashing tier flashes once.
+        fill_rect 0 0 "$ZW" "$Z_TOP_H" WHITE
+        draw_top_row "$1"
+        refresh_zone 0 0 "$ZW" $(( Z_SENS_Y + Z_SENS_H )) "${2:-0}"
+        return 0
+    fi
+    [ "${LAND:-0}" = "1" ] || draw_clock "$1"   # inside this rectangle, so it goes with it
     refresh_zone "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" "${2:-0}"
+}
+
+# The landscape page's top row: the clock, the week strip, the rule under them.
+draw_top_row() {
+    # $1=HH:MM, or empty for the row without the clock (the offline page,
+    # where the readings the clock stands with are not drawn)
+    [ "${LAND:-0}" = "1" ] || return 0
+    [ "${Z_TOP_H:-0}" -gt 0 ] 2>/dev/null || return 0
+    [ -n "$1" ] && draw_clock "$1"
+    [ "${SHOW_WEEK:-1}" = "1" ] && draw_week
+    draw_hline "${FOOT_RULE_X:-18}" "$TOPROW_Y" "${FOOT_RULE_W:-764}" "GRAYA"
+}
+
+redraw_top_row() {
+    [ "${Z_TOP_H:-0}" -gt 0 ] 2>/dev/null || return 0
+    fill_rect 0 0 "$ZW" "$Z_TOP_H" WHITE
+    draw_top_row "$1"
+    refresh_zone 0 0 "$ZW" "$Z_TOP_H" "${2:-0}"
 }
 
 redraw_chart() {
@@ -3356,6 +3836,9 @@ redraw_chart() {
     # readings above run straight into what is under them, and a refresh of a
     # zero-height region is not a refresh FBInk promises to keep small.
     [ "${Z_CHART_H:-0}" -gt 0 ] 2>/dev/null || return 0
+    # On its side the offline notice runs across the chart's half of the band
+    # too, and it stays until the collector answers.
+    [ "${LAND:-0}" = "1" ] && data_stale && return 0
     fill_rect "$Z_CHART_X" "$Z_CHART_Y" "$Z_CHART_W" "$Z_CHART_H" WHITE
     draw_chart_body
     refresh_zone "$Z_CHART_X" "$Z_CHART_Y" "$Z_CHART_W" "$Z_CHART_H" 0
@@ -3382,8 +3865,8 @@ redraw_offline() {
     # cannot be reached. So it uses the wording the LAST successful fetch left
     # behind — which is every outage after the first contact — and falls back
     # to English before that, on a panel nobody has set a language on yet.
-    local y=$(( Z_SENS_H / 3 ))
-    fill_rect "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" WHITE
+    local y=$(( Z_OFF_Y + Z_OFF_H / 3 ))
+    fill_rect "$Z_OFF_X" "$Z_OFF_Y" "$Z_OFF_W" "$Z_OFF_H" WHITE
     draw_text_bold "${OFF_X:-40}" "$y" "${OFF_SZ:-26}" "BLACK" \
                    "${LBL_OFFLINE:-Cannot reach} $(host_url)"
     local y2=$(( y + ${OFF_SZ:-26} + 12 ))
@@ -3412,7 +3895,11 @@ redraw_offline() {
         draw_text_reg "${OFF_X:-40}" "$y3" "${OFF_SUB_SZ:-16}" "GRAY7" "$hint"
 
     draw_clock "$1"
-    refresh_zone "$Z_SENS_X" "$Z_SENS_Y" "$Z_SENS_W" "$Z_SENS_H" 0
+    refresh_zone "$Z_OFF_X" "$Z_OFF_Y" "$Z_OFF_W" "$Z_OFF_H" 0
+    # On its side the clock is above this rectangle, in the top row.
+    [ "${LAND:-0}" = "1" ] && [ "${SHOW_CLOCK:-1}" = "1" ] &&
+        refresh_zone "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" 0
+    return 0
 }
 
 # The whole page, one flashing refresh at the end. This is the tier that
@@ -3426,8 +3913,11 @@ redraw_all() {
     # they were current is the one thing this page must not do.
     if ! data_stale; then
         draw_sensors_body
-        draw_clock "$1"
+        if [ "${LAND:-0}" = "1" ]; then draw_top_row "$1"; else draw_clock "$1"; fi
     fi
+    # The week strip is the date, and stands without the readings — with the
+    # rule under the row, which is drawn with it.
+    data_stale && [ "${LAND:-0}" = "1" ] && draw_top_row ""
     draw_chart_body
     draw_forecast_body
     if ! data_stale; then
@@ -3564,6 +4054,8 @@ cleanup() {
     # radio before the service that answers for it is a restore that quietly
     # does nothing.
     touch_disarm
+    # The page upright again before the reader gets the screen back.
+    rot_restore
     canvas_give_back
     gui_restore
     # And the radio goes back if WE are the ones who turned it off. Keyed on

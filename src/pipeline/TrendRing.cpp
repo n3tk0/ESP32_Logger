@@ -41,6 +41,7 @@ bool TrendRing::track(const char* sensorId, const char* metric) {
             _s[i].used     = true;
             _s[i].lastHour = 0;
             memset(_s[i].h, 0, sizeof(_s[i].h));
+            memset(&_f[i], 0, sizeof(_f[i]));
             idx = i;
             break;
         }
@@ -48,6 +49,39 @@ bool TrendRing::track(const char* sensorId, const char* metric) {
     taskEXIT_CRITICAL(&_mux);
 
     return idx >= 0;
+}
+
+// Fold one value into a ring of HOURS buckets keyed by an absolute slot
+// number (an hour, or a five-minute slot). Returns true when the reading
+// opened a new slot. See add() for why every skipped slot is cleared.
+static bool foldInto(TrendRing::Hour* ring, uint32_t& last, uint32_t slotNo,
+                     float v) {
+    const uint32_t N = (uint32_t)TrendRing::HOURS;
+    bool rolled = false;
+    if (slotNo > last) {
+        const uint32_t skipped = slotNo - last;
+        if (skipped >= N) {
+            memset(ring, 0, sizeof(TrendRing::Hour) * N);
+        } else {
+            for (uint32_t k = 1; k <= skipped; k++)
+                memset(&ring[(last + k) % N], 0, sizeof(TrendRing::Hour));
+        }
+        last = slotNo;
+        rolled = true;
+    }
+    if (slotNo <= last && last - slotNo < N) {
+        TrendRing::Hour& b = ring[slotNo % N];
+        if (b.count == 0) {
+            b.min = b.max = b.sum = v;
+            b.count = 1;
+        } else {
+            if (v < b.min) b.min = v;
+            if (v > b.max) b.max = v;
+            b.sum += v;
+            if (b.count < UINT16_MAX) b.count++;
+        }
+    }
+    return rolled;
 }
 
 void TrendRing::add(const SensorReading& r) {
@@ -100,8 +134,35 @@ void TrendRing::add(const SensorReading& r) {
                 if (b.count < UINT16_MAX) b.count++;
             }
         }
+
+        // The five-minute buckets, which never set _dirty: they are not saved.
+        foldInto(_f[i].h, _f[i].lastSlot, r.timestamp / FINE_S, r.value);
     }
     taskEXIT_CRITICAL(&_mux);
+}
+
+bool TrendRing::recent(const char* sensorId, const char* metric,
+                       uint32_t nowTs, Hour* out) const {
+    if (!out) return false;
+
+    const uint32_t nowSlot = (nowTs >= MIN_REAL_TS) ? (nowTs / FINE_S) : 0;
+    bool found = false;
+
+    taskENTER_CRITICAL(&_mux);
+    const int i = _find(sensorId, metric);
+    if (i >= 0) {
+        const Fine& f = _f[i];
+        for (int k = 0; k < HOURS; k++) {
+            const uint32_t sl = nowSlot - (uint32_t)(HOURS - 1 - k);
+            const bool live = (sl <= f.lastSlot) &&
+                              (f.lastSlot - sl < (uint32_t)HOURS);
+            out[k] = live ? f.h[sl % HOURS] : Hour{0, 0, 0, 0};
+        }
+        found = true;
+    }
+    taskEXIT_CRITICAL(&_mux);
+
+    return found;
 }
 
 bool TrendRing::series(const char* sensorId, const char* metric,

@@ -200,6 +200,27 @@ constexpr uint16_t KSHOW_CHART     = 0x0020;
 constexpr uint16_t KSHOW_WEEK      = 0x0040;
 constexpr uint16_t KSHOW_BATTERY   = 0x0080;   // the low-battery badge
 constexpr uint16_t KSHOW_ALL       = 0x00FF;
+// KindleConfig::clockSync: never, and the most days apart a reader may go.
+constexpr uint8_t KCLOCK_SYNC_OFF = 0xFF;
+constexpr uint8_t KCLOCK_SYNC_MAX = 60;
+
+// The clock, which is NOT stored in showFlags — see KindleConfig::clockOff.
+// The settings page and the layout treat it as one more switch, so it has a
+// bit of its own there: kdShowMask() folds it in, the API sends it as `clock`.
+constexpr uint16_t KSHOW_CLOCK     = 0x0100;
+
+// ── Which way up the reader stands ──────────────────────────────────────────
+// Quarter turns CLOCKWISE of the picture on the panel, so the name says where
+// the reader's USB port ends up once it is turned to read the page upright:
+// 90 is the reader lying on its left side, port on the right.
+//
+// 0 and 180 are the ordinary page, one of them upside down. 90 and 270 are the
+// landscape page — 800 x 600 design pixels, the readings beside the chart —
+// which KindleFlow.h lays out on its own.
+constexpr uint8_t KROT_0   = 0;
+constexpr uint8_t KROT_90  = 1;
+constexpr uint8_t KROT_180 = 2;
+constexpr uint8_t KROT_270 = 3;
 
 // ── Which shape the page is drawn in ────────────────────────────────────────
 // A collector running as its own access point — a wifi or ESP-NOW node talking
@@ -385,7 +406,24 @@ struct KindleConfig {
     // is a forecast to draw", so an upgrade changes nothing until somebody
     // chooses.
     uint8_t  layoutMode;      // KLAYOUT_*
-    uint8_t  reserved[7];
+    // v15.1 — the reader's orientation, and whether the clock is drawn,
+    // formerly in reserved[]. Both are 0 in an older config, which is the
+    // page it has always drawn: upright, with the clock on it. The clock is
+    // "off", not "on", for that reason — a bit of showFlags meaning "drawn"
+    // would have read as switched off on every device that upgraded.
+    uint8_t  rotation;        // KROT_*: quarter turns clockwise
+    uint8_t  clockOff;        // 1 = no clock on the page
+    // v15.2 — how often the FBInk reader sets its own clock from this one,
+    // formerly in reserved[]. 0 is what an older config holds and means the
+    // default, every day; KCLOCK_SYNC_OFF never; 1..KCLOCK_SYNC_MAX days.
+    // Read through kdClockSyncDays().
+    uint8_t  clockSync;
+    // v15.3 — which way up the BROWSER page at /kindle is, apart from the
+    // FBInk panel's `rotation` above. Formerly in reserved[]; 0 is what an
+    // older config holds and means "the same as the panel", 1..4 are
+    // KROT_0..KROT_270 plus one. Read through kdPageRot().
+    uint8_t  pageRot;
+    uint8_t  reserved[3];
 };
 
 struct DeviceConfig {

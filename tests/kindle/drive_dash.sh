@@ -763,7 +763,7 @@ flow_payload() {
 # ly_load FILE -> the keys set as the payload would set them, nothing else left
 ly_load() {
     local z
-    for z in $FLOW_KEYS GRID_ROWS CH_T CH_B; do unset "LY_$z" 2>/dev/null; done
+    for z in $FLOW_KEYS GRID_ROWS CH_T CH_B CH_L CH_R; do unset "LY_$z" 2>/dev/null; done
     load_kv "$1" PAYLOAD
 }
 
@@ -826,17 +826,227 @@ for res in 600x800 1072x1448; do
   done
 done
 
+# ── ON ITS SIDE ─────────────────────────────────────────────────────────────
+# The landscape page is the upright panel turned: the payload's RES_W/RES_H are
+# swapped, the upright panel's layout file is the base, and the collector's
+# layout moves every x as well as every y. The rectangles the panel is
+# refreshed in still tile it: the top row across, the readings beside the
+# chart, the band across under them.
+for res in 600x800 1072x1448; do
+  for args in "" "fc=0" "clk=0" "clk=0 week=0" "chart=0" "week=0"; do
+    ( w=${res%x*}; h=${res#*x}
+      flow_payload "$WORK/ly.txt" res=$w land=1 $args; ly_load "$WORK/ly.txt"
+      LAYOUT=auto; unset PAGE_MODE PAGE_ROT; RES_W=$h RES_H=$w
+      load_layout
+      [ "$LAYOUT_FLOW" = "1" ] && [ "$LAND" = "1" ] || exit 1
+      case "$ICON_DIR" in */$w) ;; *) exit 2 ;; esac     # the upright panel's file
+      [ $((Z_TOP_H + Z_SENS_H)) -eq "$RULE3_Y" ] || exit 3
+      [ $((Z_FC_Y + Z_FC_H)) -eq "$RES_H" ] || exit 4
+      if [ "$GR_H" -gt 0 ]; then
+        [ $((Z_SENS_W + Z_CHART_W)) -eq "$RES_W" ] || exit 5
+        [ "$Z_CHART_X" -gt "$SEP_X" ] || exit 6
+        [ $((GR_X + GR_W)) -le "$RES_W" ] && [ $((GR_W % 8)) -eq 0 ] || exit 7
+        [ $((KEY_Y + KEY_SZ)) -le "$RULE3_Y" ] || exit 8
+      else
+        [ "$Z_SENS_W" -eq "$RES_W" ] || exit 9
+      fi
+      [ "$OL_N" = "5" ] || exit 10
+      [ $((OL4_X + OL_PLATE_W)) -le "$RES_W" ] || exit 11
+      [ $((FOOT_RULE_X + FOOT_RULE_W)) -le "$RES_W" ] || exit 12
+      [ "$FOOT_Y" -lt "$RES_H" ] || exit 13
+      case " $args " in
+        *" clk=0 "*) [ "$SHOW_CLOCK" != "0" ] || true ;;
+        *) [ $((CL_Y + CL_H)) -le "$TOPROW_Y" ] || exit 14 ;;
+      esac
+      case " $args " in
+        *" week=0 "*) ;;
+        *) [ $((WK_X + 7 * WK_CELL_W)) -le "$RES_W" ] &&
+           [ $((WK_Y + WK_CELL_H)) -le "$TOPROW_Y" ] || exit 15 ;;
+      esac
+      exit 0 )
+    check "$?" "$res on its side with ${args:-everything on}: the page tiles and nothing runs off it"
+  done
+done
+
+# And back upright: nothing the landscape page set outlives it.
+( flow_payload "$WORK/ly.txt" res=600 land=1; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE PAGE_ROT; RES_W=800 RES_H=600; load_layout
+  [ "$LAND" = "1" ] || exit 1
+  flow_payload "$WORK/ly.txt" res=600; ly_load "$WORK/ly.txt"
+  RES_W=600 RES_H=800; load_layout
+  [ -z "${LAND:-}" ] && [ -z "${OL_N:-}" ] && [ -z "${TOPROW_Y:-}" ] || exit 2
+  [ "$GR_X" = "20" ] && [ "$COL_L_X" = "18" ] && [ "$FOOT_Y" = "772" ] || exit 3
+  [ "$Z_CHART_W" = "600" ] || exit 4
+  exit 0 )
+check "$?" "turned back upright, nothing the landscape page set is left behind"
+
+# Five outlook plates on its side, three upright; the week strip in the top
+# row beside the clock and not in the band.
+( flow_payload "$WORK/ly.txt" res=600 land=1; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE PAGE_ROT; RES_W=800 RES_H=600; load_layout
+  FC_SUMMARY="Clear" FC_ICON=0 SHOW_WEEK=1 WK_TODAY=2 WK_MON_MONTH="MAY"
+  for i in 0 1 2 3 4; do eval "FC${i}_LABEL=D$i FC${i}_ICON=0 FC${i}_TEMP=1$i"; done
+  for i in 0 1 2 3 4 5 6; do eval "WK${i}_NAME=N$i WK${i}_DAY=$i"; done
+  : > "$FBINK_LOG"; draw_forecast_body
+  [ "$(grep -c 'GRAYE' "$FBINK_LOG")" = "5" ] || exit 1
+  grep -q 'N3' "$FBINK_LOG" && exit 2               # the week is not in the band
+  : > "$FBINK_LOG"; SHOW_CLOCK=1; draw_top_row "12:00"
+  grep -q 'N3' "$FBINK_LOG" || exit 3
+  grep -q "top=$TOPROW_Y,left=18,width=764" "$FBINK_LOG" || exit 4   # its rule
+  exit 0 )
+check "$?" "on its side: five forecast columns, and the week strip beside the clock"
+
+# A tap lands where the turned page drew the button: the touch layer keeps
+# the upright panel's axes.
+( RES_W=800 RES_H=600 TOUCH_MAXX=0 TOUCH_MAXY=0 TOUCH_SWAP=0 TRACE=0
+  ROT_DEG=90;  touch_scale 0 0;     [ "$TAP_X,$TAP_Y" = "0,599" ]   || exit 1
+               touch_scale 599 799; [ "$TAP_X,$TAP_Y" = "799,0" ]   || exit 2
+  ROT_DEG=270; touch_scale 0 0;     [ "$TAP_X,$TAP_Y" = "799,0" ]   || exit 3
+  RES_W=600 RES_H=800
+  ROT_DEG=180; touch_scale 0 0;     [ "$TAP_X,$TAP_Y" = "599,799" ] || exit 4
+  ROT_DEG=0;   touch_scale 10 20;   [ "$TAP_X,$TAP_Y" = "10,20" ]   || exit 5
+  exit 0 )
+check "$?" "touch follows the page round: 90, 180 and 270 map back to the drawn page"
+
+# The panel turns to the page it was sent, and back; ROTATE_SWAP numbers the
+# two quarter turns the other way; a collector that does not say keeps it
+# upright; and stop.sh has the rotation to put back.
+( ROT_NODE="$WORK/rotate"; echo 0 > "$ROT_NODE"
+  ROT_DEG=0 ROT_FAIL=0 ROT_ORIG="" HAVE_DATA=0
+  PAGE_ROT=90;  rot_sync || exit 1
+  [ "$(cat "$ROT_NODE")" = "1" ] && [ "$ROT_DEG" = "90" ] || exit 2
+  [ "$(cat "$DASH_TMP/rota")" = "0" ] || exit 3
+  PAGE_ROT=270; ROTATE_SWAP=1; rot_sync || exit 4
+  [ "$(cat "$ROT_NODE")" = "1" ] || exit 5
+  ROTATE_SWAP=0
+  unset PAGE_ROT; rot_sync || exit 6
+  [ "$(cat "$ROT_NODE")" = "0" ] && [ "$ROT_DEG" = "0" ] || exit 7
+  PAGE_ROT=180; rot_sync; rot_restore
+  [ "$(cat "$ROT_NODE")" = "0" ] && [ ! -f "$DASH_TMP/rota" ] || exit 8
+  exit 0 )
+check "$?" "the panel turns to the page it was sent, and back on the way out"
+
+# A turn that does not check out is undone, even the first one — and the
+# reader goes back to how it was when the dashboard quits.
+( ROT_NODE="$WORK/rotate"; echo 0 > "$ROT_NODE"
+  ROT_DEG=0 ROT_FAIL=0 ROT_ORIG="" ROT_BASE="" ROT_TOUCHED=0 HAVE_DATA=0
+  rot_is_wide() { echo 0; }            # this panel never comes out wide
+  PAGE_ROT=90; rot_sync && exit 1
+  [ "$ROT_FAIL" = "1" ] && [ "$ROT_DEG" = "0" ] || exit 2
+  [ "$(cat "$ROT_NODE")" = "0" ] || exit 3
+  echo 1 > "$ROT_NODE"; rot_restore     # whatever it was left at
+  [ "$(cat "$ROT_NODE")" = "0" ] || exit 4
+  exit 0 )
+check "$?" "a turn that fails is undone at once, and the reader put back on quit"
+
+# A reader left on its side is not "upright" for this page: the panel's own
+# 0 is, and quitting leaves it on its side again.
+( ROT_NODE="$WORK/rotate"; echo 1 > "$ROT_NODE"
+  ROT_DEG=0 ROT_FAIL=0 ROT_ORIG="" ROT_BASE="" ROT_TOUCHED=0 HAVE_DATA=0
+  rot_is_wide() { case "$(cat "$ROT_NODE")" in 1|3) echo 1 ;; *) echo 0 ;; esac; }
+  PAGE_ROT=0;  rot_sync || exit 1
+  [ "$(cat "$ROT_NODE")" = "0" ] || exit 2
+  PAGE_ROT=90; rot_sync || exit 3
+  [ "$(cat "$ROT_NODE")" = "1" ] && [ "$ROT_DEG" = "90" ] || exit 4
+  rot_restore
+  [ "$(cat "$ROT_NODE")" = "1" ] || exit 5
+  exit 0 )
+check "$?" "a reader started in landscape is turned upright for the upright page"
+
+# This panel's own ROTATE is asked for by name; auto leaves it to the collector.
+( ROT_FAIL=0 ROTATE=270; rot_local && [ "$ROT_LOCAL" = "270" ] || exit 1
+  ROTATE=auto; rot_local && exit 2
+  ROT_FAIL=1; rot_local && [ "$ROT_LOCAL" = "0" ] || exit 3
+  conf_valid ROTATE 90 && conf_valid ROTATE auto || exit 4
+  conf_valid ROTATE 45 && exit 5
+  conf_valid ROTATE_SWAP 1 && ! conf_valid ROTATE_SWAP 2 || exit 6
+  exit 0 )
+check "$?" "ROTATE in dash.conf: 0, 90, 180, 270 or auto, and it goes out as ?rot="
+
+# The collector's zone, POSIX's way round; and the arithmetic that stands in
+# for a busybox date that will not take @seconds.
+( [ "$(tz_from_off 7200)" = "UTC-2" ] || exit 1
+  [ "$(tz_from_off -18000)" = "UTC+5" ] || exit 2
+  [ "$(tz_from_off 19800)" = "UTC-5:30" ] || exit 3
+  [ "$(tz_from_off 0)" = "UTC-0" ] || exit 4
+  tz_from_off "" && exit 5
+  tz_from_off "1-2" && exit 6
+  tz_from_off "-" && exit 12
+  [ "$(epoch_utc 0)" = "1970-01-01 00:00:00" ] || exit 7
+  [ "$(epoch_utc 951782400)" = "2000-02-29 00:00:00" ] || exit 8
+  [ "$(epoch_utc 1790640000)" = "2026-09-29 00:00:00" ] || exit 9
+  [ "$(epoch_utc 1767225599)" = "2025-12-31 23:59:59" ] || exit 10
+  TIME_OFF=10800; TZ=""; tz_apply; [ "$TZ" = "UTC-3" ] || exit 11
+  exit 0 )
+check "$?" "the collector's time zone as a TZ, and seconds as a date"
+
+# When the clock is set: never with 0 days; at once when it has never been, or
+# is more than ten minutes out; otherwise once the days have gone by.
+( n=1790640000
+  clock_sync_due "$n" "$n" "" 0 && exit 1                       # never
+  clock_sync_due "$n" "$n" "" 1 || exit 2                       # never set yet
+  clock_sync_due "$n" $(( n + 5 )) $(( n - 3600 )) 1 && exit 3  # set an hour ago
+  clock_sync_due "$n" $(( n + 5 )) $(( n - 86400 )) 1 || exit 4 # a day ago
+  clock_sync_due "$n" $(( n + 5 )) $(( n - 86400 )) 7 && exit 5 # weekly: not yet
+  clock_sync_due "$n" $(( n + 700 )) $(( n - 60 )) 7 || exit 6  # far out: now
+  clock_sync_due "$n" $(( n - 700 )) $(( n - 60 )) 7 || exit 7  # either way
+  clock_sync_due "$n" "$n" $(( n + 86400 )) 7 || exit 8          # a clock gone back
+  CLOCK_SYNC=auto SYNC_DAYS=5; clock_sync_days; [ "$SYNC_EVERY" = "5" ] || exit 9
+  CLOCK_SYNC=auto; unset SYNC_DAYS; clock_sync_days; [ "$SYNC_EVERY" = "1" ] || exit 10
+  CLOCK_SYNC=0 SYNC_DAYS=5; clock_sync_days; [ "$SYNC_EVERY" = "0" ] || exit 11
+  conf_valid CLOCK_SYNC auto && conf_valid CLOCK_SYNC 0 && conf_valid CLOCK_SYNC 60 || exit 12
+  conf_valid CLOCK_SYNC 61 && exit 13
+  conf_valid CLOCK_SYNC 08 && exit 15                            # octal to $(( ))
+  conf_valid CLOCK_SYNC x && exit 14
+  exit 0 )
+check "$?" "the Kindle's clock is set every CLOCK_SYNC days, and at once when far out"
+
+# Only from a payload fetched just now, and remembered on disk; a cached
+# payload's TIME_UTC is hours old and must not set anything.
+( CLOCK_SYNC_FILE="$WORK/clocksync"; rm -f "$CLOCK_SYNC_FILE"
+  SET_TO=""
+  clock_set() { SET_TO="$1"; return 0; }
+  date() { case "$1" in +%s) echo 1790640000 ;; *) command date "$@" ;; esac; }
+  CLOCK_SYNC=auto SYNC_DAYS=1 TIME_UTC=1790640090 HAVE_DATA=0
+  clock_sync 2>/dev/null || exit 1
+  [ "$SET_TO" = "1790640090" ] || exit 2
+  [ "$(cat "$CLOCK_SYNC_FILE")" = "1790640090" ] || exit 3
+  SET_TO=""; TIME_UTC=1790640095
+  clock_sync 2>/dev/null; [ -z "$SET_TO" ] || exit 4           # not a day yet
+  CLOCK_SYNC=0; rm -f "$CLOCK_SYNC_FILE"; CLOCK_SYNC_READ=0
+  clock_sync 2>/dev/null; [ -z "$SET_TO" ] || exit 5           # switched off
+  # Set back an hour: a wake window held to an absolute time moves with it.
+  CLOCK_SYNC=1; TIME_UTC=1790636400; AWAKE_UNTIL=1790640060
+  clock_sync 2>/dev/null; [ "$SET_TO" = "1790636400" ] || exit 6
+  [ "$AWAKE_UNTIL" = "1790636460" ] && [ "$CLOCK_JUMPED" = "1" ] || exit 7
+  exit 0 )
+check "$?" "a clock set from the collector is remembered, and not set again until due"
+
+# Without the clock nothing is drawn in its place, upright or on its side —
+# the indoor row has moved up into its rectangle.
+( : > "$FBINK_LOG"; SHOW_CLOCK=0 CLOCK_STYLE=1; draw_clock "12:34"
+  [ ! -s "$FBINK_LOG" ] || exit 1
+  exit 0 )
+check "$?" "the clock switched off draws nothing, not even its white box"
+
+# A zero-wide rule is not drawn: FBInk would take 0 as "to the edge".
+( : > "$FBINK_LOG"; fill_rect 10 10 0 5 BLACK; draw_hline 10 10 0 GRAYA
+  [ ! -s "$FBINK_LOG" ] || exit 1
+  exit 0 )
+check "$?" "an empty rectangle is not handed to FBInk"
+RES_W=600; RES_H=800; LAYOUT=auto; unset PAGE_MODE PAGE_ROT SHOW_CLOCK; ly_load /dev/null; load_layout
+
 # Numbers only, and only the names the panel knows. A value that is not
 # digits is dropped and the file's number stays.
 ( flow_payload "$WORK/ly.txt" res=600 week=0
   echo 'LY_HERO_SZ="1;reboot"' >> "$WORK/ly.txt"
-  echo 'LY_FOOT_Y=10' >> "$WORK/ly.txt"
+  echo 'LY_FOOT_SZ=40' >> "$WORK/ly.txt"
   ly_load "$WORK/ly.txt"
   LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
   load_layout
   [ "$LAYOUT_FLOW" = "1" ] || exit 1
   [ "$HERO_SZ" = "88" ] || exit 2          # the file's
-  [ "$FOOT_Y" = "772" ] || exit 3          # not a name it lays over
+  [ "$FOOT_SZ" = "15" ] || exit 3          # not a name it lays over
   exit 0 )
 check "$?" "an LY_ value that is not a number, or not a layout name, is ignored"
 
@@ -2685,15 +2895,27 @@ reset_log
   exit 0 )
 check "$?" "the chart's axis is labelled, the way the page labels it"
 
-# An empty record is a sentence, not a grid. A grid with no line in it reads as
-# a sensor that has stopped, which is the one thing it does not mean.
+# An empty record is still a chart: the grid, the hour axis, no scale down the
+# side, and the sentence inside the plot. No key — there are no lines to name.
 ( reset_log
+  CH_Y0= CH_Y1= CH_Y2= CH_Y3= CH_Y4= CHART_OUT=0 CHART_IN=0 \
   CH_NOTE="The 24 hour record fills as readings arrive." draw_chart_body || exit 1
   grep -q "24 hour record fills" "$FBINK_LOG" || exit 2
-  grep -q -- "-g	file=" "$FBINK_LOG" && exit 3      # and no empty image under it
-  grep -q -- "	--	33	" "$FBINK_LOG" && exit 4      # nor an axis for nothing
+  grep -q -- "file=$DASH_TMP/graph.bmp" "$FBINK_LOG" || exit 3
+  grep -q -- "	--	-23h	" "$FBINK_LOG" || exit 4
+  grep -q -- "	--	33	" "$FBINK_LOG" && exit 5
+  grep -q "outside mean" "$FBINK_LOG" && exit 6
   exit 0 )
-check "$?" "with nothing recorded yet it says so instead of drawing an empty grid"
+check "$?" "with nothing recorded yet it draws the empty chart and says so inside it"
+
+( reset_log
+  rm -f "$DASH_TMP/graph.bmp"
+  CH_NOTE="The 24 hour record fills as readings arrive." draw_chart_body || exit 1
+  grep -q "24 hour record fills" "$FBINK_LOG" || exit 2
+  grep -q "No chart yet" "$FBINK_LOG" && exit 3
+  exit 0 )
+check "$?" "and without the image the sentence still stands alone"
+printf 'BM\202\000\000\000' > "$DASH_TMP/graph.bmp"
 
 # An older collector sends no axis at all. Drawing the image alone is what this
 # script did before, and is still better than placing labels it has not been
