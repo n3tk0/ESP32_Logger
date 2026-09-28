@@ -416,9 +416,14 @@ static inline void kdFlowOutdoor(const KdFlowIn& in, int bot, KdFlow& f) {
     }
 }
 
-/// The indoor row under f.inRuleY, ending at `bot`, f.inW across. `allowStack`:
-/// whether the first field may take a line of its own.
-static inline void kdFlowIndoor(const KdFlowIn& in, int bot, bool allowStack, KdFlow& f) {
+/// The indoor row under f.inRuleY, ending at `bot`, f.inW across.
+///
+/// ALWAYS ONE LINE. The first field used to take a line of its own whenever
+/// that set it larger, which with three readings was nearly always — so the
+/// third one the reader added dropped under the other two. They stay side by
+/// side now, the first a little smaller when it has to be; f.inStack is
+/// always false, and IN_STACK still goes out as 0 for the panel.
+static inline void kdFlowIndoor(const KdFlowIn& in, int bot, KdFlow& f) {
     const int air = kdfMax(0, f.grow - 1000);
     // The narrower of the two renderers' widths — see KDF_COL_R.
     const int W = f.inW - 12;
@@ -448,39 +453,20 @@ static inline void kdFlowIndoor(const KdFlowIn& in, int bot, bool allowStack, Kd
         // Each of the others also carries its caption above it, spaced out in
         // capitals, and that is wider than a short figure: the first field
         // gives up size until they all have room for theirs.
-        while (m > 1 && s1 > 40 &&
+        while (m > 1 && s1 > 30 &&
                kdFlowInNeed(s1, a1, in.inAdv, m) > W) s1--;
 
-        // Or the first on a line of its own and the others under it.
-        int s1s = 0;
-        if (m >= 2 && allowStack) {
-            s1s = (W - KDF_CELL_PAD) * 1000 / a1;
-            const int s2 = (W - KDF_CELL_PAD * (m - 1)) * 1000 / others;
-            s1s = kdfMin(s1s, s2 * 10 / 6);
-            s1s = kdfMin(s1s, (areaH - 14 - f.labSz) * 10 / 16);
-            s1s = kdfMin(s1s, cap);
-        }
-
-        if (s1s > s1 + 2) {
-            f.inStack  = true;
-            f.inValSz1 = (uint8_t)s1s;
-            f.inValSz  = (uint8_t)(s1s * 6 / 10);
-            const int h = f.inValSz1 + 10 + f.labSz + 4 + f.inValSz;
-            f.inValY  = (int16_t)(top + kdfMax(0, (areaH - h) / 2));
-            f.inVal2Y = (int16_t)(f.inValY + f.inValSz1 + 10 + f.labSz + 4);
-        } else {
-            f.inValSz1 = (uint8_t)s1;
-            f.inValSz  = (uint8_t)(s1 * 6 / 10);
-            f.inValY   = (int16_t)(top + kdfMax(0, (areaH - s1) / 2));
-            f.inVal2Y  = (int16_t)(f.inValY + f.inValSz1 - f.inValSz);
-            if (m > 1) {
-                // The width each field needs, and the slack shared out in the
-                // same proportion — so the first field gets what it takes to
-                // be set larger, not a fixed 42 or 58 per cent.
-                const int need1 = f.inValSz1 * a1 / 1000 + KDF_CELL_PAD;
-                const int needO = kdFlowInNeed(f.inValSz1, a1, in.inAdv, m) - need1;
-                f.inW1Pm = (uint16_t)(need1 * 1000 / kdfMax(1, need1 + needO));
-            }
+        f.inValSz1 = (uint8_t)s1;
+        f.inValSz  = (uint8_t)(s1 * 6 / 10);
+        f.inValY   = (int16_t)(top + kdfMax(0, (areaH - s1) / 2));
+        f.inVal2Y  = (int16_t)(f.inValY + f.inValSz1 - f.inValSz);
+        if (m > 1) {
+            // The width each field needs, and the slack shared out in the
+            // same proportion — so the first field gets what it takes to
+            // be set larger, not a fixed 42 or 58 per cent.
+            const int need1 = f.inValSz1 * a1 / 1000 + KDF_CELL_PAD;
+            const int needO = kdFlowInNeed(f.inValSz1, a1, in.inAdv, m) - need1;
+            f.inW1Pm = (uint16_t)(need1 * 1000 / kdfMax(1, need1 + needO));
         }
     }
 }
@@ -498,7 +484,7 @@ static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
     // Without the clock the indoor row moves up to the outdoor heading's line.
     f.inRuleY = (int16_t)(in.clock ? KDF_CL_Y + f.clH + 1
                                    : KDF_TOP_Y - 10 - kdfMax(0, g - 1000) * 4 / (KDF_GROW_MAX - 1000));
-    kdFlowIndoor(in, bot, true, f);
+    kdFlowIndoor(in, bot, f);
     // Nothing in the right column: the outdoor one has the page's width, and
     // there is nothing to separate it from.
     f.sepH = (int16_t)(f.colLW > KDF_COL_L ? 0 : T - 10);
@@ -601,7 +587,7 @@ static inline void kdFlowLand(const KdFlowIn& in, int footY, KdFlow& f) {
     if (pick < 0) pick = bestG;
     kdFlowType(pick, f);
     kdFlowOutdoor(in, outBot, f);
-    kdFlowIndoor(in, midBot - 8, false, f);
+    kdFlowIndoor(in, midBot - 8, f);
 
     // ── The chart, beside the readings ──
     f.rule2X = (int16_t)(KDF_LAND_SEP + 10);

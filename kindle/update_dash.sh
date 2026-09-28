@@ -2380,11 +2380,11 @@ fetch_graph() {
 zones_forget() {
     local z s
     for z in ${GRID_ZONES:-} ${IN_ZONES:-} HERO BIG; do
-        for s in VALUE UNIT LABEL ARROW BOLD INK VADVW UADVW ADVW; do
+        for s in VALUE UNIT LABEL ARROW BOLD INK VADVW UADVW ADVW LADVW; do
             unset "Z_${z}_${s}" 2>/dev/null
         done
     done
-    unset Z_GROUP_OUT Z_GROUP_IN Z_SUB GRID_ZONES GRID_ROWS IN_ZONES 2>/dev/null
+    unset Z_GROUP_OUT Z_GROUP_IN Z_SUB Z_SUB_ADVW GRID_ZONES GRID_ROWS IN_ZONES 2>/dev/null
     # The forecast is a section that can be switched off, so its heading key
     # has to be able to go away too — draw_forecast_body draws the whole block
     # only when FC_SUMMARY is set.
@@ -3093,6 +3093,28 @@ draw_field() {
     fi
 }
 
+# How wide draw_field() will draw a field, into FIELD_W: the value, its unit
+# and the gaps draw_field() leaves, and the arrow. The same arithmetic, so a
+# centred field is centred on what is actually drawn.
+FIELD_W=0
+field_w() {
+    # $1=size $2=value $3=unit $4=arrow $5=value advance $6=unit advance
+    local sz="$1" usz
+    FIELD_W=$(( sz * ${5:-0} / 1000 ))
+    if [ -n "$3" ]; then
+        if [ "$3" = "°" ]; then usz=$(( sz * 34 / 100 ))
+        else                    usz=$(( sz * 42 / 100 ))
+        fi
+        [ "$usz" -lt 9 ] && usz=9
+        case "$3" in '°'|'%') ;; *) FIELD_W=$(( FIELD_W + sz / 12 )) ;; esac
+        FIELD_W=$(( FIELD_W + usz * ${6:-0} / 1000 ))
+    fi
+    if [ -n "$4" ]; then
+        usz=$(( sz * 50 / 100 )); [ "$usz" -lt 10 ] && usz=10
+        FIELD_W=$(( FIELD_W + sz / 10 + usz * 62 / 100 ))
+    fi
+}
+
 # ── The tendency arrow, drawn rather than typeset ────────────────────────────
 # THE PANEL'S FONTS HAVE NO ARROWS. Bookerly, Caecilia and the rest of what a
 # Kindle ships are book faces: U+2191..U+2198 are not in them, and FBInk draws
@@ -3232,13 +3254,25 @@ draw_zones() {
 
     local lx="${COL_L_X:-18}" rx="${COL_R_X:-318}" rw="${COL_R_W:-264}"
     local lab_sz="${GROUP_LAB_SZ:-12}"
-    local z val unit lab arrow bold vadv uadv ink n i cx cw vsz y
+    local z val unit lab arrow bold vadv uadv ink n i cx cw vsz y ladv lcx vcx
 
     # ── Left column: the outdoor headline ───────────────────────────────────
     draw_text_reg "$lx" "${TOP_Y:-20}" "$lab_sz" "GRAY7" "$Z_GROUP_OUT"
 
-    local hero_sz="${HERO_SZ:-84}" hero_y="${HERO_Y:-38}"
-    draw_field "$lx" "$hero_y" "$hero_sz" "${Z_HERO_BOLD:-0}" \
+    local hero_sz="${HERO_SZ:-84}" hero_y="${HERO_Y:-38}" hx="$lx" sx0="$lx"
+    # NOTHING BESIDE IT, SO IT IS CENTRED in the column, and the line under it
+    # with it — as the page's .head.ctr and .sub.ctr. The widths are the
+    # collector's; an older one sends none and both stay at the left edge.
+    if [ -z "${Z_BIG_VALUE:-}" ]; then
+        field_w "$hero_sz" "$Z_HERO_VALUE" "$Z_HERO_UNIT" "$Z_HERO_ARROW" \
+                "${Z_HERO_VADVW:-0}" "${Z_HERO_UADVW:-0}"
+        [ "${Z_HERO_VADVW:-0}" -gt 0 ] 2>/dev/null && \
+            centre_in "$lx" "${COL_L_W:-270}" "$FIELD_W" && hx="$CENTRE_X"
+        centre_in "$lx" "${COL_L_W:-270}" \
+                  "$(( ${SUB_SZ:-14} * ${Z_SUB_ADVW:-0} / 1000 ))"
+        sx0="$CENTRE_X"
+    fi
+    draw_field "$hx" "$hero_y" "$hero_sz" "${Z_HERO_BOLD:-0}" \
                "$Z_HERO_VALUE" "$Z_HERO_UNIT" "$Z_HERO_ARROW" \
                "${Z_HERO_VADVW:-0}" "${Z_HERO_UADVW:-0}" "${Z_HERO_INK:-BLACK}"
 
@@ -3260,7 +3294,7 @@ draw_zones() {
     # The 24 h low-to-high and the age, composed by the collector so that the
     # wording, the unit and the rounding are the page's and not this script's.
     [ -n "${Z_SUB:-}" ] && \
-        draw_text_reg "$lx" "${SUB_Y:-128}" "${SUB_SZ:-14}" "GRAY7" "$Z_SUB"
+        draw_text_reg "$sx0" "${SUB_Y:-128}" "${SUB_SZ:-14}" "GRAY7" "$Z_SUB"
 
     # ── Left column: the grid ───────────────────────────────────────────────
     # GRID_ROWS says how many cells are on each row; each row then divides its
@@ -3285,8 +3319,22 @@ draw_zones() {
             eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD; ink=\${Z_${z}_INK:-BLACK}"
             eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
             cx=$(( lx + gi * gcw ))
-            draw_text_reg "$cx" "$gy" "${GRID_LAB_SZ:-10}" "GRAY7" "$lab"
-            draw_field "$cx" "$(( gy + ${GRID_LAB_SZ:-10} + 4 ))" "$gvsz" \
+            # A row of one is centred, caption and value each on their own —
+            # the page's .grid td.c1. Widths of 0 (an older collector) leave
+            # both at the cell's left edge.
+            lcx="$cx"; vcx="$cx"
+            if [ "$gcols" = "1" ]; then
+                eval "ladv=\${Z_${z}_LADVW:-0}"
+                centre_in "$cx" "$gcw" "$(( ${GRID_LAB_SZ:-10} * ladv / 1000 ))"
+                lcx="$CENTRE_X"
+                if [ -n "$val" ] && [ "$vadv" -gt 0 ] 2>/dev/null; then
+                    field_w "$gvsz" "$val" "$unit" "$arrow" "$vadv" "$uadv"
+                    centre_in "$cx" "$gcw" "$FIELD_W"
+                    vcx="$CENTRE_X"
+                fi
+            fi
+            draw_text_reg "$lcx" "$gy" "${GRID_LAB_SZ:-10}" "GRAY7" "$lab"
+            draw_field "$vcx" "$(( gy + ${GRID_LAB_SZ:-10} + 4 ))" "$gvsz" \
                        "$bold" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$ink"
             gi=$((gi + 1))
         done

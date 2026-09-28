@@ -1114,12 +1114,15 @@ check "$?" "a layout that moved asks for a full repaint"
   GRID_ZONES="PRES DEW"
   reset_log
   draw_zones >/dev/null 2>&1
-  # Both values at the column's left edge, at the one size, on two lines.
+  # Both values at the one size, on two lines — and, each being a row of
+  # one, centred in the column rather than at its left edge.
   px=$(px_of "$GRID_VAL_SZ")
+  n=$(grep -c -- "px=$px,left=" "$FBINK_LOG")
+  [ "$n" -eq 2 ] || { echo "grid values at the grid's size: $n" >&2; exit 2; }
   n=$(grep -c -- "px=$px,left=${COL_L_X:-18}," "$FBINK_LOG")
-  [ "$n" -eq 2 ] || { echo "grid values at the left edge: $n" >&2; exit 2; }
+  [ "$n" -eq 0 ] || { echo "grid values at the left edge: $n" >&2; exit 3; }
   exit 0 )
-check "$?" "two readings the layout stacks are drawn one under the other"
+check "$?" "two readings the layout stacks are drawn one under the other, centred"
 
 # Old script, new collector: the file's own GRID_ROWS is still sent for it.
 grep -q 'GRID_ROWS=' "$FIXTURE"

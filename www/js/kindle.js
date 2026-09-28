@@ -518,7 +518,7 @@ function kdFlowOutdoor(inp, bot, f) {
   }
 }
 
-function kdFlowIndoor(inp, bot, allowStack, f) {
+function kdFlowIndoor(inp, bot, f) {
   var K = KDF, i;
   var air = Math.max(0, f.grow - 1000), W = f.inW - 12;
   f.inLabY = f.inRuleY + 10 + kdQ(air * 4, K.GROW_MAX - 1000);
@@ -533,27 +533,14 @@ function kdFlowIndoor(inp, bot, allowStack, f) {
                      : kdQ((W - K.CELL_PAD * m) * 1000, a1 + kdQ(others * 6, 10));
     s1 = Math.min(s1, ah, icap);
     s1 = Math.max(s1, Math.min(52, ah));
-    while (m > 1 && s1 > 40 && kdFlowInNeed(s1, a1, inp.inAdv, m) > W) s1--;
-    var s1s = 0;
-    if (m >= 2 && allowStack) {
-      s1s = kdQ((W - K.CELL_PAD) * 1000, a1);
-      var s2 = kdQ((W - K.CELL_PAD * (m - 1)) * 1000, others);
-      s1s = Math.min(s1s, kdQ(s2 * 10, 6), kdQ((ah - 14 - f.labSz) * 10, 16), icap);
-    }
-    if (s1s > s1 + 2) {
-      f.inStack = true; f.inValSz1 = s1s; f.inValSz = kdQ(s1s * 6, 10);
-      var hh = f.inValSz1 + 10 + f.labSz + 4 + f.inValSz;
-      f.inValY = top + Math.max(0, kdQ(ah - hh, 2));
-      f.inVal2Y = f.inValY + f.inValSz1 + 10 + f.labSz + 4;
-    } else {
-      f.inValSz1 = s1; f.inValSz = kdQ(s1 * 6, 10);
-      f.inValY = top + Math.max(0, kdQ(ah - s1, 2));
-      f.inVal2Y = f.inValY + f.inValSz1 - f.inValSz;
-      if (m > 1) {
-        var need1 = kdQ(f.inValSz1 * a1, 1000) + K.CELL_PAD;
-        var needO = kdFlowInNeed(f.inValSz1, a1, inp.inAdv, m) - need1;
-        f.inW1Pm = kdQ(need1 * 1000, Math.max(1, need1 + needO));
-      }
+    while (m > 1 && s1 > 30 && kdFlowInNeed(s1, a1, inp.inAdv, m) > W) s1--;
+    f.inValSz1 = s1; f.inValSz = kdQ(s1 * 6, 10);
+    f.inValY = top + Math.max(0, kdQ(ah - s1, 2));
+    f.inVal2Y = f.inValY + f.inValSz1 - f.inValSz;
+    if (m > 1) {
+      var need1 = kdQ(f.inValSz1 * a1, 1000) + K.CELL_PAD;
+      var needO = kdFlowInNeed(f.inValSz1, a1, inp.inAdv, m) - need1;
+      f.inW1Pm = kdQ(need1 * 1000, Math.max(1, need1 + needO));
     }
   }
 }
@@ -570,7 +557,7 @@ function kdFlowTop(inp, T, f) {
   kdFlowClockSizes(Math.min(g, K.GROW_CLOCK), f);
   f.inRuleY = inp.clock ? K.CL_Y + f.clH + 1
                         : K.TOP_Y - 10 - kdQ(Math.max(0, g - 1000) * 4, K.GROW_MAX - 1000);
-  kdFlowIndoor(inp, bot, true, f);
+  kdFlowIndoor(inp, bot, f);
   f.sepH = f.colLW > K.COL_L ? 0 : T - 10;
   return f;
 }
@@ -621,7 +608,7 @@ function kdFlowLand(inp, footY, f) {
   if (pick < 0) pick = bestG;
   kdFlowType(pick, f);
   kdFlowOutdoor(inp, outBot, f);
-  kdFlowIndoor(inp, midBot - 8, false, f);
+  kdFlowIndoor(inp, midBot - 8, f);
   f.rule2X = K.LAND_SEP + 10; f.rule2W = 0; f.labChartX = f.rule2X;
   f.grX = K.LAND_SEP + 12; f.grW = X1 - 2 - f.grX;
   f.keyInX = f.grX + f.grW - 100; f.keyBand = false;
@@ -821,11 +808,15 @@ function kdRenderPreview() {
   // ── Left column: the headline, its line, its grid ──
   h += kdT(X, L.groupY, L.labSz, kdGroups.out || kdGroupPh.out, { ink:"#777777", bold:capB });
   z = kdSlot("hero"); v = kdPvValue(z);
-  h += kdT(X, L.heroY, L.heroSz, v || "—",
-           { bold:(z.flags & kdFlags.bold) || (bold & 0x0001), ink:kdPvInk(z.ink) });
-  x = X + kdTw(v || "—", L.heroSz);
   u = kdPvUnit(z);
   usz = Math.round(L.heroSz * 0.34);
+  // Nothing beside the headline: it is centred in its column, and the line
+  // under it with it — as the page and the panel draw it.
+  var zb = kdSlot("big"), lone = !((show & 0x0001) && kdPvValue(zb));
+  var hx = lone ? X + Math.max(0, kdQ(L.colLW - kdTw(v || "—", L.heroSz) - kdTw(u, usz), 2)) : X;
+  h += kdT(hx, L.heroY, L.heroSz, v || "—",
+           { bold:(z.flags & kdFlags.bold) || (bold & 0x0001), ink:kdPvInk(z.ink) });
+  x = hx + kdTw(v || "—", L.heroSz);
   // The unit and the second value hang off the headline's size rather than
   // carrying coordinates of their own: they sit on its baseline, and a table
   // with three numbers that must move together is a table two of them can be
@@ -848,7 +839,9 @@ function kdRenderPreview() {
     }
   }
   if (show & 0x0008) {
-    h += kdT(X, L.subY, L.subSz, "-2.4 to 15.3°  ·  3 min", { ink:"#777777" });
+    var sub = "-2.4 to 15.3°  ·  3 min";
+    h += kdT(lone ? X + Math.max(0, kdQ(L.colLW - kdTw(sub, L.subSz), 2)) : X,
+             L.subY, L.subSz, sub, { ink:"#777777" });
   }
 
   if (L.grid.length) {
@@ -864,12 +857,18 @@ function kdRenderPreview() {
       var vs = L.gridValSz;
       for (i = 0; i < rows[r].length; i++) {
         z = kdSlot(rows[r][i]); x = X + i * cw; v = kdPvValue(z);
-        h += kdT(x, gy, L.labSz, kdPvCaption(z), { ink:"#777777", bold:capB });
+        u = kdPvUnit(z);
+        usz = Math.round(vs * (u === "°" ? 0.34 : 0.42));
+        // A row of one is centred in the column, caption and value each.
+        var cap = kdPvCaption(z), lx = x;
+        if (rows[r].length === 1) {
+          lx = x + Math.max(0, kdQ(cw - kdTw(cap, L.labSz), 2));
+          x += Math.max(0, kdQ(cw - kdTw(v, vs) - kdTw(u, usz), 2));
+        }
+        h += kdT(lx, gy, L.labSz, cap, { ink:"#777777", bold:capB });
         h += kdT(x, gy + L.labSz + 6, vs, v,
                  { bold:(z.flags & kdFlags.bold) || (bold & 0x0004), ink:kdPvInk(z.ink) });
-        u = kdPvUnit(z);
         ux = x + kdTw(v, vs) + (u === "°" || u === "%" ? 0 : 3);
-        usz = Math.round(vs * (u === "°" ? 0.34 : 0.42));
         var uy = gy + L.labSz + 10;
         h += kdT(ux, uy, usz, u, { ink:"#444444", bold:unitB });
         if ((z.flags & kdFlags.trend) && (show & 0x0004) && z.metric === "pressure") {

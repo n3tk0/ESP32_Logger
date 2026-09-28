@@ -1170,6 +1170,8 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
     kdShellVarUpper(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
 
     kdShellVar(s, "Z_SUB", rd.sub);
+    // Its width, for centring it under a headline with nothing beside it.
+    s->printf("Z_SUB_ADVW=%u\n", kdAdvanceMille(rd.sub));
 
     char key[24];
     for (int i = 0; i < KZ_COUNT; i++) {
@@ -1208,6 +1210,13 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         // FBInk will not say what that width was.
         s->printf("Z_%s_VADVW=%u\n", up, kdAdvanceMille(res[i].text));
         s->printf("Z_%s_UADVW=%u\n", up, kdAdvanceMille(res[i].unit));
+        // The caption as the panel prints it, upper case, for a grid row of
+        // one, which is centred.
+        {
+            char lup[48];
+            kdUpperUtf8(lup, sizeof(lup), res[i].label);
+            s->printf("Z_%s_LADVW=%u\n", up, kdAdvanceMille(lup));
+        }
 
         // The headline needs one more: the whole of it, unit included, because
         // the slash and the second value go after all of it rather than after
@@ -1329,17 +1338,22 @@ static void appendOutdoor(String& p, const KindleConfig& skin, const KdRender& r
     // on this heading — where it has always been.
     if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive())
         appendBatteryBadge(p);
-    p += F("</div><div class=\"head\">");
+    // NOTHING BESIDE THE HEADLINE, AND IT IS CENTRED: a lone number hard
+    // against the left edge left the rest of its column white. The line under
+    // it goes with it, so the two still read as one block.
+    const bool big = (skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() &&
+                     res[KZ_BIG].ok;
+    p += big ? F("</div><div class=\"head\">") : F("</div><div class=\"head ctr\">");
 
     appendValue(p, res[KZ_HERO], zones.z[KZ_HERO], "v1");
-    if ((skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() && res[KZ_BIG].ok) {
+    if (big) {
         p += F("<span class=\"slash\">/</span>");
         appendValue(p, res[KZ_BIG], zones.z[KZ_BIG], "v2");
     }
     p += F("</div>");
 
     if (rd.sub[0]) {
-        p += F("<div class=\"sub\">");
+        p += big ? F("<div class=\"sub\">") : F("<div class=\"sub ctr\">");
         appendEscaped(p, rd.sub);
         p += F("</div>");
     }
@@ -1358,7 +1372,8 @@ static void appendOutdoor(String& p, const KindleConfig& skin, const KdRender& r
             const int cols = flow.gridRows[r];
             p += F("<table class=\"grid\"><tr>");
             for (int c = 0; c < cols && at < n; c++, at++) {
-                p += F("<td width=\"");
+                // A row of one is centred in the column, as the headline is.
+                p += (cols == 1) ? F("<td class=\"c1\" width=\"") : F("<td width=\"");
                 p += (int)(100 / cols);
                 p += F("%\">");
                 appendCell(p, res[used[at]], zones.z[used[at]], "gv");
@@ -2324,6 +2339,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S("px}")
     KD_S(".grid td,.inrow td{padding:0 ")     KD_N(10)
     KD_S("px 0 0;vertical-align:top}")
+    // A headline with nothing beside it, and a grid row of one, are centred
+    // in their column — see appendOutdoor().
+    KD_S(".ctr{text-align:center}.grid td.c1{text-align:center;padding:0}")
     KD_S(".cv{line-height:1.0;white-space:nowrap;overflow:hidden;letter-spacing:-")
     KD_N(1)
     KD_S("px}")
