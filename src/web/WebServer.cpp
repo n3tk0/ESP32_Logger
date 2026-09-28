@@ -2975,6 +2975,15 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             r->send(*activeFS, path, getMime(path));
             return;
         }
+        // AN API ROUTE THIS BUILD DOES NOT HAVE IS A 404, not the SPA shell.
+        // /api/espnow/status in a build without ESP-NOW used to come back as
+        // 200 index.html, which a caller asking "is this here?" read as a
+        // broken answer rather than "no" — and the network handover refused
+        // to save on a collector that simply has no nodes.
+        if (path.startsWith("/api/")) {
+            r->send(404, "application/json", "{\"ok\":false,\"error\":\"not found\"}");
+            return;
+        }
         if (r->method() == HTTP_GET && path.indexOf('.') < 0) {
             if (littleFsAvailable && LittleFS.exists("/www/index.html")) {
                 r->send(LittleFS, "/www/index.html", "text/html");
