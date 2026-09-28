@@ -792,6 +792,8 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     kd["fbinkResW"]       = config.kindle.fbinkResW;
     kd["outdoorSensor"]   = config.kindle.outdoorSensor;
     kd["indoorSensor"]    = config.kindle.indoorSensor;
+    kd["rotation"]        = config.kindle.rotation;
+    kd["clockOff"]        = config.kindle.clockOff;
 
     // ── Network ───────────────────────────────────────────────────────────
     JsonObject net = doc["network"].to<JsonObject>();
@@ -2519,6 +2521,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     SAFE_STRNCPY(config.kindle.outdoorSensor, kd["outdoorSensor"], sizeof(config.kindle.outdoorSensor));
                 if (kd["indoorSensor"].is<const char*>())
                     SAFE_STRNCPY(config.kindle.indoorSensor, kd["indoorSensor"], sizeof(config.kindle.indoorSensor));
+                if (kd["rotation"].is<int>())
+                    config.kindle.rotation = (uint8_t)kd["rotation"].as<int>();
+                if (kd["clockOff"].is<int>())
+                    config.kindle.clockOff = (uint8_t)kd["clockOff"].as<int>();
                 // An imported file is not a form: it can carry anything,
                 // including values written by a firmware that had one more
                 // clock style than this one. Clamped here so the renderer

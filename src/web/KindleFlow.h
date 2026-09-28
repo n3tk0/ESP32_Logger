@@ -229,6 +229,8 @@ struct KdFlowIn {
     bool    chart    = true;    ///< KSHOW_CHART
     bool    forecast = true;    ///< a forecast band is drawn (not standalone)
     bool    week     = true;    ///< KSHOW_WEEK
+    bool    clock    = true;    ///< KSHOW_CLOCK
+    bool    land     = false;   ///< the landscape page: KROT_90 or KROT_270
     bool    sub      = true;    ///< the line under the headline has something in it
     uint8_t nGrid    = 0;       ///< grid places with a reading, 0..6
     uint16_t gridAdv[6] = {0, 0, 0, 0, 0, 0};   ///< kdFlowWorstAdvance() of each
@@ -265,11 +267,38 @@ struct KdFlow {
     int16_t sepH;            ///< the hairline between the columns
 
     // ── The sections under it ──
-    bool    chart, forecast, week;
+    bool    chart, forecast, week, clock;
     int16_t rule2Y;          ///< the chart's rule; == rule3Y when there is no chart
     int16_t grY, grH;        ///< the chart image
     int16_t rule3Y;          ///< where the chart ends and the forecast (or the week) begins
     int16_t wkRuleY;         ///< the week strip's rule, or KDF_FOOT_Y without one
+
+    // ── Across ──
+    // Everything above is a height, and on the upright page that is all that
+    // moves: every x is the layout file's. The landscape page moves things
+    // sideways too — the chart beside the readings, the week strip beside the
+    // clock — so these carry the x of everything, on both pages; on the
+    // upright one they are exactly the file's numbers.
+    bool    land;            ///< the landscape page, 800 x 600
+    int16_t pageW, pageH;    ///< 600 x 800, or 800 x 600
+    int16_t groupY;          ///< the outdoor heading (the file's TOP_Y)
+    int16_t colLX, colLW;    ///< the outdoor column
+    int16_t inX, inW;        ///< the indoor row's column
+    int16_t sepX, sepY;      ///< the hairline between the columns, from its top
+    int16_t clX, clY, clW;   ///< the clock's rectangle
+    int16_t topRowY;         ///< landscape: the rule under the clock and the week; 0 upright
+    int16_t rule2X, rule2W;  ///< the rule over the chart; 0 wide when there is none
+    int16_t labChartX;
+    int16_t grX, grW;        ///< the chart image
+    int16_t keyInX;          ///< where the key's indoor entry starts
+    bool    keyBand;         ///< whether the key has room for "shaded band = ..."
+    uint8_t olN;             ///< outlook columns in the forecast band: 3, or 5
+    int16_t olX[5];
+    int16_t wkX, wkY, wkCellW, wkHdgY;
+    bool    wkRule;          ///< whether the week strip has a hairline of its own
+    int16_t footY;           ///< the footer's rule
+    int16_t statX;           ///< where the footer's status line starts
+    int16_t battX, battY;    ///< the low-battery badge
 };
 
 static inline int kdfMin(int a, int b) { return a < b ? a : b; }
@@ -302,30 +331,42 @@ static inline int kdFlowInNeed(int s1, int a1, const uint16_t* adv, int m) {
     return w;
 }
 
-static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
-    f.topBot = (int16_t)(KDF_TOP_Y + T);
-    int g = 1000 + (KDF_GROW_MAX - 1000) * (T - KDF_TOP_MIN) / (KDF_TOP_GROWN - KDF_TOP_MIN);
-    g = kdfMax(1000, kdfMin(KDF_GROW_MAX, g));
-    f.grow = (uint16_t)g;
-
-    // ── The headline and the line under it ──
+/// The headline's sizes at a growth of `g` thousandths. Below 1000 only on the
+/// landscape page, where the readings share their height with the indoor row.
+static inline void kdFlowType(int g, KdFlow& f) {
+    f.grow    = (uint16_t)g;
     f.labSz   = (uint8_t)(g >= KDF_GROW_BIG ? 15 : 14);
     f.heroSz  = (uint8_t)kdfScale(88, g);
     f.bigSz   = (uint8_t)kdfScale(44, kdfMin(g, KDF_GROW_BIG));
     f.headGap = (uint8_t)kdfScale(8, g);
     f.slashW  = (uint8_t)kdfScale(22, g);
     f.subSz   = (uint8_t)kdfScale(17, kdfMin(g, KDF_GROW_SUB));
-    f.heroY   = (int16_t)KDF_HERO_Y;
+}
+
+/// The clock at a growth of `gc` thousandths.
+static inline void kdFlowClockSizes(int gc, KdFlow& f) {
+    f.clGrow     = (uint16_t)gc;
+    f.clSize     = (uint8_t)(96 * gc / 1000);
+    f.clBoxed    = (uint8_t)(84 * gc / 1000);
+    f.clRuled    = (uint8_t)(72 * gc / 1000);
+    f.clRuledPad = (uint8_t)(16 * gc / 1000);
+    f.clDated    = (uint8_t)(66 * gc / 1000);
+    f.clDateSz   = (uint8_t)(15 * gc / 1000);
+    f.clDateGap  = (uint8_t)(6 * gc / 1000);
+    f.clH        = (int16_t)(f.clSize + 1);
+}
+
+/// The outdoor column under f.heroY: the line under the headline and the grid,
+/// which ends at `bot`. Sized to f.colLW across.
+static inline void kdFlowOutdoor(const KdFlowIn& in, int bot, KdFlow& f) {
     // The headline's growth, as air: the standalone page put 14 px more under
     // the headline and 6 more under the line below it than the ordinary one.
-    const int air = g - 1000;
+    const int air = kdfMax(0, f.grow - 1000);
     f.subY    = (int16_t)(f.heroY + f.heroSz + 2 + air * 14 / (KDF_GROW_MAX - 1000));
     const int gridTop = in.sub
         ? f.subY + f.subSz + 13 + air * 6 / (KDF_GROW_MAX - 1000)
         : f.subY;
-    const int bot = f.topBot - 8;
 
-    // ── The grid ──
     f.gridNRows = 0;
     for (int i = 0; i < 6; i++) f.gridRows[i] = 0;
     f.gridY = (int16_t)gridTop;
@@ -344,7 +385,7 @@ static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
             int v = pitch - f.labSz - 4 - KDF_GRID_GAP;
             int at = 0;
             for (int k = 0; k < r; k++) {
-                const int cellW = KDF_COL_L / rows[k] - KDF_CELL_PAD;
+                const int cellW = f.colLW / rows[k] - KDF_CELL_PAD;
                 for (int c = 0; c < rows[k]; c++, at++) {
                     const int adv = in.gridAdv[at] ? in.gridAdv[at] : 1000;
                     v = kdfMin(v, cellW * 1000 / adv);
@@ -370,21 +411,14 @@ static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
         const int content = f.labSz + 4 + f.gridValSz;
         f.gridY = (int16_t)(gridTop + kdfMax(0, (f.gridRowH - content) / 2));
     }
+}
 
-    // ── The clock ──
-    const int gc = kdfMin(g, KDF_GROW_CLOCK);
-    f.clGrow     = (uint16_t)gc;
-    f.clSize     = (uint8_t)(96 * gc / 1000);
-    f.clBoxed    = (uint8_t)(84 * gc / 1000);
-    f.clRuled    = (uint8_t)(72 * gc / 1000);
-    f.clRuledPad = (uint8_t)(16 * gc / 1000);
-    f.clDated    = (uint8_t)(66 * gc / 1000);
-    f.clDateSz   = (uint8_t)(15 * gc / 1000);
-    f.clDateGap  = (uint8_t)(6 * gc / 1000);
-    f.clH        = (int16_t)(f.clSize + 1);
-
-    // ── The indoor row ──
-    f.inRuleY = (int16_t)(KDF_CL_Y + f.clH + 1);
+/// The indoor row under f.inRuleY, ending at `bot`, f.inW across. `allowStack`:
+/// whether the first field may take a line of its own.
+static inline void kdFlowIndoor(const KdFlowIn& in, int bot, bool allowStack, KdFlow& f) {
+    const int air = kdfMax(0, f.grow - 1000);
+    // The narrower of the two renderers' widths — see KDF_COL_R.
+    const int W = f.inW - 12;
     f.inLabY  = (int16_t)(f.inRuleY + 10 + air * 4 / (KDF_GROW_MAX - 1000));
     f.inValSz1 = f.inValSz = 0;
     f.inW1Pm = 1000;
@@ -402,8 +436,8 @@ static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
         // All on one line, the first set larger and the others at six tenths
         // of it, hanging their captions above themselves.
         int s1;
-        if (m == 1) s1 = (KDF_COL_R - KDF_CELL_PAD) * 1000 / a1;
-        else        s1 = (KDF_COL_R - KDF_CELL_PAD * m) * 1000 / (a1 + others * 6 / 10);
+        if (m == 1) s1 = (W - KDF_CELL_PAD) * 1000 / a1;
+        else        s1 = (W - KDF_CELL_PAD * m) * 1000 / (a1 + others * 6 / 10);
         s1 = kdfMin(s1, areaH);
         s1 = kdfMin(s1, cap);
         // The ordinary page's 52, which was measured to fit.
@@ -412,13 +446,13 @@ static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
         // capitals, and that is wider than a short figure: the first field
         // gives up size until they all have room for theirs.
         while (m > 1 && s1 > 40 &&
-               kdFlowInNeed(s1, a1, in.inAdv, m) > KDF_COL_R) s1--;
+               kdFlowInNeed(s1, a1, in.inAdv, m) > W) s1--;
 
         // Or the first on a line of its own and the others under it.
         int s1s = 0;
-        if (m >= 2) {
-            s1s = (KDF_COL_R - KDF_CELL_PAD) * 1000 / a1;
-            const int s2 = (KDF_COL_R - KDF_CELL_PAD * (m - 1)) * 1000 / others;
+        if (m >= 2 && allowStack) {
+            s1s = (W - KDF_CELL_PAD) * 1000 / a1;
+            const int s2 = (W - KDF_CELL_PAD * (m - 1)) * 1000 / others;
             s1s = kdfMin(s1s, s2 * 10 / 6);
             s1s = kdfMin(s1s, (areaH - 14 - f.labSz) * 10 / 16);
             s1s = kdfMin(s1s, cap);
@@ -446,8 +480,25 @@ static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
             }
         }
     }
+}
 
-    f.sepH = (int16_t)(T - 10);
+/// The upright top block, laid out for a height of T.
+static inline void kdFlowTop(const KdFlowIn& in, int T, KdFlow& f) {
+    f.topBot = (int16_t)(KDF_TOP_Y + T);
+    int g = 1000 + (KDF_GROW_MAX - 1000) * (T - KDF_TOP_MIN) / (KDF_TOP_GROWN - KDF_TOP_MIN);
+    g = kdfMax(1000, kdfMin(KDF_GROW_MAX, g));
+    kdFlowType(g, f);
+    f.heroY = (int16_t)KDF_HERO_Y;
+    const int bot = f.topBot - 8;
+    kdFlowOutdoor(in, bot, f);
+    kdFlowClockSizes(kdfMin(g, KDF_GROW_CLOCK), f);
+    // Without the clock the indoor row moves up to the outdoor heading's line.
+    f.inRuleY = (int16_t)(in.clock ? KDF_CL_Y + f.clH + 1
+                                   : KDF_TOP_Y - 10 - kdfMax(0, g - 1000) * 4 / (KDF_GROW_MAX - 1000));
+    kdFlowIndoor(in, bot, true, f);
+    // Nothing in the right column: the outdoor one has the page's width, and
+    // there is nothing to separate it from.
+    f.sepH = (int16_t)(f.colLW > KDF_COL_L ? 0 : T - 10);
 }
 
 /// Whether two layouts set everything in the top block the same.
@@ -458,16 +509,166 @@ static inline bool kdFlowSameType(const KdFlow& a, const KdFlow& b) {
     return true;
 }
 
-/// The whole page.
-static inline KdFlow kdFlowCompute(const KdFlowIn& in) {
+// ---------------------------------------------------------------------------
+// The landscape page, 800 x 600
+// ---------------------------------------------------------------------------
+// The upright page's sections turned into rows and columns:
+//
+//   clock          | the week strip, seven days across         (the top row)
+//   outdoor        | the chart, the height of the middle band
+//   indoor, 1 row  |
+//   forecast now   | five outlook columns                       (the band)
+//   the footer
+//
+// Heights are the upright page's where they are the same thing (the band 124,
+// the footer 36); what is left between the top row and the band is split
+// across, not stacked, so here the readings do not trade height with the chart
+// — they trade it with the indoor row, and their size is the most that fits.
+static const int KDF_LAND_W      = 800;
+static const int KDF_LAND_H      = 600;
+static const int KDF_LAND_FOOT_Y = 564;   ///< the footer: 36 px, as upright
+static const int KDF_LAND_X1     = 782;   ///< the right margin
+static const int KDF_LAND_COL    = 300;   ///< the readings' column beside the chart
+static const int KDF_LAND_SEP    = 328;
+static const int KDF_LAND_CLOCK  = 840;   ///< the clock's growth: 96 -> 80
+static const int KDF_LAND_ROW_W  = 77;    ///< the week strip's own height
+static const int KDF_IN_H        = 102;   ///< the indoor row, rule to rule
+static const int KDF_LAND_GROW_MIN = 640;
+static const int KDF_OL_PITCH    = 92;    ///< one outlook column to the next
+
+/// The landscape page with its footer at `footY` — KDF_LAND_FOOT_Y for the
+/// panel, less the browser's extra for the page.
+static inline void kdFlowLand(const KdFlowIn& in, int footY, KdFlow& f) {
+    const int X0 = 18, X1 = KDF_LAND_X1;
+    f.land  = true;
+    f.pageW = (int16_t)KDF_LAND_W;
+    f.pageH = (int16_t)KDF_LAND_H;
+    f.footY = (int16_t)footY;
+    f.statX = (int16_t)(KDF_LAND_W - 204);
+
+    // ── The top row: the clock, and the week strip beside it ──
+    kdFlowClockSizes(KDF_LAND_CLOCK, f);
+    const bool row  = in.clock || in.week;
+    const int rowH  = in.clock ? f.clH + 7 : KDF_LAND_ROW_W + 4;
+    const int rowBot = KDF_TOP_Y + rowH;
+    f.topRowY = (int16_t)(row ? rowBot : 0);
+    f.clY     = (int16_t)(KDF_TOP_Y + 4);
+    f.clW     = (int16_t)KDF_COL_R + 12;
+    // Alone, the clock stands in the middle of the row.
+    f.clX     = (int16_t)(in.week ? X0 : (KDF_LAND_W - f.clW) / 2);
+    f.wkX     = (int16_t)(in.clock ? X0 + KDF_LAND_COL : X0);
+    f.wkCellW = (int16_t)((X1 - f.wkX) / 7);
+    f.wkHdgY  = (int16_t)(KDF_TOP_Y + (rowH - KDF_LAND_ROW_W) / 2);
+    f.wkY     = (int16_t)(f.wkHdgY + 19);
+    f.wkRule  = false;
+    f.wkRuleY = f.footY;
+
+    // ── The middle band ──
+    const int midTop = row ? rowBot + 8 : KDF_TOP_Y;
+    f.rule3Y = (int16_t)(in.forecast ? footY - KDF_FC_H : footY);
+    const int midBot = f.rule3Y;
+    f.topBot = (int16_t)midBot;
+    f.colLX  = (int16_t)X0;
+    f.colLW  = (int16_t)(in.chart ? KDF_LAND_COL : X1 - X0);
+    f.sepX   = (int16_t)KDF_LAND_SEP;
+    f.sepY   = (int16_t)midTop;
+    f.sepH   = (int16_t)(in.chart ? midBot - 8 - midTop : 0);
+    f.groupY = (int16_t)midTop;
+    f.heroY  = (int16_t)(midTop + 18);
+    f.battX  = (int16_t)(f.colLX + f.colLW - 48);
+    f.battY  = (int16_t)(midTop - 2);
+    f.inX    = f.colLX;
+    f.inW    = f.colLW;
+    f.inRuleY = (int16_t)(in.nIn ? midBot - KDF_IN_H : midBot);
+
+    // The largest headline under which the grid still sets at the upright
+    // page's sizes (34, or 27 three across); if none does, the one that sets
+    // it largest.
+    const int outBot = f.inRuleY - 8;
+    const int n = in.nGrid > 6 ? 6 : in.nGrid;
+    int pick = -1, bestG = KDF_LAND_GROW_MIN, bestV = -1;
+    for (int g = KDF_GROW_MAX; g >= KDF_LAND_GROW_MIN; g -= 20) {
+        kdFlowType(g, f);
+        kdFlowOutdoor(in, outBot, f);
+        const bool ok = n ? f.gridValSz >= (f.gridRows[0] >= 3 ? 27 : 34)
+                          : f.subY + (in.sub ? f.subSz : 0) <= outBot;
+        if (ok) { pick = g; break; }
+        if (n && f.gridValSz >= bestV) { bestV = f.gridValSz; bestG = g; }
+    }
+    if (pick < 0) pick = bestG;
+    kdFlowType(pick, f);
+    kdFlowOutdoor(in, outBot, f);
+    kdFlowIndoor(in, midBot - 8, false, f);
+
+    // ── The chart, beside the readings ──
+    f.rule2X = (int16_t)(KDF_LAND_SEP + 10);
+    f.rule2W = 0;                         // the hairline is the separator
+    f.labChartX = f.rule2X;
+    f.grX    = (int16_t)(KDF_LAND_SEP + 12);
+    f.grW    = (int16_t)(X1 - 2 - f.grX);
+    f.keyInX = (int16_t)(f.grX + f.grW - 100);
+    f.keyBand = false;
+    if (in.chart) {
+        f.rule2Y = (int16_t)(midTop - 6);
+        f.grY    = (int16_t)(midTop + 20);
+        f.grH    = (int16_t)(midBot - KDF_CHART_BELOW - 4 - f.grY);
+    } else {
+        f.rule2Y = f.rule3Y;
+        f.grY = f.rule3Y;
+        f.grH = 0;
+    }
+
+    // ── The forecast band: five outlook columns ──
+    f.olN = 5;
+    for (int i = 0; i < 5; i++) f.olX[i] = (int16_t)(X0 + 308 + KDF_OL_PITCH * i);
+}
+
+/// The upright page's x, which are the layout file's.
+static inline void kdFlowUpright(const KdFlowIn& in, KdFlow& f) {
+    static const int16_t ol[3] = {320, 410, 500};
+    f.land   = false;
+    f.pageW  = 600; f.pageH = (int16_t)KDF_PAGE_H;
+    f.groupY = (int16_t)KDF_TOP_Y;
+    f.colLX  = 18;
+    f.colLW  = (int16_t)(!in.clock && !in.nIn ? 564 : KDF_COL_L);
+    f.inX = 318;  f.inW = 264;
+    f.sepX = 300; f.sepY = (int16_t)KDF_TOP_Y;
+    f.clX = 318;  f.clY = (int16_t)KDF_CL_Y; f.clW = 264;
+    f.topRowY = 0;
+    f.rule2X = 18; f.rule2W = 564;
+    f.labChartX = 18;
+    f.grX = 20;   f.grW = 560;
+    f.keyInX = 470;
+    f.keyBand = true;
+    f.olN = 3;
+    for (int i = 0; i < 5; i++) f.olX[i] = i < 3 ? ol[i] : 0;
+    f.wkX = 18;   f.wkCellW = 81;
+    f.wkRule = true;
+    f.footY = (int16_t)KDF_FOOT_Y;
+    f.statX = 396;
+    f.battX = (int16_t)(f.colLX + f.colLW - 48);
+    f.battY = 18;
+}
+
+/// The whole page. `footY` is where the landscape page's footer goes — the
+/// browser's is higher; the upright page ignores it.
+static inline KdFlow kdFlowComputeAt(const KdFlowIn& in, int footY) {
     KdFlow f;
     memset(&f, 0, sizeof(f));
     f.chart    = in.chart;
     f.forecast = in.forecast;
     f.week     = in.week;
+    f.clock    = in.clock;
+    if (in.land) {
+        kdFlowLand(in, footY, f);
+        return f;
+    }
+    kdFlowUpright(in, f);
 
     // Stacked from the bottom: the footer, the week strip, the forecast.
     f.wkRuleY = (int16_t)(in.week ? KDF_FOOT_Y - KDF_WEEK_H : KDF_FOOT_Y);
+    f.wkHdgY  = (int16_t)(f.wkRuleY + 5);
+    f.wkY     = (int16_t)(f.wkRuleY + 24);
     const int below = f.wkRuleY - (in.forecast ? KDF_FC_H : 0);   // where the chart ends
 
     // What the top block and the chart have between them.
@@ -480,7 +681,7 @@ static inline KdFlow kdFlowCompute(const KdFlowIn& in) {
         // THE READINGS FIRST, THEN THE CHART: the smallest height at which the
         // top block is already setting everything as large as it ever will.
         // Anything past that is air in the readings and chart in the chart.
-        KdFlow at;
+        KdFlow at = f;
         for (int t = KDF_TOP_MIN; t < T; t++) {
             kdFlowTop(in, t, at);
             if (kdFlowSameType(at, f)) { T = t; break; }
@@ -496,6 +697,10 @@ static inline KdFlow kdFlowCompute(const KdFlowIn& in) {
         f.grH = 0;
     }
     return f;
+}
+
+static inline KdFlow kdFlowCompute(const KdFlowIn& in) {
+    return kdFlowComputeAt(in, KDF_LAND_FOOT_Y);
 }
 
 // ---------------------------------------------------------------------------
@@ -514,7 +719,16 @@ static inline int kdFlowPanel(int v, unsigned resW) {
 /// KDF_PANEL_KEYS. The names are the layout file's, so the reader applies them
 /// by name and the file stays the description of everything that does not
 /// move.
-static const int KDF_PANEL_KEYS = 48;
+///
+/// `resW` is the panel's SHORT side — its width held upright — on either page:
+/// the landscape page is 800 x 600 design pixels on a 1448 x 1072 panel, and
+/// the scale is the same 1072 / 600 it is upright.
+///
+/// The upright page sends only heights, as it always has: its x are the layout
+/// file's, which were measured on each panel and are not all a plain scale of
+/// the 600 px file's. The landscape page sends its x too.
+static const int KDF_PANEL_BASE = 48;
+static const int KDF_PANEL_KEYS = KDF_PANEL_BASE + 42;
 static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out) {
     int n = 0;
     // Bounded: a key added below without KDF_PANEL_KEYS growing with it is
@@ -567,10 +781,57 @@ static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out)
     KDF_K("OL0_Y",        f.rule3Y + 12);
     KDF_K("OL1_Y",        f.rule3Y + 12);
     KDF_K("OL2_Y",        f.rule3Y + 12);
-    KDF_K("WK_HDG_RULE_Y", f.wkRuleY);
-    KDF_K("WK_HDG_Y",     f.wkRuleY + 5);
-    KDF_K("WK_Y",         f.wkRuleY + 24);
+    KDF_K("WK_HDG_RULE_Y", f.wkHdgY - 5);
+    KDF_K("WK_HDG_Y",     f.wkHdgY);
+    KDF_K("WK_Y",         f.wkY);
     KDF_R("FC_BAND",      f.forecast ? 1 : 0);
+
+    if (f.land) {
+        const int X1 = KDF_LAND_X1;
+        KDF_R("LAND",         1);
+        KDF_K("TOP_Y",        f.groupY);
+        KDF_K("COL_L_X",      f.colLX);
+        KDF_K("COL_L_W",      f.colLW);
+        KDF_K("COL_R_X",      f.inX);
+        KDF_K("COL_R_W",      f.inW);
+        KDF_K("SEP_X",        f.sepX);
+        KDF_K("CL_X",         f.clX);
+        KDF_K("CL_Y",         f.clY);
+        KDF_K("CL_W",         f.clW);
+        KDF_K("TOPROW_Y",     f.topRowY);
+        KDF_K("RULE2_X",      f.rule2X);
+        KDF_R("RULE2_W",      0);
+        KDF_K("LAB_CHART_X",  f.labChartX);
+        KDF_K("GR_X",         f.grX);
+        // The image's own width, which /kindle/graph.bmp rounds to 8.
+        KDF_R("GR_W",         kdFlowPanel(f.grW, resW) & ~7);
+        KDF_K("KEY_IN_X",     f.keyInX);
+        KDF_R("KEY_BAND",     f.keyBand ? 1 : 0);
+        KDF_R("OL_N",         f.olN);
+        KDF_K("OL0_X",        f.olX[0]);
+        KDF_K("OL1_X",        f.olX[1]);
+        KDF_K("OL2_X",        f.olX[2]);
+        KDF_K("OL3_X",        f.olX[3]);
+        KDF_K("OL4_X",        f.olX[4]);
+        KDF_K("OL3_Y",        f.rule3Y + 12);
+        KDF_K("OL4_Y",        f.rule3Y + 12);
+        KDF_K("RULE3_W",      X1 - 18);
+        KDF_K("WK_X",         f.wkX);
+        KDF_K("WK_HDG_X",     f.wkX);
+        KDF_K("WK_CELL_W",    f.wkCellW);
+        KDF_R("WK_HDG_RULE_W", 0);
+        KDF_K("FOOT_RULE_Y",  f.footY);
+        KDF_K("FOOT_RULE_W",  X1 - 18);
+        KDF_K("FOOT_Y",       f.footY + 8);
+        KDF_K("STAT_X",       f.statX);
+        KDF_K("STAT_Y",       f.footY + 8);
+        KDF_K("BATT_X",       f.battX);
+        KDF_K("BATT_Y",       f.battY);
+    } else if (f.colLW != KDF_COL_L) {
+        // Upright with nothing in the right column: the outdoor one is wider.
+        KDF_K("COL_L_W",      f.colLW);
+        KDF_K("BATT_X",       f.battX);
+    }
     #undef KDF_K
     #undef KDF_R
     return n > KDF_PANEL_KEYS ? -1 : n;      // -1: the table outgrew its count
@@ -606,6 +867,10 @@ static const int KDF_HTML_WEEK   = 7;
 static const int KDF_HTML_SPARE  = 14;
 
 static inline int kdFlowHtmlExtra(const KdFlow& f) {
+    // Landscape: the chart and the week strip are beside something as tall as
+    // they are, so only the bands across the page cost the browser more.
+    if (f.land)
+        return KDF_HTML_FOOT + KDF_HTML_SPARE + (f.forecast ? KDF_HTML_FC : 0);
     return KDF_HTML_FOOT + KDF_HTML_SPARE + (f.chart ? KDF_HTML_CHART : 0) +
            (f.forecast ? KDF_HTML_FC : 0) + (f.week ? KDF_HTML_WEEK : 0);
 }
@@ -613,14 +878,20 @@ static inline int kdFlowHtmlExtra(const KdFlow& f) {
 /// The layout the browser page draws. With a chart it is the panel's, less
 /// kdFlowHtmlExtra() off the chart; without one the top block is laid out
 /// again that much shorter, so what is in it is sized for the room it gets.
+///
+/// The landscape page is laid out again with its footer that much higher: its
+/// readings and its chart sit side by side, so both give the height back.
 static inline KdFlow kdFlowComputeHtml(const KdFlowIn& in) {
     KdFlow f = kdFlowCompute(in);
+    if (f.land) return kdFlowComputeAt(in, KDF_LAND_FOOT_Y - kdFlowHtmlExtra(f));
     if (!f.chart) kdFlowTop(in, f.topBot - KDF_TOP_Y - kdFlowHtmlExtra(f), f);
     return f;
 }
 
-/// The height of the top block's two cells on the browser page.
+/// The height of the top block's two cells on the browser page — on the
+/// landscape page, of the readings' cell beside the chart.
 static inline int kdFlowHtmlColH(const KdFlow& f) {
+    if (f.land) return f.topBot - f.groupY - 12;
     return f.topBot - KDF_TOP_Y - 12;
 }
 
@@ -688,10 +959,22 @@ inline void kdFlowCss(StringT& out, const KdFlow& f, uint8_t clockStyle, PxFn px
     // the layout put it.
     out += ".clock-x{font-size:";   KDF_PX(f.bigSz);
     out += ";line-height:";         KDF_PX(100 * gc / 1000); out += "}";
+    // The landscape page's rows and columns — see kdFlowLand().
+    if (f.land) {
+        out += ".trow{height:";     KDF_PX(f.topRowY - KDF_TOP_Y);
+        out += "}.trow td{vertical-align:middle;padding:0}.trow .wk{margin-top:0}";
+        if (f.clock && f.week) { out += ".tclk{width:"; KDF_PX(f.wkX - f.colLX); out += "}"; }
+        else                     out += ".tclk{text-align:center}";
+        if (f.chart) {
+            out += ".col-l{width:";      KDF_PX(f.sepX - f.colLX);
+            out += "}.top .sep{padding-left:"; KDF_PX(f.grX - f.sepX - 2); out += "}";
+        }
+    }
     #undef KDF_PX
 }
 
 /// The chart's height on the browser page, in design pixels.
 static inline int kdFlowHtmlChartH(const KdFlow& f) {
+    if (f.land) return f.chart ? f.grH : 0;     // kdFlowComputeHtml() took it off already
     return f.chart ? f.grH - kdFlowHtmlExtra(f) : 0;
 }

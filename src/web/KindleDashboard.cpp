@@ -34,7 +34,7 @@
 static void kdForecastKeysEmpty(AsyncResponseStream* s) {
     s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_ICON=-1\nFC_HIGH=\nFC_LOW=\n"
              "FC_WIND=\nFC_AGE=\"\"\n");
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 5; i++)
         s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\nFC%d_ICON=-1\n"
                   "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i, i);
 }
@@ -89,6 +89,16 @@ static bool kdStandaloneFor(AsyncWebServerRequest* req) {
         if (v == "standalone") return true;
     }
     return kdStandalone();
+}
+
+// Which way up the page is. The FBInk reader can carry its own — ROTATE= in
+// dash.conf, KUAL's Settings → Screen → Rotation — and sends it as ?rot= in
+// degrees, so the layout is worked out for the page it will actually draw; the
+// browser page takes it the same way, for a reader to bookmark.
+static uint8_t kdRotFor(AsyncWebServerRequest* req, const KindleConfig& skin) {
+    if (req && req->hasParam("rot"))
+        return kdRotFromDeg(req->getParam("rot")->value().toInt(), skin.rotation);
+    return skin.rotation;
 }
 
 // The left half of the footer. "Measured on site" is the right thing to say
@@ -312,7 +322,7 @@ static bool seriesHasData(const TrendRing::Hour* h) {
 
 static void appendChart(String& out,
                         const TrendRing::Hour* a, const TrendRing::Hour* b,
-                        bool haveA, bool haveB, int CHART_H) {
+                        bool haveA, bool haveB, int CHART_H, int chartW = CHART_W) {
     float lo =  1e9f, hi = -1e9f;
     for (int i = 0; i < TrendRing::HOURS; i++) {
         if (haveA && a[i].count) { if (a[i].min < lo) lo = a[i].min; if (a[i].max > hi) hi = a[i].max; }
@@ -330,7 +340,7 @@ static void appendChart(String& out,
     lo -= pad; hi += pad;
     const float span = hi - lo;
 
-    const int L = kdPx(40), R = CHART_W - kdPx(4), T = kdPx(10), B = CHART_H - kdPx(26);
+    const int L = kdPx(40), R = chartW - kdPx(4), T = kdPx(10), B = CHART_H - kdPx(26);
     const float dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
 
     // Local lambdas would be tidier, but this file targets a toolchain shared
@@ -338,9 +348,9 @@ static void appendChart(String& out,
     #define KD_X(i)   (L + (int)(dx * (float)(i)))
     #define KD_Y(v)   (T + (int)((hi - (v)) / span * (float)(B - T)))
 
-    out += F("<svg class=\"chart\" width=\""); out += CHART_W;
+    out += F("<svg class=\"chart\" width=\""); out += chartW;
     out += F("\" height=\""); out += CHART_H;
-    out += F("\" viewBox=\"0 0 "); out += CHART_W; out += ' '; out += CHART_H;
+    out += F("\" viewBox=\"0 0 "); out += chartW; out += ' '; out += CHART_H;
     out += F("\">");
 
     // Three-hourly verticals, drawn first so the band and lines cover them.
@@ -607,7 +617,7 @@ static void appendEscaped(String& out, const char* s) {
 // shift is (wday + 6) % 7 rather than wday itself — getting that backwards
 // puts today in the wrong column on Sundays only, which is exactly the sort
 // of bug that survives a casual look.
-static void appendWeek(String& out, uint32_t now) {
+static void appendWeek(String& out, uint32_t now, bool rule = true) {
     if (now < 1000000000u) return;
 
     const time_t t = (time_t)now;
@@ -627,14 +637,17 @@ static void appendWeek(String& out, uint32_t now) {
     const time_t monday = t - (time_t)todayIdx * 86400;
     const time_t sunday = monday + 6 * 86400;
     if (localtime_r(&monday, &mv) != nullptr && localtime_r(&sunday, &sv) != nullptr) {
-        out += F("<div class=\"rule\"></div><div class=\"sec sec-wk\">");
+        // Beside the clock on the landscape page, with nothing over it to
+        // separate it from.
+        if (rule) out += F("<div class=\"rule\"></div>");
+        out += F("<div class=\"sec sec-wk\">");
         out += kdMonth(mv.tm_mon);
         if (sv.tm_mon != mv.tm_mon) {
             out += F(" &ndash; ");
             out += kdMonth(sv.tm_mon);
         }
         out += F("</div>");
-    } else {
+    } else if (rule) {
         out += F("<div class=\"rule\"></div>");
     }
 
@@ -677,7 +690,14 @@ static void appendWeek(String& out, uint32_t now) {
 
 void handleKindleGraph(AsyncWebServerRequest* req) {
     const KindleConfig skin = config.kindle;
-    const uint16_t W = ChartBmp::imageW(skin.fbinkResW);
+    // As wide as the reader's layout left the chart, when it says: the
+    // landscape page's is beside the readings. See LY_GR_W.
+    uint16_t askW = 0;
+    if (req->hasParam("w")) {
+        const long v = req->getParam("w")->value().toInt();
+        if (v > 0 && v < 4000) askW = (uint16_t)v;
+    }
+    const uint16_t W = ChartBmp::clampW(askW, skin.fbinkResW);
     // As tall as the reader's layout left the chart, when it says — see
     // LY_GR_H in /kindle/data. A reader that does not say gets the fixed
     // image it has always been sent.
@@ -975,7 +995,7 @@ static uint16_t kdPlaceAdvance(const KindleConfig& skin, const KindleSlot& sl,
 /// the forecast band is on the page; `haveSub` whether the line under the
 /// headline has anything in it; `html` whether it is for the browser page.
 static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT],
-                        bool standalone, bool haveSub, bool html) {
+                        bool standalone, bool haveSub, bool html, bool land) {
     const KindleZones& zones = kdSlots();
     bool visible[KZ_COUNT];
     kdZoneVisibility(res, visible);
@@ -985,6 +1005,8 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     in.week     = (skin.showFlags & KSHOW_WEEK) != 0;
     in.forecast = !standalone;
     in.sub      = haveSub;
+    in.clock    = (kdShowMask(skin) & KSHOW_CLOCK) != 0;
+    in.land     = land;
 
     uint8_t used[KZ_GRID_COUNT];
     const int n = (skin.showFlags & KSHOW_GRID) ? kdGridUsed(zones, visible, used) : 0;
@@ -1011,10 +1033,10 @@ struct KdRender {
 };
 
 static void kdRenderBegin(KdRender& r, const KindleConfig& skin, uint32_t now,
-                          bool standalone, bool html) {
+                          bool standalone, bool html, bool land) {
     kdResolveZones(skin, r.res);
     kdSubLine(r.sub, sizeof(r.sub), skin, r.res[KZ_HERO], now);
-    r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html);
+    r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html, land);
 }
 
 static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
@@ -1206,20 +1228,12 @@ static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
 
 /// The whole top of the page: the outdoor headline and grid on the left, the
 /// clock and the indoor row on the right.
-static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now,
-                           const KdRender& rd) {
+/// The outdoor group: its heading, the headline, the line under it, the grid.
+static void appendOutdoor(String& p, const KindleConfig& skin, const KdRender& rd,
+                          const bool visible[KZ_COUNT]) {
     const KdResolved* res = rd.res;
     const KdFlow& flow = rd.flow;
-
-    bool visible[KZ_COUNT];
-    kdZoneVisibility(res, visible);
-
     const KindleZones& zones = kdSlots();
-
-    // A TABLE, not a grid or flexbox. The reader is a browser from 2014 with no
-    // CSS Grid and a flexbox implementation that is not worth finding the edges
-    // of; the rest of this page is tables for the same reason.
-    p += F("<table class=\"top\"><tr><td class=\"col-l\" width=\"50%\">");
 
     // ── The outdoor headline ────────────────────────────────────────────────
     p += F("<div class=\"lab\">");
@@ -1267,8 +1281,10 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now,
         }
     }
 
-    p += F("</td><td class=\"col-r sep\" width=\"50%\">");
+}
 
+/// The clock, or the line printed in its place when there is no time to show.
+static void appendClock(String& p, const KindleConfig& skin, uint32_t now) {
     // ── The clock ───────────────────────────────────────────────────────────
     // Not a reading and so not a place, but it is what the right column is for.
     // An e-ink panel on a shelf is read across a room, which is why the time is
@@ -1299,6 +1315,15 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now,
         p += F("</div>");
     }
 
+}
+
+/// The indoor row, with its hairline above it when `rule`.
+static void appendIndoor(String& p, const KdRender& rd, const bool visible[KZ_COUNT],
+                         bool rule) {
+    const KdResolved* res = rd.res;
+    const KdFlow& flow = rd.flow;
+    const KindleZones& zones = kdSlots();
+
     // ── The indoor row ──────────────────────────────────────────────────────
     // One row with the first field set larger, its share of the width what it
     // needs to be — or, when that sets it larger still, the first field on a
@@ -1308,7 +1333,11 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now,
         uint8_t used[KZ_INDOOR_COUNT];
         const int n = kdIndoorUsed(zones, visible, used);
         if (n > 0) {
-            p += F("<div class=\"inrule\"></div><div class=\"lab\">");
+            // The hairline separates the row from what is above it in the
+            // same column: the clock upright, the outdoor grid on its side.
+            // Upright with no clock there is nothing above it.
+            if (rule) p += F("<div class=\"inrule\"></div>");
+            p += F("<div class=\"lab\">");
             appendEscaped(p, kdGroupInLabel(zones));
             p += F("</div><table class=\"inrow\"><tr>");
             // THE FIRST FIELD CARRIES NO CAPTION and spends the line on type
@@ -1334,6 +1363,29 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now,
         }
     }
 
+}
+
+static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now,
+                           const KdRender& rd) {
+    bool visible[KZ_COUNT];
+    kdZoneVisibility(rd.res, visible);
+    const bool clock = rd.flow.clock;
+    // Nothing for the right column: the outdoor group has the page's width.
+    const bool wide = !clock && !rd.flow.inValSz1;
+
+    // A TABLE, not a grid or flexbox. The reader is a browser from 2014 with no
+    // CSS Grid and a flexbox implementation that is not worth finding the edges
+    // of; the rest of this page is tables for the same reason.
+    p += wide ? F("<table class=\"top\"><tr><td class=\"col-l\" width=\"100%\">")
+              : F("<table class=\"top\"><tr><td class=\"col-l\" width=\"50%\">");
+    appendOutdoor(p, skin, rd, visible);
+    if (!wide) {
+        p += F("</td><td class=\"col-r sep\" width=\"50%\">");
+        // Not a reading and so not a place, but it is what the right column
+        // is for — unless it is switched off, and the indoor row moves up.
+        if (clock) appendClock(p, skin, now);
+        appendIndoor(p, rd, visible, clock);
+    }
     p += F("</td></tr></table>");
 }
 
@@ -1367,8 +1419,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // The page's shape and everything on it, decided once for this payload:
     // the forecast keys, PAGE_MODE and the layout all have to agree on it.
     const bool standalone = kdStandaloneFor(req);
+    const uint8_t rot = kdRotFor(req, skin);
     KdRender rd;
-    kdRenderBegin(rd, skin, now, standalone, false);
+    kdRenderBegin(rd, skin, now, standalone, false, kdRotLandscape(rot));
 
     AsyncResponseStream* s = req->beginResponseStream("text/plain");
 
@@ -1577,7 +1630,11 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             forecastAgeText(age, sizeof(age), fc.fetchedAt, (uint32_t)time(nullptr));
             kdShellVar(s, "FC_AGE", age);
         }
-        for (int i = 0; i < 3; i++) {
+        // Five, whichever way up the page is: the upright page draws the first
+        // three and the landscape one all five, and a payload that carried
+        // only what this page draws would leave the reader holding the last
+        // page's fourth and fifth after it was turned.
+        for (int i = 0; i < ForecastModule::OUTLOOK_N; i++) {
             // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
             // makes. The stored string was written when the provider was last
             // polled, so on this path it was still the language that was set then:
@@ -1675,16 +1732,25 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // from the GRID_ROWS, PAGE_MODE and CH_* keys above and below, which keep
     // their old meaning for it.
     {
-        KdFlowKV kv[KDF_PANEL_KEYS];
+        // STATIC, not on the stack: the landscape page's keys took the table
+        // to ninety entries, 720 bytes, in a handler that already holds three
+        // 24-hour trend series there. The async server runs one handler at a
+        // time on its own task, so one table is all that is ever in use.
+        static KdFlowKV kv[KDF_PANEL_KEYS];
         const int nkv = kdFlowPanelKeys(rd.flow, resW, kv);
         for (int i = 0; i < nkv; i++) s->printf("LY_%s=%d\n", kv[i].key, kv[i].value);
         char rows[16];
         kdFlowRowsText(rd.flow, rows, sizeof(rows));
         kdShellVar(s, "LY_GRID_ROWS", rows);
     }
+    // The page's own size, which on its side is the panel's turned: the reader
+    // draws in those coordinates and leaves the turning to the framebuffer.
+    // The layout keys above are scaled by the SHORT side on either page.
     const uint16_t resH = (resW > 600) ? 1448 : 800;
-    s->printf("RES_W=%u\n", resW);
-    s->printf("RES_H=%u\n", resH);
+    const bool land = kdRotLandscape(rot);
+    s->printf("RES_W=%u\n", land ? resH : resW);
+    s->printf("RES_H=%u\n", land ? resW : resH);
+    s->printf("PAGE_ROT=%d\n", (int)rot * 90);
     kdShellVar(s, "LANG", KD_T("en", "bg"));
     s->printf("DECIMALS=%d\n", skin.tempDecimals);
     s->printf("CLOCK_STYLE=%d\n", skin.clockStyle);
@@ -1699,6 +1765,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // emitZones() sends an empty list for a group that is switched off.
     s->printf("SHOW_CHART=%d\n", (skin.showFlags & KSHOW_CHART) ? 1 : 0);
     s->printf("SHOW_WEEK=%d\n",  (skin.showFlags & KSHOW_WEEK)  ? 1 : 0);
+    s->printf("SHOW_CLOCK=%d\n", (kdShowMask(skin) & KSHOW_CLOCK) ? 1 : 0);
 
     // WHICH SHAPE THE PAGE IS, decided here and nowhere else. The panel has
     // the coordinates for both and no way to know which applies: only this end
@@ -1791,6 +1858,14 @@ static void handleKindleData(AsyncWebServerRequest* req) {
                 (uint16_t)kdFlowPanel(rd.flow.grH, resW), skin.fbinkResW);
             s->printf("LY_CH_T=%d\nLY_CH_B=%d\n",
                       ChartBmp::marginT(fh), ChartBmp::marginB(fh));
+            // ...and as wide: ?w=LY_GR_W on the landscape page, where the
+            // chart is beside the readings; the fixed width upright.
+            const uint16_t fw = rd.flow.land
+                ? ChartBmp::clampW((uint16_t)(kdFlowPanel(rd.flow.grW, resW) & ~7),
+                                   skin.fbinkResW)
+                : cw;
+            s->printf("LY_CH_L=%d\nLY_CH_R=%d\n",
+                      ChartBmp::marginL(fw), ChartBmp::marginR(fw));
         }
 
         // What the page prints instead of a chart when the record is empty.
@@ -1843,6 +1918,109 @@ static void kdEmitSheet(String& p, const char* sheet) {
     p += seg;
 }
 
+static void appendChartSection(String& p, const KdRender& rd,
+                               const TrendRing::Hour* tOut, const TrendRing::Hour* tIn,
+                               bool haveOut, bool haveIn, bool rule) {
+    // Beside the readings on the landscape page, where the hairline
+    // between the columns is the separator.
+    if (rule) p += F("<div class=\"rule\"></div>");
+    p += F("<div class=\"sec\">");
+    p += kdT("Last 24 hours", "Последните 24 часа");
+    p += F("</div>");
+    appendChart(p, tOut, tIn, haveOut, haveIn, kdPx(kdFlowHtmlChartH(rd.flow)),
+                kdPx(rd.flow.grW));
+    // The key names the lines the chart DREW, which is what appendChart's
+    // own lo > hi test turns on — not the series the ring is tracking.
+    const bool drewOut = haveOut && seriesHasData(tOut);
+    const bool drewIn  = haveIn  && seriesHasData(tIn);
+    if (drewOut || drewIn) {
+        // The two swatches must be drawn with the same stroke as the lines
+        // they stand for — .l-out #000/3, .l-in #777/2 dashed — or the key
+        // describes a chart the reader is not looking at.
+        p += F("<table class=\"key\"><tr><td>");
+        appendKeySwatch(p, "#000", 3, false);
+        p += ' ';
+        p += kdT("outside mean", "средно навън");
+        // Only where there is room for it: the landscape chart is narrower.
+        if (rd.flow.keyBand) {
+            p += F("<span class=\"dim\">");
+            p += kdT(", shaded band = hourly low to high",
+                     ", сивото е час. мин&ndash;макс");
+            p += F("</span>");
+        }
+        p += F("</td><td style=\"text-align:right\">");
+        appendKeySwatch(p, "#777", 2, true);
+        p += ' ';
+        p += kdT("inside", "вътре");
+        p += F("</td></tr></table>");
+    }
+}
+
+/// The landscape page, 800 x 600 — see kdFlowLand(): the clock and the week
+/// strip in a row across the top, the readings beside the chart, the forecast
+/// band with five outlook columns, and the footer.
+static void appendLandBody(String& p, const KindleConfig& skin, uint32_t now,
+                           const KdRender& rd,
+                           const TrendRing::Hour* tOut, const TrendRing::Hour* tIn,
+                           bool haveOut, bool haveIn) {
+    const KdFlow& f = rd.flow;
+    const bool week = (skin.showFlags & KSHOW_WEEK) && now > 1000000000u;
+    if (f.clock || week) {
+        p += F("<table class=\"trow\"><tr>");
+        if (f.clock) {
+            p += F("<td class=\"tclk\">");
+            appendClock(p, skin, now);
+            p += F("</td>");
+        }
+        if (week) {
+            p += F("<td class=\"twk\">");
+            appendWeek(p, now, false);
+            p += F("</td>");
+        }
+        p += F("</tr></table><div class=\"rule\"></div>");
+    }
+
+    bool visible[KZ_COUNT];
+    kdZoneVisibility(rd.res, visible);
+    p += f.chart ? F("<table class=\"top\"><tr><td class=\"col-l\">")
+                 : F("<table class=\"top\"><tr><td class=\"col-l\" width=\"100%\">");
+    appendOutdoor(p, skin, rd, visible);
+    appendIndoor(p, rd, visible, true);
+    if (f.chart) {
+        p += F("</td><td class=\"col-r sep\">");
+        appendChartSection(p, rd, tOut, tIn, haveOut, haveIn, false);
+    }
+    p += F("</td></tr></table>");
+
+#ifdef MODULE_FORECAST_ENABLED
+    if (f.forecast) appendForecastSection(p, ForecastModule::OUTLOOK_N);
+#endif
+}
+
+/// The page turned a quarter or a half: drawn upright in a box the size of
+/// the turned page, and the box rotated onto the screen about its top-left
+/// corner and moved back into view. -webkit- first, for the reader's old
+/// WebKit, which has had 2D transforms since before any Kindle shipped it.
+/// The body loses its padding to the box, which carries the same.
+static void kdRotCss(String& p, uint8_t rot) {
+    if (rot == KROT_0) return;
+    const bool land = kdRotLandscape(rot);
+    const int W = kdPx(land ? 800 : 600), H = kdPx(land ? 600 : 800);
+    char t[64];
+    switch (rot) {
+        case KROT_90:  snprintf(t, sizeof(t), "translate(%dpx,0) rotate(90deg)", kdPx(600)); break;
+        case KROT_180: snprintf(t, sizeof(t), "translate(%dpx,%dpx) rotate(180deg)",
+                                kdPx(600), kdPx(800)); break;
+        default:       snprintf(t, sizeof(t), "translate(0,%dpx) rotate(-90deg)", kdPx(800)); break;
+    }
+    p += F("body{padding:0;overflow:hidden}.rot{position:absolute;left:0;top:0;width:");
+    p += W; p += F("px;height:"); p += H; p += F("px;padding:");
+    p += kdPx(14); p += F("px "); p += kdPx(18);
+    p += F("px;overflow:hidden;-webkit-transform-origin:0 0;transform-origin:0 0;"
+           "-webkit-transform:");
+    p += t; p += F(";transform:"); p += t; p += '}';
+}
+
 static void handleKindle(AsyncWebServerRequest* req) {
     // THE LANGUAGE, FIRST, BEFORE ANYTHING IS WORDED. kdT() and the weekday and
     // month tables read one ambient value rather than taking a parameter each —
@@ -1880,8 +2058,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     // The places and where everything goes, once for the whole page: the
     // stylesheet's sizes and the markup's rows have to come from one answer.
+    const uint8_t rot = kdRotFor(req, skin);
     KdRender rd;
-    kdRenderBegin(rd, skin, now, kdStandalone(), true);
+    kdRenderBegin(rd, skin, now, kdStandalone(), true, kdRotLandscape(rot));
 
     String p;
     p.reserve(7000);
@@ -2276,58 +2455,42 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // is one of the things it decides.
     kdFlowCss(p, rd.flow, skin.clockStyle, [](int v) { return kdPx(v); });
 
+    kdRotCss(p, rot);
+
     p += F("</style></head><body>");
+    // Turned, the page is drawn upright in a box the size of the turned page
+    // and the box is rotated onto the screen — see kdRotCss().
+    if (rot != KROT_0) p += F("<div class=\"rot\">");
 
-    // No masthead. The place name never changed and the date is carried by the
-    // week strip at the foot, so the row was two lines of furniture above the
-    // only two numbers the page exists to show. The top block is the masthead.
-    //
-    // THE SAME ELEVEN PLACES THE FBINK RENDERER DRAWS, resolved by the same call,
-    // so "what is in this place" has one answer on this device rather than one
-    // per screen.
-    appendTopBlock(p, skin, now, rd);
+    if (rd.flow.land) {
+        appendLandBody(p, skin, now, rd, tOut, tIn, haveOut, haveIn);
+    } else {
+        // No masthead. The place name never changed and the date is carried by the
+        // week strip at the foot, so the row was two lines of furniture above the
+        // only two numbers the page exists to show. The top block is the masthead.
+        //
+        // THE SAME ELEVEN PLACES THE FBINK RENDERER DRAWS, resolved by the same call,
+        // so "what is in this place" has one answer on this device rather than one
+        // per screen.
+        appendTopBlock(p, skin, now, rd);
 
-    if (skin.showFlags & KSHOW_CHART) {
-        p += F("<div class=\"rule\"></div><div class=\"sec\">");
-        p += kdT("Last 24 hours", "Последните 24 часа");
-        p += F("</div>");
-        appendChart(p, tOut, tIn, haveOut, haveIn, kdPx(kdFlowHtmlChartH(rd.flow)));
-        // The key names the lines the chart DREW, which is what appendChart's
-        // own lo > hi test turns on — not the series the ring is tracking.
-        const bool drewOut = haveOut && seriesHasData(tOut);
-        const bool drewIn  = haveIn  && seriesHasData(tIn);
-        if (drewOut || drewIn) {
-            // The two swatches must be drawn with the same stroke as the lines
-            // they stand for — .l-out #000/3, .l-in #777/2 dashed — or the key
-            // describes a chart the reader is not looking at.
-            p += F("<table class=\"key\"><tr><td>");
-            appendKeySwatch(p, "#000", 3, false);
-            p += ' ';
-            p += kdT("outside mean", "средно навън");
-            p += F("<span class=\"dim\">");
-            p += kdT(", shaded band = hourly low to high",
-                     ", сивото е час. мин&ndash;макс");
-            p += F("</span></td><td style=\"text-align:right\">");
-            appendKeySwatch(p, "#777", 2, true);
-            p += ' ';
-            p += kdT("inside", "вътре");
-            p += F("</td></tr></table>");
-        }
-    }
+        if (skin.showFlags & KSHOW_CHART)
+            appendChartSection(p, rd, tOut, tIn, haveOut, haveIn, true);
 
 #ifdef MODULE_FORECAST_ENABLED
-    // Last, deliberately: the measured values are what the reader came for and
-    // the forecast is the supporting note, so it reads as a footnote rather
-    // than as something competing with the two temperatures.
-    //
-    // AND NOT AT ALL IN STANDALONE. This used to be settled at build time
-    // alone, so a collector built with the module and then run on its own AP
-    // served the section with a circled question mark in it — furniture, in
-    // the one place on the page where the readings could have been.
-    if (rd.flow.forecast) appendForecastSection(p);
+        // Last, deliberately: the measured values are what the reader came for and
+        // the forecast is the supporting note, so it reads as a footnote rather
+        // than as something competing with the two temperatures.
+        //
+        // AND NOT AT ALL IN STANDALONE. This used to be settled at build time
+        // alone, so a collector built with the module and then run on its own AP
+        // served the section with a circled question mark in it — furniture, in
+        // the one place on the page where the readings could have been.
+        if (rd.flow.forecast) appendForecastSection(p);
 #endif
 
-    if (skin.showFlags & KSHOW_WEEK) appendWeek(p, now);
+        if (skin.showFlags & KSHOW_WEEK) appendWeek(p, now);
+    }
 
     // The footer carries the two manual repaints. Links rather than anything
     // scripted, so a five-way pad reaches them as readily as a fingertip. See
@@ -2360,7 +2523,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
         p += F("</a>");
     }
 #endif
-    p += F("</td></tr></table></body></html>");
+    p += F("</td></tr></table>");
+    if (rot != KROT_0) p += F("</div>");
+    p += F("</body></html>");
 
     AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
     // The meta tag drives the refresh, so nothing may be served from cache: an

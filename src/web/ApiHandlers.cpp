@@ -846,6 +846,12 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     // its own right and showing it resolved would turn it into a fixed one the
     // next time somebody pressed Save — the same reason `lang` is sent raw.
     doc["layout_mode"]      = k.layoutMode;
+    // The clock is a switch on the page like the chart and the week strip,
+    // but kept out of `show` — whose bits a settings page older than this one
+    // posts back without it, which would take the clock off on every Save.
+    doc["clock"]            = k.clockOff ? 0 : 1;
+    // Degrees, which is what the reader's own dash.conf and ?rot= say too.
+    doc["rotation"]         = (int)k.rotation * 90;
     doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
     doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
 
@@ -881,6 +887,11 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     KD_PARAM("fbink_res_w",       fbinkResW);
     KD_PARAM("layout_mode",       layoutMode);
     #undef KD_PARAM
+    if (req->hasParam("clock", true))
+        k.clockOff = req->getParam("clock", true)->value().toInt() ? 0 : 1;
+    if (req->hasParam("rotation", true))
+        k.rotation = kdRotFromDeg(req->getParam("rotation", true)->value().toInt(),
+                                  k.rotation);
 
     if (req->hasParam("face_custom", true)) {
         const String v = req->getParam("face_custom", true)->value();

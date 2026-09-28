@@ -63,6 +63,16 @@ esac
     lipc-set-prop com.lab126.pillow disableEnablePillow 0 2>/dev/null
 [ -f "$DASH_TMP/radio-off" ] && lipc-set-prop com.lab126.cmd wirelessEnable 1 2>/dev/null
 
+# And the page upright, if the dashboard turned the panel on its side and was
+# killed before it could turn it back. The marker holds the rotation it found.
+if [ -f "$DASH_TMP/rota" ]; then
+    r=$(tr -dc '0-3' < "$DASH_TMP/rota" 2>/dev/null | cut -c1)
+    if [ -n "$r" ]; then
+        { command -v fbdepth >/dev/null 2>&1 && fbdepth -r "$r" >/dev/null 2>&1; } ||
+            echo "$r" > /sys/class/graphics/fb0/rotate 2>/dev/null
+    fi
+fi
+
 rm -rf "$DASH_TMP"
 fbink -c 2>/dev/null
 echo "Dashboard stopped."

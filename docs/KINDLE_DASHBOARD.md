@@ -569,6 +569,41 @@ rules so the preview shows the page before anything is saved;
 CI on the first number they disagree on. `tools/kindle_preview/preview.py`
 takes `chart=0 fc=0 week=0 grid=N in=N` to render any of them.
 
+### The clock can be switched off
+
+The clock is a switch in the region list like the chart and the week strip.
+Off, upright, the indoor row moves up to the outdoor heading's line and takes
+the clock's height; with the indoor row empty too, the outdoor grid takes the
+whole width. It is kept out of `showFlags` in the config (`clockOff`, and
+`clock` in `/api/kindle/config`) so that a config from before the switch, and
+a settings page from before it, both read as "clock on".
+
+### On its side: the landscape page
+
+**Rotation** (`rotation` in `/api/kindle/config`: 0, 90, 180 or 270 degrees
+clockwise) turns the page. 180° is the ordinary page upside down. 90° and 270°
+are **the landscape page, 800 × 600 design pixels**, laid out by
+`kdFlowLand()`:
+
+| row | what is in it |
+|---|---|
+| top | the clock, and the week strip beside it (either alone is centred or full width; neither, and the row is gone) |
+| middle | the outdoor headline and grid with the indoor row on one line under them, 300 px wide; the chart beside them, the height of the band |
+| band | today's forecast and **five** outlook columns (three upright) |
+| footer | as upright |
+
+The headline is sized to the largest it can be while the grid still sets at
+the upright page's sizes. The panel is scaled by its SHORT side, so the 1072 ×
+1448 Paperwhite draws the same page at 1448 × 1072.
+
+The browser page (`/kindle`, or `/kindle?rot=90` to try one) is drawn upright
+in a box the size of the turned page and rotated with `-webkit-transform`.
+The FBInk reader turns its framebuffer instead and draws in the turned
+coordinates: `/kindle/data` sends `RES_W`/`RES_H` swapped, `PAGE_ROT`, and the
+landscape page's x positions as `LY_*` keys as well as its heights; the chart
+image is fetched as `/kindle/graph.bmp?h=H&w=W`. The reader can override the
+collector with `ROTATE=` in `dash.conf`, sent as `?rot=`.
+
 ## Appearance
 
 Everything above describes the page as it is drawn out of the box. Some of it

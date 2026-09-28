@@ -285,6 +285,9 @@ KINDLE = {
     # that has never been asked holds — and the value the driver has to be able
     # to move away from and back to.
     "layout_mode": 0,
+    # The clock on (a switch the page keeps apart from `show`), upright.
+    "clock": 1,
+    "rotation": 0,
     "outdoor_sensor": "balcony",
     "indoor_sensor": "",
 }
@@ -1005,7 +1008,7 @@ class H(http.server.SimpleHTTPRequestHandler):
             for k in ("face", "bold", "show", "clock_style", "time_format",
                       "date_format", "pressure_unit", "decimals", "lang",
                       "refresh_sec", "follow_data", "clock_pin_refresh",
-                      "fbink_res_w", "layout_mode"):
+                      "fbink_res_w", "layout_mode", "clock", "rotation"):
                 if k in body:
                     KINDLE[k] = int(body[k][0])
             for k in ("face_custom", "outdoor_sensor", "indoor_sensor"):

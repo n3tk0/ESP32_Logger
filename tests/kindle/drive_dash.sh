@@ -763,7 +763,7 @@ flow_payload() {
 # ly_load FILE -> the keys set as the payload would set them, nothing else left
 ly_load() {
     local z
-    for z in $FLOW_KEYS GRID_ROWS CH_T CH_B; do unset "LY_$z" 2>/dev/null; done
+    for z in $FLOW_KEYS GRID_ROWS CH_T CH_B CH_L CH_R; do unset "LY_$z" 2>/dev/null; done
     load_kv "$1" PAYLOAD
 }
 
@@ -826,17 +826,141 @@ for res in 600x800 1072x1448; do
   done
 done
 
+# ── ON ITS SIDE ─────────────────────────────────────────────────────────────
+# The landscape page is the upright panel turned: the payload's RES_W/RES_H are
+# swapped, the upright panel's layout file is the base, and the collector's
+# layout moves every x as well as every y. The rectangles the panel is
+# refreshed in still tile it: the top row across, the readings beside the
+# chart, the band across under them.
+for res in 600x800 1072x1448; do
+  for args in "" "fc=0" "clk=0" "clk=0 week=0" "chart=0" "week=0"; do
+    ( w=${res%x*}; h=${res#*x}
+      flow_payload "$WORK/ly.txt" res=$w land=1 $args; ly_load "$WORK/ly.txt"
+      LAYOUT=auto; unset PAGE_MODE PAGE_ROT; RES_W=$h RES_H=$w
+      load_layout
+      [ "$LAYOUT_FLOW" = "1" ] && [ "$LAND" = "1" ] || exit 1
+      case "$ICON_DIR" in */$w) ;; *) exit 2 ;; esac     # the upright panel's file
+      [ $((Z_TOP_H + Z_SENS_H)) -eq "$RULE3_Y" ] || exit 3
+      [ $((Z_FC_Y + Z_FC_H)) -eq "$RES_H" ] || exit 4
+      if [ "$GR_H" -gt 0 ]; then
+        [ $((Z_SENS_W + Z_CHART_W)) -eq "$RES_W" ] || exit 5
+        [ "$Z_CHART_X" -gt "$SEP_X" ] || exit 6
+        [ $((GR_X + GR_W)) -le "$RES_W" ] && [ $((GR_W % 8)) -eq 0 ] || exit 7
+        [ $((KEY_Y + KEY_SZ)) -le "$RULE3_Y" ] || exit 8
+      else
+        [ "$Z_SENS_W" -eq "$RES_W" ] || exit 9
+      fi
+      [ "$OL_N" = "5" ] || exit 10
+      [ $((OL4_X + OL_PLATE_W)) -le "$RES_W" ] || exit 11
+      [ $((FOOT_RULE_X + FOOT_RULE_W)) -le "$RES_W" ] || exit 12
+      [ "$FOOT_Y" -lt "$RES_H" ] || exit 13
+      case " $args " in
+        *" clk=0 "*) [ "$SHOW_CLOCK" != "0" ] || true ;;
+        *) [ $((CL_Y + CL_H)) -le "$TOPROW_Y" ] || exit 14 ;;
+      esac
+      case " $args " in
+        *" week=0 "*) ;;
+        *) [ $((WK_X + 7 * WK_CELL_W)) -le "$RES_W" ] &&
+           [ $((WK_Y + WK_CELL_H)) -le "$TOPROW_Y" ] || exit 15 ;;
+      esac
+      exit 0 )
+    check "$?" "$res on its side with ${args:-everything on}: the page tiles and nothing runs off it"
+  done
+done
+
+# And back upright: nothing the landscape page set outlives it.
+( flow_payload "$WORK/ly.txt" res=600 land=1; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE PAGE_ROT; RES_W=800 RES_H=600; load_layout
+  [ "$LAND" = "1" ] || exit 1
+  flow_payload "$WORK/ly.txt" res=600; ly_load "$WORK/ly.txt"
+  RES_W=600 RES_H=800; load_layout
+  [ -z "${LAND:-}" ] && [ -z "${OL_N:-}" ] && [ -z "${TOPROW_Y:-}" ] || exit 2
+  [ "$GR_X" = "20" ] && [ "$COL_L_X" = "18" ] && [ "$FOOT_Y" = "772" ] || exit 3
+  [ "$Z_CHART_W" = "600" ] || exit 4
+  exit 0 )
+check "$?" "turned back upright, nothing the landscape page set is left behind"
+
+# Five outlook plates on its side, three upright; the week strip in the top
+# row beside the clock and not in the band.
+( flow_payload "$WORK/ly.txt" res=600 land=1; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE PAGE_ROT; RES_W=800 RES_H=600; load_layout
+  FC_SUMMARY="Clear" FC_ICON=0 SHOW_WEEK=1 WK_TODAY=2 WK_MON_MONTH="MAY"
+  for i in 0 1 2 3 4; do eval "FC${i}_LABEL=D$i FC${i}_ICON=0 FC${i}_TEMP=1$i"; done
+  for i in 0 1 2 3 4 5 6; do eval "WK${i}_NAME=N$i WK${i}_DAY=$i"; done
+  : > "$FBINK_LOG"; draw_forecast_body
+  [ "$(grep -c 'GRAYE' "$FBINK_LOG")" = "5" ] || exit 1
+  grep -q 'N3' "$FBINK_LOG" && exit 2               # the week is not in the band
+  : > "$FBINK_LOG"; SHOW_CLOCK=1; draw_top_row "12:00"
+  grep -q 'N3' "$FBINK_LOG" || exit 3
+  grep -q "top=$TOPROW_Y,left=18,width=764" "$FBINK_LOG" || exit 4   # its rule
+  exit 0 )
+check "$?" "on its side: five forecast columns, and the week strip beside the clock"
+
+# A tap lands where the turned page drew the button: the touch layer keeps
+# the upright panel's axes.
+( RES_W=800 RES_H=600 TOUCH_MAXX=0 TOUCH_MAXY=0 TOUCH_SWAP=0 TRACE=0
+  ROT_DEG=90;  touch_scale 0 0;     [ "$TAP_X,$TAP_Y" = "0,599" ]   || exit 1
+               touch_scale 599 799; [ "$TAP_X,$TAP_Y" = "799,0" ]   || exit 2
+  ROT_DEG=270; touch_scale 0 0;     [ "$TAP_X,$TAP_Y" = "799,0" ]   || exit 3
+  RES_W=600 RES_H=800
+  ROT_DEG=180; touch_scale 0 0;     [ "$TAP_X,$TAP_Y" = "599,799" ] || exit 4
+  ROT_DEG=0;   touch_scale 10 20;   [ "$TAP_X,$TAP_Y" = "10,20" ]   || exit 5
+  exit 0 )
+check "$?" "touch follows the page round: 90, 180 and 270 map back to the drawn page"
+
+# The panel turns to the page it was sent, and back; ROTATE_SWAP numbers the
+# two quarter turns the other way; a collector that does not say keeps it
+# upright; and stop.sh has the rotation to put back.
+( ROT_NODE="$WORK/rotate"; echo 0 > "$ROT_NODE"
+  ROT_DEG=0 ROT_FAIL=0 ROT_ORIG="" HAVE_DATA=0
+  PAGE_ROT=90;  rot_sync || exit 1
+  [ "$(cat "$ROT_NODE")" = "1" ] && [ "$ROT_DEG" = "90" ] || exit 2
+  [ "$(cat "$DASH_TMP/rota")" = "0" ] || exit 3
+  PAGE_ROT=270; ROTATE_SWAP=1; rot_sync || exit 4
+  [ "$(cat "$ROT_NODE")" = "1" ] || exit 5
+  ROTATE_SWAP=0
+  unset PAGE_ROT; rot_sync || exit 6
+  [ "$(cat "$ROT_NODE")" = "0" ] && [ "$ROT_DEG" = "0" ] || exit 7
+  PAGE_ROT=180; rot_sync; rot_restore
+  [ "$(cat "$ROT_NODE")" = "0" ] && [ ! -f "$DASH_TMP/rota" ] || exit 8
+  exit 0 )
+check "$?" "the panel turns to the page it was sent, and back on the way out"
+
+# This panel's own ROTATE is asked for by name; auto leaves it to the collector.
+( ROT_FAIL=0 ROTATE=270; rot_local && [ "$ROT_LOCAL" = "270" ] || exit 1
+  ROTATE=auto; rot_local && exit 2
+  ROT_FAIL=1; rot_local && [ "$ROT_LOCAL" = "0" ] || exit 3
+  conf_valid ROTATE 90 && conf_valid ROTATE auto || exit 4
+  conf_valid ROTATE 45 && exit 5
+  conf_valid ROTATE_SWAP 1 && ! conf_valid ROTATE_SWAP 2 || exit 6
+  exit 0 )
+check "$?" "ROTATE in dash.conf: 0, 90, 180, 270 or auto, and it goes out as ?rot="
+
+# Without the clock nothing is drawn in its place, upright or on its side —
+# the indoor row has moved up into its rectangle.
+( : > "$FBINK_LOG"; SHOW_CLOCK=0 CLOCK_STYLE=1; draw_clock "12:34"
+  [ ! -s "$FBINK_LOG" ] || exit 1
+  exit 0 )
+check "$?" "the clock switched off draws nothing, not even its white box"
+
+# A zero-wide rule is not drawn: FBInk would take 0 as "to the edge".
+( : > "$FBINK_LOG"; fill_rect 10 10 0 5 BLACK; draw_hline 10 10 0 GRAYA
+  [ ! -s "$FBINK_LOG" ] || exit 1
+  exit 0 )
+check "$?" "an empty rectangle is not handed to FBInk"
+RES_W=600; RES_H=800; LAYOUT=auto; unset PAGE_MODE PAGE_ROT SHOW_CLOCK; ly_load /dev/null; load_layout
+
 # Numbers only, and only the names the panel knows. A value that is not
 # digits is dropped and the file's number stays.
 ( flow_payload "$WORK/ly.txt" res=600 week=0
   echo 'LY_HERO_SZ="1;reboot"' >> "$WORK/ly.txt"
-  echo 'LY_FOOT_Y=10' >> "$WORK/ly.txt"
+  echo 'LY_FOOT_SZ=40' >> "$WORK/ly.txt"
   ly_load "$WORK/ly.txt"
   LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
   load_layout
   [ "$LAYOUT_FLOW" = "1" ] || exit 1
   [ "$HERO_SZ" = "88" ] || exit 2          # the file's
-  [ "$FOOT_Y" = "772" ] || exit 3          # not a name it lays over
+  [ "$FOOT_SZ" = "15" ] || exit 3          # not a name it lays over
   exit 0 )
 check "$?" "an LY_ value that is not a number, or not a layout name, is ignored"
 

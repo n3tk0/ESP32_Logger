@@ -33,9 +33,9 @@ const char FORECAST_SCHEMA[] PROGMEM =
         "\"help\":\"Required. Both coordinates at 0 is read as 'not set up yet' and no request is made.\"},"
       "{\"id\":\"lon\",\"type\":\"float\",\"min\":-180,\"max\":180,\"step\":0.0001,\"label\":\"Longitude\",\"unit\":\"\\u00b0\",\"group\":\"Location\"},"
       "{\"id\":\"outlook\",\"type\":\"enum\",\"label\":\"Outlook columns\",\"group\":\"Dashboard\","
-        "\"options\":[{\"v\":\"hourly\",\"l\":\"Next hours (+3, +6, +9)\"},"
-                     "{\"v\":\"daily\",\"l\":\"Next days (tomorrow .. +3)\"}],"
-        "\"help\":\"What the three columns on the right of the /kindle forecast row step through. Hourly prints one figure per column; daily prints that day's high and low.\"},"
+        "\"options\":[{\"v\":\"hourly\",\"l\":\"Next hours (+3, +6, +9 ...)\"},"
+                     "{\"v\":\"daily\",\"l\":\"Next days (tomorrow, +2, +3 ...)\"}],"
+        "\"help\":\"What the columns on the right of the /kindle forecast row step through: three on the upright page, five on the landscape one. Hourly prints one figure per column; daily prints that day's high and low.\"},"
       "{\"id\":\"interval_min\",\"type\":\"int\",\"min\":10,\"max\":360,\"label\":\"Fetch interval\",\"unit\":\"min\",\"group\":\"Dashboard\","
         "\"help\":\"Clamped to 10-360. A forecast does not move faster than that, and the floor is what keeps a misconfigured device off a provider's rate limit.\"}"
     "]}";
@@ -406,7 +406,7 @@ bool ForecastModule::_fetchOpenMeteo() {
                  "?latitude=%.4f&longitude=%.4f"
                  "&current=temperature_2m,weather_code,wind_speed_10m"
                  "&daily=temperature_2m_max,temperature_2m_min,weather_code"
-                 "&timezone=auto&forecast_days=4",
+                 "&timezone=auto&forecast_days=6",
                  (double)_lat, (double)_lon);
     } else {
         snprintf(url, sizeof(url),
@@ -415,7 +415,7 @@ bool ForecastModule::_fetchOpenMeteo() {
                  "&current=temperature_2m,weather_code,wind_speed_10m"
                  "&daily=temperature_2m_max,temperature_2m_min"
                  "&hourly=temperature_2m,weather_code"
-                 "&timezone=auto&forecast_days=1&forecast_hours=12",
+                 "&timezone=auto&forecast_days=1&forecast_hours=16",
                  (double)_lat, (double)_lon);
     }
 
@@ -459,8 +459,8 @@ bool ForecastModule::_fetchOpenMeteo() {
     strncpy(d.summary, wmoSummary(d.code), sizeof(d.summary) - 1);
 
     if (_outlook == OUTLOOK_DAILY) {
-        for (int i = 0; i < 3; i++) {
-            // Index 0 is today, so the three columns are +1..+3 days.
+        for (int i = 0; i < OUTLOOK_N; i++) {
+            // Index 0 is today, so the columns are +1..+5 days.
             JsonVariantConst hi = doc["daily"]["temperature_2m_max"][i + 1];
             if (hi.isNull()) break;
             d.outlook[i].valid = true;
@@ -470,8 +470,8 @@ bool ForecastModule::_fetchOpenMeteo() {
             weekdayLabel(d.outlook[i], i + 1);
         }
     } else {
-        for (int i = 0; i < 3; i++) {
-            const int idx = (i + 1) * 3;             // +3 h, +6 h, +9 h
+        for (int i = 0; i < OUTLOOK_N; i++) {
+            const int idx = (i + 1) * 3;             // +3 h, +6 h ... +15 h
             JsonVariantConst t = doc["hourly"]["temperature_2m"][idx];
             if (t.isNull()) break;
             d.outlook[i].valid = true;
@@ -554,13 +554,16 @@ bool ForecastModule::_fetchOwm() {
 }
 
 bool ForecastModule::_fetchOwmOutlook(Data& d) {
-    // cnt=24 is three days of 3-hourly slots — enough for either mode and a
-    // hard bound on how much JSON lands in heap on a 4 MB C3.
+    // As few 3-hourly slots as the mode needs, which is also the bound on how
+    // much JSON lands in heap on a 4 MB C3: the five hourly columns are the
+    // first five slots, and five days need the whole of the free tier's 40
+    // (the fifth of them only partly covered, and aggregated from what there is).
     char url[256];
     snprintf(url, sizeof(url),
              "https://api.openweathermap.org/data/2.5/forecast"
-             "?lat=%.4f&lon=%.4f&units=metric&cnt=24&appid=%s",
-             (double)_lat, (double)_lon, _apiKey);
+             "?lat=%.4f&lon=%.4f&units=metric&cnt=%d&appid=%s",
+             (double)_lat, (double)_lon,
+             (_outlook == OUTLOOK_HOURLY) ? 8 : 40, _apiKey);
 
     const String body = httpsGet(url);
     if (body.isEmpty()) return false;
@@ -581,9 +584,9 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
     if (list.isNull() || list.size() == 0) return false;
 
     if (_outlook == OUTLOOK_HOURLY) {
-        // list[0] is the next slot, so the first three are +3/+6/+9 h.
+        // list[0] is the next slot, so the first five are +3 .. +15 h.
         const long tz = doc["city"]["timezone"] | 0L;
-        for (int i = 0; i < 3 && i < (int)list.size(); i++) {
+        for (int i = 0; i < OUTLOOK_N && i < (int)list.size(); i++) {
             JsonObjectConst e = list[i];
             d.outlook[i].valid = true;
             d.outlook[i].tempC = e["main"]["temp"] | NAN;
@@ -611,7 +614,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
     const int today = nowTm.tm_yday;
 
     struct Acc { bool used = false; float hi = -1e9f, lo = 1e9f; int code = -1; int bestGap = 99; };
-    Acc acc[3];
+    Acc acc[OUTLOOK_N];
 
     for (JsonObjectConst e : list) {
         const time_t local = (time_t)((long)(e["dt"] | 0L) + tz);
@@ -620,7 +623,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
 
         int ahead = tmv.tm_yday - today;
         if (ahead < 0) ahead += 365;              // year wrap
-        if (ahead < 1 || ahead > 3) continue;     // only tomorrow .. +3 days
+        if (ahead < 1 || ahead > OUTLOOK_N) continue;   // only tomorrow .. +5 days
 
         Acc& a = acc[ahead - 1];
         const float t = e["main"]["temp"] | NAN;
@@ -636,7 +639,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
         }
     }
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < OUTLOOK_N; i++) {
         if (!acc[i].used) continue;
         d.outlook[i].valid = true;
         d.outlook[i].tempC = acc[i].hi;
@@ -692,7 +695,9 @@ const char* forecastSummary(const ForecastModule::Data& d) {
 // ---------------------------------------------------------------------------
 // Dashboard section
 // ---------------------------------------------------------------------------
-void appendForecastSection(String& out) {
+void appendForecastSection(String& out, int columns) {
+    if (columns < 1) columns = 1;
+    if (columns > ForecastModule::OUTLOOK_N) columns = ForecastModule::OUTLOOK_N;
     const ForecastModule::Data d = forecastModule.snapshot();
     if (!d.valid) return;
 
@@ -731,7 +736,7 @@ void appendForecastSection(String& out) {
     }
     out += F("</div></td>");
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < columns; i++) {
         const ForecastModule::Period& pd = d.outlook[i];
         out += F("<td class=\"per\">");
         if (pd.valid) {

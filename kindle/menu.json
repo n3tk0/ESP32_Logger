@@ -185,6 +185,55 @@
                                     "action": "/bin/sh",
                                     "params": "kual.sh set LAYOUT standalone",
                                     "exitmenu": true
+                                },
+                                {
+                                    "name": "Rotation: follow the collector",
+                                    "priority": 12,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set ROTATE auto",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Rotation: 0, upright",
+                                    "priority": 13,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set ROTATE 0",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Rotation: 90, on its side, USB on the right",
+                                    "priority": 14,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set ROTATE 90",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Rotation: 180, upside down",
+                                    "priority": 15,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set ROTATE 180",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Rotation: 270, on its side, USB on the left",
+                                    "priority": 16,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set ROTATE 270",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Rotation: 90 and 270 swapped",
+                                    "priority": 17,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set ROTATE_SWAP 1",
+                                    "exitmenu": true
+                                },
+                                {
+                                    "name": "Rotation: 90 and 270 as numbered",
+                                    "priority": 18,
+                                    "action": "/bin/sh",
+                                    "params": "kual.sh set ROTATE_SWAP 0",
+                                    "exitmenu": true
                                 }
                             ]
                         },

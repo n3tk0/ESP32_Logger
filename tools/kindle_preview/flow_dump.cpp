@@ -94,6 +94,8 @@ int main(int argc, char** argv) {
         else if (k == "fc")    in.forecast = atoi(v) != 0;
         else if (k == "week")  in.week     = atoi(v) != 0;
         else if (k == "sub")   in.sub      = atoi(v) != 0;
+        else if (k == "clk")   in.clock    = atoi(v) != 0;
+        else if (k == "land")  in.land     = atoi(v) != 0;
         else if (k == "grid")  in.nGrid    = (uint8_t)parseList(v, in.gridAdv, 6);
         else if (k == "in")    in.nIn      = (uint8_t)parseList(v, in.inAdv, 3);
         else if (k == "gridp") in.nGrid    = (uint8_t)parsePlaces(v, in.gridAdv, 6);
@@ -146,6 +148,19 @@ int main(int argc, char** argv) {
                f.chart ? "true" : "false", f.forecast ? "true" : "false",
                f.week ? "true" : "false", f.rule2Y, f.grY, f.grH, f.rule3Y, f.wkRuleY,
                kdFlowHtmlChartH(f), kdFlowHtmlColH(f));
+        printf(",\"clock\":%s,\"land\":%s,\"pageW\":%d,\"pageH\":%d,\"groupY\":%d,"
+               "\"colLX\":%d,\"colLW\":%d,\"inX\":%d,\"inW\":%d,\"sepX\":%d,\"sepY\":%d,"
+               "\"clX\":%d,\"clY\":%d,\"clW\":%d,\"topRowY\":%d,\"rule2X\":%d,\"rule2W\":%d,"
+               "\"labChartX\":%d,\"grX\":%d,\"grW\":%d,\"keyInX\":%d,\"keyBand\":%s,\"olN\":%d,",
+               f.clock ? "true" : "false", f.land ? "true" : "false", f.pageW, f.pageH,
+               f.groupY, f.colLX, f.colLW, f.inX, f.inW, f.sepX, f.sepY, f.clX, f.clY,
+               f.clW, f.topRowY, f.rule2X, f.rule2W, f.labChartX, f.grX, f.grW, f.keyInX,
+               f.keyBand ? "true" : "false", f.olN);
+        printf("\"olX\":[%d,%d,%d,%d,%d],\"wkX\":%d,\"wkY\":%d,\"wkCellW\":%d,"
+               "\"wkHdgY\":%d,\"wkRule\":%s,\"footY\":%d,\"statX\":%d,\"battX\":%d,"
+               "\"battY\":%d",
+               f.olX[0], f.olX[1], f.olX[2], f.olX[3], f.olX[4], f.wkX, f.wkY, f.wkCellW,
+               f.wkHdgY, f.wkRule ? "true" : "false", f.footY, f.statX, f.battX, f.battY);
         printf("}\n");
         return 0;
     }

@@ -117,6 +117,20 @@ inline uint16_t clampH(uint16_t h, uint16_t panelW) {
     return h < lo ? lo : (h > hi ? hi : h);
 }
 
+/// The width a reader asks for — /kindle/graph.bmp?w= — held the same way:
+/// the landscape page's chart sits beside the readings and is narrower than
+/// the upright one. A multiple of 8, because the rows are four-bit pixels
+/// padded to whole 32-bit words and every width here is then already one; and
+/// never wider than the streamer's row buffer. 0 means "not asked".
+inline uint16_t clampW(uint16_t w, uint16_t panelW) {
+    const uint16_t base = imageW(panelW);
+    if (w == 0) return base;
+    uint16_t lo = (uint16_t)(base * 6 / 10), hi = (uint16_t)(base * 3 / 2);
+    if (hi > 1000) hi = 1000;
+    w = w < lo ? lo : (w > hi ? hi : w);
+    return (uint16_t)(w & ~7u);
+}
+
 /// The plot area inside that image, in image pixels. The margins are the
 /// 560x220 design's, scaled with the image — so each divides by the design's
 /// own dimension, 560 across and 220 down.

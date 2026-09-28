@@ -362,6 +362,28 @@ inline bool kdStandaloneDecide(uint8_t layoutMode, bool haveForecastModule,
     return now > fetchedAt && (now - fetchedAt) > staleAfterS;
 }
 
+/// The switches the layout and the settings page work from: showFlags, and
+/// the clock as one more bit of it (KSHOW_CLOCK), which the config keeps apart
+/// so that an older config reads as "clock on". See KindleConfig::clockOff.
+inline uint16_t kdShowMask(const KindleConfig& k) {
+    return (uint16_t)((k.showFlags & KSHOW_ALL) | (k.clockOff ? 0 : KSHOW_CLOCK));
+}
+
+/// A rotation in degrees, as the API and the reader's ?rot= spell it, to a
+/// KROT_* value; anything that is not one of the four is `fallback`.
+inline uint8_t kdRotFromDeg(long deg, uint8_t fallback) {
+    switch (deg) {
+        case 0:   return KROT_0;
+        case 90:  return KROT_90;
+        case 180: return KROT_180;
+        case 270: return KROT_270;
+        default:  return fallback;
+    }
+}
+
+/// Whether the page is the landscape one: the reader on its side.
+inline bool kdRotLandscape(uint8_t rot) { return rot == KROT_90 || rot == KROT_270; }
+
 // Applied on the way in from the API and again on the way out to the page.
 // Twice, because a config.bin can also arrive by import or from a firmware
 // that wrote a field this one has since narrowed, and a stylesheet built from
@@ -382,6 +404,10 @@ inline void kdSkinClamp(KindleConfig& k) {
     // Same reasoning, same safe answer: KLAYOUT_AUTO is both the older
     // config's reserved byte and what a value nobody recognises becomes.
     if (k.layoutMode > KLAYOUT_STANDALONE) k.layoutMode = KLAYOUT_AUTO;
+    // Upright is both what an older config holds and the one answer that is
+    // always drawable, so a byte nobody recognises lands there.
+    if (k.rotation > KROT_270)          k.rotation = KROT_0;
+    if (k.clockOff > 1)                 k.clockOff = 1;
     k.boldZones &= 0x01FF;
     k.showFlags &= KSHOW_ALL;
     k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';
