@@ -252,14 +252,29 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
 }  // namespace
 
 // ---------------------------------------------------------------------------
+bool firstRunPageAvailable() {
+    return littleFsAvailable &&
+           (LittleFS.exists("/www/firstrun.html") || LittleFS.exists("/www/firstrun.html.gz"));
+}
+
+// ---------------------------------------------------------------------------
 void registerFirstRunRoutes() {
     extern AsyncWebServer server;
 
     // /firstrun → /www/firstrun.html. serveStatic maps /firstrun.html
     // directly; this alias lets the FirstRunGate redirect target work
     // without forcing users to type the extension.
+    //
+    // NOT A BARE send(LittleFS, ...): with no such file that sends nothing,
+    // and the library answers 501 "Handler did not handle the request" — the
+    // whole of what a device flashed without its filesystem image showed.
+    // The failsafe page is built into the firmware and can upload /www.
     server.on("/firstrun", HTTP_GET, [](AsyncWebServerRequest* r) {
-        r->send(LittleFS, "/www/firstrun.html", "text/html");
+        AsyncWebServerResponse* resp = firstRunPageAvailable()
+            ? r->beginResponse(LittleFS, "/www/firstrun.html", "text/html")
+            : nullptr;
+        if (resp) r->send(resp);
+        else      r->redirect("/setup");
     });
 
     server.on("/api/board-profiles", HTTP_GET, handleGetBoardProfiles);

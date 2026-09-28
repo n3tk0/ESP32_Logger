@@ -1682,6 +1682,10 @@ class FirstRunGateHandler : public AsyncWebHandler {
 public:
     bool canHandle(AsyncWebServerRequest* r) LOGGER_CANHANDLE_CV override {
         if (!g_setupRequired) return false;
+        // No wizard to send anyone to: the web UI itself is missing, and the
+        // failsafe page on / and /setup is how it gets uploaded. Gating that
+        // too left a firmware-only flash with nothing but a 501.
+        if (!firstRunPageAvailable()) return false;
         const String& url = r->url();
         if (url == "/firstrun" || url == "/firstrun.html")        return false;
         if (url.startsWith("/api/firstrun"))                       return false;

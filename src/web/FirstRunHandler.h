@@ -19,3 +19,9 @@
 #include <ESPAsyncWebServer.h>
 
 void registerFirstRunRoutes();
+
+/// Whether the wizard's page is on LittleFS to be served. A device flashed
+/// with the firmware alone has no /www at all, and the wizard cannot run:
+/// the gate then stands aside so /setup (the failsafe page, built into the
+/// firmware) can upload the web UI first.
+bool firstRunPageAvailable();
