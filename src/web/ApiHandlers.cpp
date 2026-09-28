@@ -855,6 +855,15 @@ static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     doc["page_rotation"]    = kdPageRotDeg(k);   // -1: the same as the panel
     // Days between the reader setting its clock from this one; 0 never.
     doc["clock_sync"]       = kdClockSyncDays(k);
+    // The week strip: how its cells are drawn (0 filled .. 3 minimal), and
+    // whether it holds the forecast instead of the calendar.
+    doc["week_style"]       = kdWeekStyle(k);
+    doc["week_forecast"]    = kdWeekForecast(k) ? 1 : 0;
+    // The dividing lines: weight 0..2 (1..3 px), ink 0..3 (light .. black),
+    // style 0..2 (solid, dashed, dotted).
+    doc["rule_weight"]      = kdRuleWeight(k);
+    doc["rule_ink"]         = kdRuleInk(k);
+    doc["rule_style"]       = kdRuleStyle(k);
     doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
     doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
 
@@ -901,6 +910,21 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     if (req->hasParam("clock_sync", true))
         k.clockSync = kdClockSyncFromDays(req->getParam("clock_sync", true)->value().toInt(),
                                           k.clockSync);
+
+    if (req->hasParam("week_style", true))
+        k.weekStyle = (uint8_t)((k.weekStyle & ~KWEEK_STYLE_MASK) |
+                      (req->getParam("week_style", true)->value().toInt() & KWEEK_STYLE_MASK));
+    if (req->hasParam("week_forecast", true)) {
+        if (req->getParam("week_forecast", true)->value().toInt()) k.weekStyle |= KWEEK_FORECAST;
+        else k.weekStyle &= (uint8_t)~KWEEK_FORECAST;
+    }
+    {
+        int w = kdRuleWeight(k), ink = kdRuleInk(k), st = kdRuleStyle(k);
+        if (req->hasParam("rule_weight", true)) w   = req->getParam("rule_weight", true)->value().toInt();
+        if (req->hasParam("rule_ink", true))    ink = req->getParam("rule_ink", true)->value().toInt();
+        if (req->hasParam("rule_style", true))  st  = req->getParam("rule_style", true)->value().toInt();
+        k.rules = kdRulesPack(w, ink, st);
+    }
 
     if (req->hasParam("face_custom", true)) {
         const String v = req->getParam("face_custom", true)->value();

@@ -796,6 +796,10 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     kd["pageRotation"]    = kdPageRotDeg(config.kindle);   // -1: the same as the panel
     kd["clockOff"]        = config.kindle.clockOff;
     kd["clockSync"]       = kdClockSyncDays(config.kindle);   // days, 0 never
+    // The week strip's look and content, and the rules, as the bytes they
+    // are stored in — kdSkinClamp() narrows them on the way back in.
+    kd["weekStyle"]       = config.kindle.weekStyle;
+    kd["rules"]           = config.kindle.rules;
 
     // ── Network ───────────────────────────────────────────────────────────
     JsonObject net = doc["network"].to<JsonObject>();
@@ -2538,6 +2542,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 if (kd["clockSync"].is<int>())
                     config.kindle.clockSync = kdClockSyncFromDays(kd["clockSync"].as<int>(),
                                                                   config.kindle.clockSync);
+                if (kd["weekStyle"].is<int>())
+                    config.kindle.weekStyle = (uint8_t)kd["weekStyle"].as<int>();
+                if (kd["rules"].is<int>())
+                    config.kindle.rules = (uint8_t)kd["rules"].as<int>();
                 // An imported file is not a form: it can carry anything,
                 // including values written by a firmware that had one more
                 // clock style than this one. Clamped here so the renderer

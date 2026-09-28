@@ -77,7 +77,46 @@ inline const char* kdFaceStack(const KindleConfig& k) {
 
 /// True when `k` asks for nothing the base stylesheet does not already do.
 inline bool kdSkinIsDefault(const KindleConfig& k) {
-    return k.face == KFACE_BOOKERLY && k.boldZones == 0 && k.clockStyle == KCLOCK_PLAIN;
+    return k.face == KFACE_BOOKERLY && k.boldZones == 0 && k.clockStyle == KCLOCK_PLAIN &&
+           k.rules == 0 && (k.weekStyle & 0x03) == 0;
+}
+
+/// How the week strip's day cells are drawn: KWEEK_FILLED .. KWEEK_MINIMAL.
+inline uint8_t kdWeekStyle(const KindleConfig& k) { return k.weekStyle & KWEEK_STYLE_MASK; }
+
+/// Whether the week strip holds the next seven days' forecast rather than
+/// the calendar week.
+inline bool kdWeekForecast(const KindleConfig& k) { return (k.weekStyle & KWEEK_FORECAST) != 0; }
+
+/// The dividing lines: weight (KRULE_THIN..THICK), ink (KRULE_LIGHT..BLACK)
+/// and style (KRULE_SOLID..DOTTED).
+inline uint8_t kdRuleWeight(const KindleConfig& k) { return k.rules & 0x03; }
+inline uint8_t kdRuleInk(const KindleConfig& k)    { return (k.rules >> 2) & 0x03; }
+inline uint8_t kdRuleStyle(const KindleConfig& k)  { return (k.rules >> 4) & 0x03; }
+
+/// Their thickness in design pixels, 1..3.
+inline int kdRulePx(const KindleConfig& k) { return kdRuleWeight(k) + 1; }
+
+/// And packed back, each field clamped to what it can be.
+inline uint8_t kdRulesPack(int weight, int ink, int style) {
+    if (weight < KRULE_THIN || weight > KRULE_THICK) weight = KRULE_THIN;
+    if (ink < KRULE_LIGHT || ink > KRULE_BLACK)      ink = KRULE_LIGHT;
+    if (style < KRULE_SOLID || style > KRULE_DOTTED) style = KRULE_SOLID;
+    return (uint8_t)(weight | (ink << 2) | (style << 4));
+}
+
+/// The ink of a rule as a CSS colour and as an FBInk pen. `soft` is the one
+/// step lighter the rule under the clock is drawn in (.inrule) — #d8d8d8
+/// under the default #aaa, as it always was.
+inline const char* kdRuleCss(uint8_t ink, bool soft) {
+    static const char* const css[5] = {"#000", "#444", "#777", "#aaa", "#d8d8d8"};
+    const int i = 3 - (ink & 3) + (soft ? 1 : 0);
+    return css[i];
+}
+inline const char* kdRuleFbink(uint8_t ink, bool soft) {
+    static const char* const pen[5] = {"BLACK", "GRAY4", "GRAY7", "GRAYA", "GRAYD"};
+    const int i = 3 - (ink & 3) + (soft ? 1 : 0);
+    return pen[i];
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +275,58 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
         case KCLOCK_PLAIN:
         default:
             break;
+    }
+
+    // ── The dividing lines ──────────────────────────────────────────────────
+    // The sheet's own rules are the default: one pixel, #aaa, solid, and the
+    // softer #d8d8d8 under the clock. Anything else is written over them here.
+    // A heavier rule takes its extra height out of the margin under it, so
+    // the footer stays where it was on a page with no room to spare.
+    if (k.rules) {
+        static const char* const style[3] = {"solid", "dashed", "dotted"};
+        const int w = kdRulePx(k);
+        const char* st  = style[kdRuleStyle(k) % 3];
+        const char* ink = kdRuleCss(kdRuleInk(k), false);
+        const char* soft = kdRuleCss(kdRuleInk(k), true);
+        out += ".rule{border-top:";      out += kdPx(w); out += "px "; out += st;
+        out += " ";                      out += ink;
+        out += ";margin-bottom:";        out += kdPx(7 - w); out += "px}";
+        out += ".inrule{border-top:";    out += kdPx(w); out += "px "; out += st;
+        out += " ";                      out += soft;
+        out += ";margin-bottom:";        out += kdPx(7 - w); out += "px}";
+        out += ".top .sep{border-left:"; out += kdPx(w); out += "px "; out += st;
+        out += " ";                      out += ink; out += "}";
+        out += ".foot{border-top:";      out += kdPx(w); out += "px "; out += st;
+        out += " ";                      out += ink; out += "}";
+    }
+
+    // ── The week strip's cells ──────────────────────────────────────────────
+    // Filled is the sheet's own. The others clear the cells and mark the
+    // current day their own way; the weekend keeps a darker weekday name, so
+    // it still reads as the end of the week without a grey block to say so.
+    // .wf, the forecast in the strip, frames the current day in every style
+    // rather than inverting it — see appendWeekFc().
+    const uint8_t ws = kdWeekStyle(k);
+    if (ws != KWEEK_FILLED) {
+        out += ".wd,.wd-we{background:none}.wd-we .wd-n{color:#444}";
+        if (ws == KWEEK_OUTLINE) {
+            out += ".wk{border-collapse:collapse}.wd{border:";
+            out += kdPx(1);
+            out += "px solid ";
+            out += kdRuleCss(kdRuleInk(k), false);
+            out += "}";
+        }
+        if (ws == KWEEK_MINIMAL) {
+            // Underlined, not inverted: the lightest mark that still says
+            // which day it is from across the room.
+            out += ".wd-now{background:none;color:#000;border-bottom:";
+            out += kdPx(3);
+            out += "px solid #000}.wd-now .wd-n{color:#000}.wd-now .wd-d{font-weight:bold}"
+                   ".wf .wd-now{outline:none}";
+        } else {
+            out += ".wd-now{background:#000;color:#fff}";
+        }
+        out += ".wf .wd-now{background:none;color:#111}";
     }
 }
 
@@ -449,6 +540,10 @@ inline void kdSkinClamp(KindleConfig& k) {
     // Every day — the default, and an older config's 0 — for a byte nobody
     // recognises: a clock set too often costs nothing, one never set drifts.
     if (k.clockSync > KCLOCK_SYNC_MAX && k.clockSync != KCLOCK_SYNC_OFF) k.clockSync = 0;
+    // The week strip's and the rules' spare bits, and a rule field past its
+    // last value, go back to the page as it was.
+    k.weekStyle &= (uint8_t)(KWEEK_STYLE_MASK | KWEEK_FORECAST);
+    k.rules = kdRulesPack(k.rules & 0x03, (k.rules >> 2) & 0x03, (k.rules >> 4) & 0x03);
     k.boldZones &= 0x01FF;
     k.showFlags &= KSHOW_ALL;
     k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';

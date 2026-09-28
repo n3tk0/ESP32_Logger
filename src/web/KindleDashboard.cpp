@@ -754,6 +754,65 @@ static void appendWeek(String& out, uint32_t now, bool rule = true) {
     out += F("</tr></table>");
 }
 
+/// Whether the week strip holds the forecast: the reader asked for it, and
+/// there is a fresh one to put there. Otherwise it is the calendar, as it
+/// always was — a strip of empty cells would say less than the dates do.
+static bool kdWeekFcOn(const KindleConfig& k) {
+    #ifdef MODULE_FORECAST_ENABLED
+    if (!kdWeekForecast(k)) return false;
+    const auto& fc = forecastModule.snapshot();
+    const uint32_t now = (uint32_t)time(nullptr);
+    return fc.valid && fc.days[0].valid && fc.fetchedAt && now >= fc.fetchedAt &&
+           now - fc.fetchedAt <= KD_FORECAST_STALE_S;
+    #else
+    (void)k;
+    return false;
+    #endif
+}
+
+#ifdef MODULE_FORECAST_ENABLED
+/// The week strip holding the forecast: today and the six days after it, each
+/// cell its weekday, the condition and the high over the low. Today is framed
+/// rather than inverted — an icon drawn in black on black is no icon — and
+/// the cells are one height with the calendar's, month heading included, so
+/// nothing else on the page moves when the reader switches between them.
+static void appendWeekFc(String& out, bool rule) {
+    const auto& fc = forecastModule.snapshot();
+    if (rule) out += F("<div class=\"rule\"></div>");
+    out += F("<table class=\"wk wf\"><tr>");
+    for (int i = 0; i < ForecastModule::WEEK_N; i++) {
+        const ForecastModule::Period& d = fc.days[i];
+        out += (i == 0) ? F("<td class=\"wd wd-now\">") : F("<td class=\"wd\">");
+        out += F("<div class=\"wd-n\">");
+        out += d.valid ? forecastPeriodLabel(d) : "";
+        out += F("</div>");
+        if (d.valid) {
+            appendWeatherIcon(out, d.code, kdPx(30));
+            out += F("<div class=\"wf-t\">");
+            out += (int)lroundf(d.tempC);
+            out += F("&deg;");
+            if (isfinite(d.lowC)) {
+                out += F("<span class=\"dim\">/");
+                out += (int)lroundf(d.lowC);
+                out += F("&deg;</span>");
+            }
+            out += F("</div>");
+        }
+        out += F("</td>");
+    }
+    out += F("</tr></table>");
+}
+#endif
+
+/// The week strip, whichever it holds.
+static void appendWeekStrip(String& out, const KindleConfig& skin, uint32_t now,
+                            bool rule = true) {
+    #ifdef MODULE_FORECAST_ENABLED
+    if (kdWeekFcOn(skin)) { appendWeekFc(out, rule); return; }
+    #endif
+    appendWeek(out, now, rule);
+}
+
 // ---------------------------------------------------------------------------
 // The page
 // ---------------------------------------------------------------------------
@@ -1676,6 +1735,43 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         }
         s->printf("WK_TODAY=%d\n", wday);
 
+        // THE FORECAST IN THE WEEK STRIP, when the reader asked for it and
+        // there is a fresh one: today and the six days after it. The calendar
+        // keys above still go out, for a reader too old to know WK_FC. A day
+        // the provider did not cover (OpenWeatherMap stops after five) keeps
+        // its name and nothing under it.
+        #ifdef MODULE_FORECAST_ENABLED
+        if (kdWeekFcOn(skin)) {
+            const auto& fc = forecastModule.snapshot();
+            s->print("WK_FC=1\n");
+            for (int i = 0; i < ForecastModule::WEEK_N; i++) {
+                const ForecastModule::Period& d = fc.days[i];
+                char wn[24];
+                kdUpperUtf8(wn, sizeof(wn), d.valid ? forecastPeriodLabel(d)
+                                                    : kdWeekdayAhead(tm.tm_wday, i));
+                kdShellVarN(s, "WF%d_NAME", i, wn);
+                s->printf("WF%d_NAMEW=%u\n", i, kdAdvanceMille(wn));
+                if (d.valid) {
+                    char hi[12], lo[12];
+                    snprintf(hi, sizeof(hi), "%d°", (int)lroundf(d.tempC));
+                    if (isfinite(d.lowC)) snprintf(lo, sizeof(lo), "/%d°", (int)lroundf(d.lowC));
+                    else lo[0] = '\0';
+                    s->printf("WF%d_ICON=%d\n", i, weatherIconCode(d.code));
+                    kdShellVarN(s, "WF%d_HI", i, hi);
+                    kdShellVarN(s, "WF%d_LO", i, lo);
+                    s->printf("WF%d_HIW=%u\nWF%d_LOW=%u\n",
+                              i, kdAdvanceMille(hi), i, kdAdvanceMille(lo));
+                } else {
+                    s->printf("WF%d_ICON=\nWF%d_HI=\nWF%d_LO=\nWF%d_HIW=0\nWF%d_LOW=0\n",
+                              i, i, i, i, i);
+                }
+            }
+        } else
+        #endif
+        {
+            s->print("WK_FC=0\n");
+        }
+
         // The month heading the web page draws above the week strip:
         // one name when the week stays inside a month, two with a dash
         // between them when it straddles the boundary.
@@ -1701,7 +1797,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             s->printf("WK%d_NAMEW=%u\nWK%d_DAY=\nWK%d_DAYW=0\n",
                       i, kdAdvanceMille(wkn), i, i);
         }
-        s->print("WK_TODAY=-1\nWK_MON_MONTH=\"\"\nWK_SUN_MONTH=\"\"\n");
+        s->print("WK_TODAY=-1\nWK_MON_MONTH=\"\"\nWK_SUN_MONTH=\"\"\nWK_FC=0\n");
     }
 
     // ── Forecast ──
@@ -1739,7 +1835,11 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         // three and the landscape one all five, and a payload that carried
         // only what this page draws would leave the reader holding the last
         // page's fourth and fifth after it was turned.
+        // The hours whenever the week strip holds the days — see
+        // appendForecastSection().
+        const bool olHourly = kdWeekFcOn(skin);
         for (int i = 0; i < KD_FC_COLS; i++) {
+            const ForecastModule::Period& ol = fc.outlookAt(i, olHourly);
             // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
             // makes. The stored string was written when the provider was last
             // polled, so on this path it was still the language that was set then:
@@ -1747,20 +1847,20 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             // panel on the wall said MON/TUE/WED for up to six hours. Which is the
             // exact defect Period::wday was added to remove.
             char oll[24];
-            kdUpperUtf8(oll, sizeof(oll), forecastPeriodLabel(fc.outlook[i]));
+            kdUpperUtf8(oll, sizeof(oll), forecastPeriodLabel(ol));
             kdShellVarN(s, "FC%d_LABEL", i, oll);
             s->printf("FC%d_LABELW=%u\n", i, kdAdvanceMille(oll));
-            s->printf("FC%d_CODE=%d\n", i, fc.outlook[i].code);
-            s->printf("FC%d_ICON=%d\n", i, weatherIconCode(fc.outlook[i].code));
+            s->printf("FC%d_CODE=%d\n", i, ol.code);
+            s->printf("FC%d_ICON=%d\n", i, weatherIconCode(ol.code));
 
             // The temperature as it is DRAWN, degree included, because .per is
             // centred and what has to be measured is the whole string.
             char olt[12];
-            snprintf(olt, sizeof(olt), "%d°", (int)roundf(fc.outlook[i].tempC));
-            s->printf("FC%d_TEMP=%d\n", i, (int)roundf(fc.outlook[i].tempC));
+            snprintf(olt, sizeof(olt), "%d°", (int)roundf(ol.tempC));
+            s->printf("FC%d_TEMP=%d\n", i, (int)roundf(ol.tempC));
             s->printf("FC%d_TEMPW=%u\n", i, kdAdvanceMille(olt));
-            if (!isnan(fc.outlook[i].lowC))
-                s->printf("FC%d_LOW=%d\n", i, (int)roundf(fc.outlook[i].lowC));
+            if (!isnan(ol.lowC))
+                s->printf("FC%d_LOW=%d\n", i, (int)roundf(ol.lowC));
             else
                 s->printf("FC%d_LOW=\n", i);
         }
@@ -1867,6 +1967,15 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LANG", KD_T("en", "bg"));
     s->printf("DECIMALS=%d\n", skin.tempDecimals);
     s->printf("CLOCK_STYLE=%d\n", skin.clockStyle);
+    // How the week strip's cells are drawn (KWEEK_*), and the dividing lines:
+    // their thickness at this panel's size, their pens and their style
+    // (0 solid, 1 dashed, 2 dotted). A reader too old to know these draws
+    // the page's defaults, which are what 0 in each means anyway.
+    s->printf("WK_STYLE=%d\n", kdWeekStyle(skin));
+    s->printf("RULE_PX=%d\n", kdfMax(1, kdFlowPanel(kdRulePx(skin), resW)));
+    s->printf("RULE_INK=%s\nRULE_SOFT=%s\nRULE_STYLE=%d\n",
+              kdRuleFbink(kdRuleInk(skin), false), kdRuleFbink(kdRuleInk(skin), true),
+              kdRuleStyle(skin));
     s->printf("TIME_FORMAT=%d\n", skin.timeFormat);
     s->printf("SHOW_FLAGS=%u\n", skin.showFlags);
 
@@ -2110,7 +2219,7 @@ static void appendLandBody(String& p, const KindleConfig& skin, uint32_t now,
         }
         if (week) {
             p += F("<td class=\"twk\">");
-            appendWeek(p, now, false);
+            appendWeekStrip(p, skin, now, false);
             p += F("</td>");
         }
         p += F("</tr></table><div class=\"rule\"></div>");
@@ -2129,7 +2238,7 @@ static void appendLandBody(String& p, const KindleConfig& skin, uint32_t now,
     p += F("</td></tr></table>");
 
 #ifdef MODULE_FORECAST_ENABLED
-    if (f.forecast) appendForecastSection(p, ForecastModule::OUTLOOK_N);
+    if (f.forecast) appendForecastSection(p, ForecastModule::OUTLOOK_N, kdWeekFcOn(skin));
 #endif
 }
 
@@ -2499,6 +2608,19 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // unambiguous after e-ink dithering, where a thin ring can read as a smudge.
     KD_S(".wd-now{background:#000;color:#fff}")
 
+    // The forecast in the week strip (appendWeekFc): the calendar's cells and
+    // its heading's height, the current day framed rather than inverted.
+    KD_S(".wf .wd{height:")                   KD_N(77)
+    KD_S("px;vertical-align:top;padding:")    KD_N(3)
+    KD_S("px 0}")
+    KD_S(".wf .wd-now{background:#f4f4f4;color:#111;outline:") KD_N(3)
+    KD_S("px solid #000;outline-offset:-")    KD_N(3)
+    KD_S("px}")
+    KD_S(".wf svg{display:block;margin:")     KD_N(2)
+    KD_S("px auto}")
+    KD_S(".wf-t{font-size:")                  KD_N(16)
+    KD_S("px;line-height:1.15}")
+
     KD_S(".foot{border-top:")                 KD_N(1)
     KD_S("px solid #aaa;margin-top:")         KD_N(6)
     KD_S("px;font-size:")                     KD_N(15)
@@ -2628,10 +2750,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
         // alone, so a collector built with the module and then run on its own AP
         // served the section with a circled question mark in it — furniture, in
         // the one place on the page where the readings could have been.
-        if (rd.flow.forecast) appendForecastSection(p);
+        // The hours in the outlook whenever the week strip holds the days:
+        // the same days twice on one page would be a strip and a half of
+        // nothing new.
+        if (rd.flow.forecast) appendForecastSection(p, 3, kdWeekFcOn(skin));
 #endif
 
-        if (skin.showFlags & KSHOW_WEEK) appendWeek(p, now);
+        if (skin.showFlags & KSHOW_WEEK) appendWeekStrip(p, skin, now);
     }
 
     // The footer carries the two manual repaints. Links rather than anything

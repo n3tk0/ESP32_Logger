@@ -327,6 +327,10 @@ payload_key_ok() {
         # allowed here. They reach one drawn string and nothing else.
         CACHED_AT|CACHED_ON) return 0 ;;
         SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
+        # The week strip's look and, when it holds the forecast, its seven
+        # days; and the dividing lines' thickness, pens and style. The pens
+        # are checked where they are used — see rule_pen().
+        WK_STYLE|WK_FC|WF[0-9]_*|RULE_PX|RULE_INK|RULE_SOFT|RULE_STYLE) return 0 ;;
         # The chart's axis: the five values, the five hours, their widths, and
         # where the image's plot area is inside the image.
         CH_Y[0-9]|CH_Y[0-9]W|CH_H[0-9]|CH_H[0-9]W|CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
@@ -2664,7 +2668,7 @@ zones_derive() {
     if [ "${LAND:-0}" = "1" ]; then
         local top="${TOPROW_Y:-0}" mid
         Z_TOP_H=0
-        [ "$top" -gt 0 ] 2>/dev/null && Z_TOP_H=$(( top + ${RULE_H:-1} ))
+        [ "$top" -gt 0 ] 2>/dev/null && { rule_h; Z_TOP_H=$(( top + RULE_T )); }
         mid=$(( ${RULE3_Y:-440} - Z_TOP_H ))
         Z_SENS_Y=$Z_TOP_H
         Z_SENS_H=$mid
@@ -2825,7 +2829,127 @@ draw_hline() {
     # $1=x $2=y $3=width $4=colour — a rectangle one pixel tall, because FBInk
     # has no line primitive and -L is --linecountcode, which took this script's
     # width as a string to print.
-    fill_rect "$1" "$2" "$3" "${RULE_H:-1}" "$4"
+    #
+    # THE PAGE'S RULES ARE THE READER'S TO SET: GRAYA is "a rule" and GRAYD
+    # "the soft rule under the clock", and both are drawn in the collector's
+    # RULE_INK / RULE_SOFT, RULE_PX thick and RULE_STYLE — see rule_style().
+    # Anything else is drawn as asked.
+    local pen="$4"
+    case "$pen" in
+        GRAYA) rule_pen "${RULE_INK:-}" GRAYA; pen="$RULE_PEN" ;;
+        GRAYD) rule_pen "${RULE_SOFT:-}" GRAYD; pen="$RULE_PEN" ;;
+        *) fill_rect "$1" "$2" "$3" "${RULE_H:-1}" "$pen"; return ;;
+    esac
+    rule_h
+    draw_rule "$1" "$2" "$3" "$RULE_T" "$pen"
+}
+
+# The vertical twin, for the hairline between the columns: $1=x $2=y $3=height
+# $4=width from the layout (SEP_W), 0 for none.
+draw_vline() {
+    [ "${4:-0}" -gt 0 ] 2>/dev/null || return 0
+    rule_pen "${RULE_INK:-}" GRAYA
+    rule_h
+    draw_rule "$1" "$2" "$RULE_T" "$3" "$RULE_PEN"
+}
+
+# The pen a rule is drawn in: $1 as the collector sent it, or $2 when it sent
+# nothing or something that is not a pen. Into RULE_PEN, not echoed — every
+# rule on the page asks, and a subshell each is a fork each.
+RULE_PEN=GRAYA
+rule_pen() {
+    case "$1" in
+        BLACK|GRAY[1-9A-E]) RULE_PEN="$1" ;;
+        *)                  RULE_PEN="$2" ;;
+    esac
+}
+
+# How thick a rule is at this panel's size: the collector's RULE_PX, or the
+# layout file's RULE_H for a collector that sends none. Into RULE_T.
+RULE_T=1
+rule_h() {
+    RULE_T="${RULE_PX:-${RULE_H:-1}}"
+    case "$RULE_T" in ''|*[!0-9]*) RULE_T="${RULE_H:-1}" ;; esac
+    [ "$RULE_T" -ge 1 ] 2>/dev/null || RULE_T=1
+    [ "$RULE_T" -le 12 ] || RULE_T=12
+}
+
+# A rule, solid or not: $1=x $2=y $3=w $4=h $5=pen.
+#
+# DASHED AND DOTTED ARE AN IMAGE, NOT A ROW OF RECTANGLES. FBInk draws one
+# rectangle per process, and a dotted rule across the page is ninety of them —
+# seconds of the reader's time on every repaint, for six rules. So the pattern
+# is written once as a small BMP, kept in $DASH_TMP by its size, pen and style,
+# and blitted like the chart. Anything that goes wrong there draws it solid.
+draw_rule() {
+    local st="${RULE_STYLE:-0}" f
+    case "$st" in 1|2) ;; *) fill_rect "$1" "$2" "$3" "$4" "$5"; return ;; esac
+    [ "${3:-0}" -gt 0 ] 2>/dev/null && [ "${4:-0}" -gt 0 ] 2>/dev/null || return 0
+    f="$DASH_TMP/rule_${st}_${5}_${3}x${4}.bmp"
+    if [ -s "$f" ] || rule_bmp "$f" "$3" "$4" "$5" "$st"; then
+        draw_image "$f" "$1" "$2" && return 0
+    fi
+    fill_rect "$1" "$2" "$3" "$4" "$5"
+}
+
+# Writes a dashed ($5=1) or dotted ($5=2) rule $2 x $3 in pen $4 to $1, as a
+# 24-bit BMP: the format the chart already arrives in, so it is one FBInk
+# certainly reads. The pattern runs along the rule's length and its steps are
+# counted in its thickness, so a heavier rule has longer dashes.
+rule_bmp() {
+    local f="$1" w="$2" h="$3" pen="$4" st="$5"
+    local g on off per row pad size i j p px bg t
+    case "$pen" in
+        BLACK) g=0 ;;
+        GRAY[1-9]) g=$(( ${pen#GRAY} * 17 )) ;;
+        GRAYA) g=170 ;; GRAYB) g=187 ;; GRAYC) g=204 ;; GRAYD) g=221 ;; GRAYE) g=238 ;;
+        *) return 1 ;;
+    esac
+    px=$(printf '\\%03o\\%03o\\%03o' "$g" "$g" "$g")
+    bg='\377\377\377'
+    t="$h"; [ "$w" -lt "$h" ] && t="$w"            # the thickness
+    if [ "$st" = "1" ]; then on=$(( t * 5 )); off=$(( t * 3 ))
+                        [ "$on" -lt 6 ] && on=6; [ "$off" -lt 4 ] && off=4
+    else                on="$t"; off=$(( t * 2 )); [ "$off" -lt 2 ] && off=2
+    fi
+    per=$(( on + off ))
+    pad=$(( (4 - (w * 3) % 4) % 4 ))
+    size=$(( 54 + (w * 3 + pad) * h ))
+    {
+        printf 'BM'; le32 "$size"; le32 0; le32 54
+        le32 40; le32 "$w"; le32 "$h"; printf '\001\000\030\000'
+        le32 0; le32 $(( size - 54 )); le32 2835; le32 2835; le32 0; le32 0
+        if [ "$w" -ge "$h" ]; then
+            # Across: one row, the same for every line of the thickness.
+            row=""; i=0
+            while [ "$i" -lt "$w" ]; do
+                if [ $(( i % per )) -lt "$on" ]; then row="$row$px"; else row="$row$bg"; fi
+                i=$(( i + 1 ))
+            done
+            p=0; while [ "$p" -lt "$pad" ]; do row="$row\000"; p=$(( p + 1 )); done
+            j=0; while [ "$j" -lt "$h" ]; do printf "$row"; j=$(( j + 1 )); done
+        else
+            # Down: each line all ink or all paper. BMP rows run bottom up,
+            # which for a pattern that starts with ink only moves where the
+            # last dash is cut.
+            local ink="" paper=""
+            i=0; while [ "$i" -lt "$w" ]; do ink="$ink$px"; paper="$paper$bg"; i=$(( i + 1 )); done
+            p=0; while [ "$p" -lt "$pad" ]; do ink="$ink\000"; paper="$paper\000"; p=$(( p + 1 )); done
+            j=0
+            while [ "$j" -lt "$h" ]; do
+                if [ $(( j % per )) -lt "$on" ]; then printf "$ink"; else printf "$paper"; fi
+                j=$(( j + 1 ))
+            done
+        fi
+    } > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f" && return 0
+    rm -f "$f.tmp"
+    return 1
+}
+
+# A 32-bit little-endian number, as the four bytes a BMP header wants.
+le32() {
+    printf "$(printf '\\%03o\\%03o\\%03o\\%03o' \
+        $(( $1 & 255 )) $(( ($1 >> 8) & 255 )) $(( ($1 >> 16) & 255 )) $(( ($1 >> 24) & 255 )))"
 }
 
 draw_image() {
@@ -3409,7 +3533,7 @@ draw_zones() {
 
     # ── The hairline between the columns ────────────────────────────────────
     if [ "${SEP_W:-1}" -gt 0 ] 2>/dev/null; then
-        fill_rect "${SEP_X:-300}" "${TOP_Y:-20}" "${SEP_W:-1}" "${SEP_H:-210}" GRAYA
+        draw_vline "${SEP_X:-300}" "${TOP_Y:-20}" "${SEP_H:-210}" "${SEP_W:-1}"
     fi
 
     return 0
@@ -3757,6 +3881,13 @@ draw_forecast_body() {
 
 # ── The week strip ───────────────────────────────────────────────────────────
 draw_week() {
+    # WHAT THE STRIP HOLDS: the calendar week, or — WK_FC=1 — the next seven
+    # days' forecast in the same cells. The collector decides, because it is
+    # the end that knows whether there is a fresh forecast to put there.
+    if [ "${WK_FC:-0}" = "1" ]; then
+        draw_week_fc
+        return
+    fi
 
     # Week heading (month)
     if [ -n "${WK_MON_MONTH:-}" ]; then
@@ -3768,12 +3899,20 @@ draw_week() {
                       "${WK_HDG_SZ:-$LAB_SZ}" "GRAY7" "$wk_heading"
     fi
 
+    # HOW THE CELLS ARE DRAWN: WK_STYLE, the page's .wd rules. 0 filled grey
+    # (the weekend darker), 1 an outline round each, 2 no cells at all, 3 no
+    # cells and today underlined rather than inverted. Without a filled cell
+    # the weekend says so with a darker name.
+    local st="${WK_STYLE:-0}" wk_npen wk_t
+    case "$st" in 0|1|2|3) ;; *) st=0 ;; esac
+    rule_h; wk_t="$RULE_T"; mark_t
+    rule_pen "${RULE_INK:-}" GRAYA
+
     # Week strip
     local wk_x="$WK_X" wk_name wk_day wk_bg i wk_nw wk_dw wk_nx wk_dx
     for i in 0 1 2 3 4 5 6; do
         eval "wk_name=\$WK${i}_NAME"
         eval "wk_day=\$WK${i}_DAY"
-
         # CENTRED IN THE CELL, and the number set REGULAR. .wd is
         # text-align:center and .wd-d carries no font-weight, so the page draws
         # seven centred regular numerals; the panel drew seven bold ones hard
@@ -3801,7 +3940,18 @@ draw_week() {
         centre_in "$wk_x" "$WK_CELL_W" "$(( WK_DAY_SZ * ${wk_dw:-0} / 1000 ))"
         wk_dx="$CENTRE_X"
 
-        if [ "$i" = "$WK_TODAY" ]; then
+        # The outline, shared between neighbours as the page's collapsed
+        # borders are: each cell draws its left, top and bottom, and the last
+        # one its right as well.
+        if [ "$st" = "1" ]; then
+            fill_rect "$wk_x" "$WK_Y" "$wk_t" "$WK_CELL_H" "$RULE_PEN"
+            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$wk_t" "$RULE_PEN"
+            fill_rect "$wk_x" "$(( WK_Y + WK_CELL_H - wk_t ))" "$WK_CELL_W" "$wk_t" "$RULE_PEN"
+            [ "$i" = "6" ] && \
+                fill_rect "$(( wk_x + WK_CELL_W - wk_t ))" "$WK_Y" "$wk_t" "$WK_CELL_H" "$RULE_PEN"
+        fi
+
+        if [ "$i" = "$WK_TODAY" ] && [ "$st" != "3" ]; then
             # Today: knocked out of a black plate — and drawn ON that
             # plate, not bgless over it. Bgless left an empty black
             # rectangle where the date should be: the one cell on the
@@ -3810,14 +3960,110 @@ draw_week() {
             fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
             draw_text_reg_inv "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "$wk_name"
             draw_text_reg_inv "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "$wk_day"
+        elif [ "$i" = "$WK_TODAY" ]; then
+            # Minimal: today's name black, its date bold, a bar under it.
+            fill_rect "$wk_x" "$(( WK_Y + WK_CELL_H - WK_MARK_T ))" \
+                      "$WK_CELL_W" "$WK_MARK_T" BLACK
+            draw_text_reg "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "BLACK" "$wk_name"
+            draw_text_bold "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "BLACK" "$wk_day"
         else
-            wk_bg="GRAYE"
-            { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
-            fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
-            draw_text_reg "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "GRAY7" "$wk_name"
+            wk_npen="GRAY7"
+            if [ "$st" = "0" ]; then
+                wk_bg="GRAYE"
+                { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
+                fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
+            elif [ "$i" = "5" ] || [ "$i" = "6" ]; then
+                wk_npen="GRAY4"
+            fi
+            draw_text_reg "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "$wk_npen" "$wk_name"
             draw_text_reg "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "BLACK" "$wk_day"
         fi
         wk_x=$((wk_x + WK_CELL_W))
+    done
+}
+
+# How thick the mark on the current day is — the frame round it in the
+# forecast, the bar under it in the minimal calendar: three design pixels at
+# this panel's size. Into WK_MARK_T; set by mark_t() before either is drawn.
+WK_MARK_T=3
+mark_t() {
+    local short="${RES_W:-600}"
+    [ "${RES_H:-800}" -lt "$short" ] 2>/dev/null && short="$RES_H"
+    WK_MARK_T=$(( (3 * short + 300) / 600 ))
+    [ "$WK_MARK_T" -ge 2 ] || WK_MARK_T=2
+}
+
+# ── The forecast in the week strip ───────────────────────────────────────────
+# Today and the six days after it, where the calendar would be: the weekday,
+# the condition, the high and, grey after it, the low. The cells take the
+# calendar's and its month heading's height together, so nothing else on the
+# page moves when the reader switches between the two.
+#
+# TODAY IS FRAMED, NOT INVERTED: a weather icon on a black plate is a white
+# square with nothing in it. The icons carry their own ground (see
+# tools/check_kindle_icons.py), so a filled cell takes the outlook's GRAYE
+# icons and every other style the white-ground ones, fc_<code>_<size>w.bmp.
+draw_week_fc() {
+    local st="${WK_STYLE:-0}" top="${WK_HDG_Y:-$WK_Y}" x="$WK_X" i
+    local h name nw icon hi lo hiw low tsz nh th pad y nx ix hx lx w f sfx=""
+    case "$st" in 0|1|2|3) ;; *) st=0 ;; esac
+    [ "$st" = "0" ] || sfx="w"
+    h=$(( WK_Y + WK_CELL_H - top ))
+    tsz=$(( WK_NAME_SZ * 8 / 7 ))
+    mark_t; rule_h; rule_pen "${RULE_INK:-}" GRAYA
+
+    # Name, icon and temperatures as one block, centred in the cell's height.
+    nh=$(( WK_NAME_SZ * ${TEXT_PX_MILLE:-1160} / 1000 ))
+    th=$(( tsz * ${TEXT_PX_MILLE:-1160} / 1000 ))
+    pad=$(( (h - nh - FC_OL_SZ - th - 4) / 2 ))
+    [ "$pad" -ge 0 ] || pad=0
+
+    draw_hline "${WK_HDG_RULE_X:-$FOOT_RULE_X}" "${WK_HDG_RULE_Y:-$WK_Y}" \
+               "${WK_HDG_RULE_W:-$FOOT_RULE_W}" "GRAYA"
+    for i in 0 1 2 3 4 5 6; do
+        eval "name=\${WF${i}_NAME:-}; nw=\${WF${i}_NAMEW:-0}; icon=\${WF${i}_ICON:-}"
+        eval "hi=\${WF${i}_HI:-}; lo=\${WF${i}_LO:-}; hiw=\${WF${i}_HIW:-0}; low=\${WF${i}_LOW:-0}"
+
+        case "$st" in
+            0) fill_rect "$x" "$top" "$WK_CELL_W" "$h" GRAYE ;;
+            1) fill_rect "$x" "$top" "$RULE_T" "$h" "$RULE_PEN"
+               fill_rect "$x" "$top" "$WK_CELL_W" "$RULE_T" "$RULE_PEN"
+               fill_rect "$x" "$(( top + h - RULE_T ))" "$WK_CELL_W" "$RULE_T" "$RULE_PEN"
+               [ "$i" = "6" ] && \
+                   fill_rect "$(( x + WK_CELL_W - RULE_T ))" "$top" "$RULE_T" "$h" "$RULE_PEN" ;;
+        esac
+        if [ "$i" = "0" ]; then
+            if [ "$st" = "3" ]; then
+                fill_rect "$x" "$(( top + h - WK_MARK_T ))" "$WK_CELL_W" "$WK_MARK_T" BLACK
+            else
+                w="$WK_MARK_T"
+                fill_rect "$x" "$top" "$w" "$h" BLACK
+                fill_rect "$(( x + WK_CELL_W - w ))" "$top" "$w" "$h" BLACK
+                fill_rect "$x" "$top" "$WK_CELL_W" "$w" BLACK
+                fill_rect "$x" "$(( top + h - w ))" "$WK_CELL_W" "$w" BLACK
+            fi
+        fi
+
+        y=$(( top + pad ))
+        centre_in "$x" "$WK_CELL_W" "$(( WK_NAME_SZ * nw / 1000 ))"; nx="$CENTRE_X"
+        if [ "$i" = "0" ]; then draw_text_reg "$nx" "$y" "$WK_NAME_SZ" BLACK "$name"
+        else                    draw_text_reg "$nx" "$y" "$WK_NAME_SZ" GRAY7 "$name"
+        fi
+        y=$(( y + nh + 2 ))
+        if [ -n "$icon" ]; then
+            f="$ICON_DIR/fc_${icon}_${FC_OL_SZ}${sfx}.bmp"
+            [ -f "$f" ] || f="$ICON_DIR/fc_-1_${FC_OL_SZ}${sfx}.bmp"
+            centre_in "$x" "$WK_CELL_W" "$FC_OL_SZ"; ix="$CENTRE_X"
+            draw_image "$f" "$ix" "$y"
+        fi
+        y=$(( y + FC_OL_SZ + 2 ))
+        if [ -n "$hi" ]; then
+            centre_in "$x" "$WK_CELL_W" "$(( tsz * (hiw + low) / 1000 ))"; hx="$CENTRE_X"
+            lx=$(( hx + tsz * hiw / 1000 ))
+            draw_text_bold "$hx" "$y" "$tsz" BLACK "$hi"
+            [ -n "$lo" ] && draw_text_reg "$lx" "$y" "$tsz" GRAY7 "$lo"
+        fi
+        x=$(( x + WK_CELL_W ))
     done
 }
 

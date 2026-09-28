@@ -91,14 +91,29 @@ public:
         // strncpy(dst, src, sizeof-1) would cut it after 23 — mid-character,
         // which shows on the panel as one broken glyph and nothing else.
         char     summary[40] = {0};
-        /// FIVE, of which the upright page draws the first three: the
-        /// landscape page has the width for all five, and a fetch that only
-        /// ever asked for three would leave it nothing to put there.
-        Period   outlook[5];
+        /// The next five steps of three hours (+3 h .. +15 h), and the week
+        /// from today (days[0]) to six days ahead — BOTH, whichever the
+        /// outlook setting is. The outlook columns read one or the other
+        /// (outlookAt()); the Kindle's week strip can hold the days while its
+        /// outlook columns keep the hours, which is why neither is left out.
+        ///
+        /// FIVE hours, of which the upright page draws the first three: the
+        /// landscape page has the width for all five.
+        Period   hours[5];
+        Period   days[7];
+        bool     daily = false;   // the outlook setting when this was fetched
+
+        /// Outlook column `i`: the hours, or tomorrow onwards in daily mode.
+        /// `hourly` asks for the hours whatever the setting says.
+        const Period& outlookAt(int i, bool hourly = false) const {
+            return (daily && !hourly) ? days[i + 1] : hours[i];
+        }
     };
 
-    /// How many outlook columns a fetch fills. See Data::outlook.
+    /// How many outlook columns a fetch fills. See Data::hours.
     static constexpr int OUTLOOK_N = 5;
+    /// How many days the week holds, today included. See Data::days.
+    static constexpr int WEEK_N = 7;
 
     const char* getId()   const override { return "forecast"; }
     const char* getName() const override { return "Weather forecast"; }
@@ -147,9 +162,9 @@ private:
     bool _fetch();
     bool _fetchOpenMeteo();
     bool _fetchOwm();
-    /// Fills d.outlook from OWM's 3-hourly list, collapsing to days when the
-    /// configured mode asks for it. Separate request from the current-weather
-    /// one, because OWM serves them from different endpoints.
+    /// Fills d.hours and d.days from OWM's 3-hourly list, the days collapsed
+    /// out of it. Separate request from the current-weather one, because OWM
+    /// serves them from different endpoints.
     bool _fetchOwmOutlook(Data& d);
 
     Provider _provider     = PROVIDER_OPEN_METEO;
@@ -179,7 +194,10 @@ extern ForecastModule forecastModule;
 /// Kindle renderer does not need to know the provider details.
 /// `columns` is how many outlook columns it draws: three on the upright page,
 /// ForecastModule::OUTLOOK_N on the landscape one.
-void appendForecastSection(String& out, int columns = 3);
+/// `hourly` draws the hours in the outlook columns whatever the module's
+/// outlook setting is — the Kindle page does, when its week strip holds the
+/// days.
+void appendForecastSection(String& out, int columns = 3, bool hourly = false);
 
 /// The caption for one outlook column, in the language set now rather than the
 /// one set when the forecast was fetched. See Period::wday.

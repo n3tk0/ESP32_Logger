@@ -266,6 +266,12 @@ def generate_all():
                 # disc — filled white on purpose, to hide what passes behind
                 # them — are not flattened into the plate with the rest.
                 if sz == outlook_sz:
+                    # And the same size on the white it was rendered on, for
+                    # the week strip's forecast in its unfilled styles
+                    # (draw_week_fc in update_dash.sh).
+                    wpath = out_dir / f"fc_{code}_{sz}w.bmp"
+                    wpath.write_bytes(bmp)
+                    print(f"  {wpath.relative_to(project_root)} ({len(bmp)} bytes)")
                     img = Bmp4(str(path), bmp)
                     why = reground(img, GROUND["outlook"])
                     if why:

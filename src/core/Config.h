@@ -222,6 +222,31 @@ constexpr uint8_t KROT_90  = 1;
 constexpr uint8_t KROT_180 = 2;
 constexpr uint8_t KROT_270 = 3;
 
+// ── The week strip ──────────────────────────────────────────────────────────
+// How its day cells are drawn, in KindleConfig::weekStyle's low two bits. The
+// current day stands out in every one of them.
+constexpr uint8_t KWEEK_FILLED   = 0;   // grey cells, weekend darker (as it was)
+constexpr uint8_t KWEEK_OUTLINE  = 1;   // a hairline round each cell, no fill
+constexpr uint8_t KWEEK_TODAY    = 2;   // no cells; only the current day marked
+constexpr uint8_t KWEEK_MINIMAL  = 3;   // no cells; the current day underlined
+constexpr uint8_t KWEEK_STYLE_MASK = 0x03;
+// And what it holds: the calendar week, or the next seven days' forecast.
+constexpr uint8_t KWEEK_FORECAST = 0x10;
+
+// ── The dividing lines ──────────────────────────────────────────────────────
+// KindleConfig::rules, packed: weight in bits 0-1, ink in 2-3, style in 4-5.
+// Every field's 0 is the page as it was, so an older config changes nothing.
+constexpr uint8_t KRULE_THIN     = 0;   // 1 design pixel
+constexpr uint8_t KRULE_MEDIUM   = 1;   // 2
+constexpr uint8_t KRULE_THICK    = 2;   // 3
+constexpr uint8_t KRULE_LIGHT    = 0;   // #aaa
+constexpr uint8_t KRULE_MID      = 1;   // #777
+constexpr uint8_t KRULE_DARK     = 2;   // #444
+constexpr uint8_t KRULE_BLACK    = 3;   // #000
+constexpr uint8_t KRULE_SOLID    = 0;
+constexpr uint8_t KRULE_DASHED   = 1;
+constexpr uint8_t KRULE_DOTTED   = 2;
+
 // ── Which shape the page is drawn in ────────────────────────────────────────
 // A collector running as its own access point — a wifi or ESP-NOW node talking
 // to it directly, nothing upstream — cannot fetch a forecast, and the forecast
@@ -423,7 +448,14 @@ struct KindleConfig {
     // older config holds and means "the same as the panel", 1..4 are
     // KROT_0..KROT_270 plus one. Read through kdPageRot().
     uint8_t  pageRot;
-    uint8_t  reserved[3];
+    // v15.4 — the week strip's look and what it holds, and the page's
+    // dividing lines, formerly in reserved[]. 0 in both is what an older
+    // config holds and is the page as it was: filled day cells with the
+    // calendar in them, one-pixel light-grey solid rules. Read through the
+    // kdWeek*() and kdRule*() helpers in KindleSkin.h.
+    uint8_t  weekStyle;       // KWEEK_* in the low bits, KWEEK_FORECAST
+    uint8_t  rules;           // KRULE_* weight, ink and style packed
+    uint8_t  reserved[1];
 };
 
 struct DeviceConfig {
