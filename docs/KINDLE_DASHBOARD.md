@@ -531,7 +531,14 @@ the two cannot disagree about where a thing is.
    the clock and the captions grow together up to the standalone page's sizes,
    a sixth larger, where the width of their column stops them. Whatever is
    left makes the chart taller (`/kindle/graph.bmp?h=N`). With the chart off
-   the readings take all of it.
+   the readings take all of it. On, it is always drawn: with nothing
+   recorded yet it is drawn empty — the grid and the hour axis, no
+   scale down the side, and "The 24 hour record fills as readings arrive."
+   inside the plot — so the page does not change shape when the first
+   reading lands. For its first two hours the chart is the last two
+   hours in five-minute buckets (`TrendRing::recent()`, axis in minutes,
+   "Last 2 hours"), so a line appears five minutes after the first reading;
+   from the third hour it is the 24-hour chart.
 3. **The grid tries every way of breaking its readings into rows** and keeps
    the one that sets them largest, all at one size. Rows share the height, and
    each is centred in its share, so there is no white row at the bottom.

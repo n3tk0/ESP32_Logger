@@ -88,6 +88,23 @@ public:
     bool series(const char* sensorId, const char* metric, uint32_t nowTs,
                 Hour* out) const;
 
+    // ── The first hours, five minutes at a time ─────────────────────────────
+    //
+    // An hourly chart has nothing to draw until a second hour has begun, so a
+    // collector that has just started showed an empty chart for up to an
+    // hour, and a line of two points for the hour after. Alongside the hourly
+    // buckets each series keeps the last HOURS five-minute ones — two hours —
+    // which the dashboard draws instead while the hourly record is that
+    // short. Kept in RAM only (not in the snapshot): a reboot that restored
+    // the hourly record has no use for them, and one that did not starts
+    // filling them again with the first reading.
+    static constexpr uint32_t FINE_S = 300;
+
+    /// Like series(), in FINE_S buckets: HOURS of them, oldest first, ending
+    /// with the one containing `nowTs`.
+    bool recent(const char* sensorId, const char* metric, uint32_t nowTs,
+                Hour* out) const;
+
     // ── Surviving a reboot ──────────────────────────────────────────────────
     //
     // This ring is the ONLY twenty-four-hour record the firmware keeps.
@@ -156,6 +173,14 @@ private:
     int _find(const char* sensorId, const char* metric) const;
 
     Series _s[MAX_SERIES] = {};
+
+    /// The five-minute buckets, by the same index as _s. Apart from Series
+    /// so that the snapshot's layout — sizeof(Series) — is unchanged.
+    struct Fine {
+        uint32_t lastSlot;          // absolute FINE_S slot last written
+        Hour     h[HOURS];
+    };
+    Fine _f[MAX_SERIES] = {};
     bool   _dirty = false;      ///< an hour was completed; see dirty()
     // NOT `= portMUX_INITIALIZER_UNLOCKED`. The unlocked state is not zero
     // (owner = 0xB33FFFFF), and one non-zero member makes the compiler emit

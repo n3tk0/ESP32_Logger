@@ -341,25 +341,74 @@ static bool seriesHasData(const TrendRing::Hour* h) {
     return false;
 }
 
+// ── The first two hours, drawn five minutes at a time ────────────────────
+//
+// An hourly chart has one point in its first hour and two in its second, so
+// a collector that had just started showed an empty chart for an hour and a
+// single segment after it. While the hourly record holds two hours or fewer,
+// the chart is drawn from TrendRing::recent() instead: the last two hours in
+// five-minute buckets, the same 24 points, so every renderer — the page, the
+// image and the panel's axis — only relabels its hours as minutes. From the
+// third hour on it is the 24-hour chart it always was.
+static constexpr int KD_CHART_FINE_HOURS = 2;
+
+static bool kdChartWantsFine(const TrendRing::Hour* tOut, const TrendRing::Hour* tIn,
+                             bool haveOut, bool haveIn) {
+    int n = 0;
+    for (int i = 0; i < TrendRing::HOURS; i++)
+        if ((haveOut && tOut[i].count) || (haveIn && tIn[i].count)) n++;
+    return n <= KD_CHART_FINE_HOURS;
+}
+
+/// Replace the hourly buckets with the five-minute ones, when the chart wants
+/// them. A single point draws nothing — no segment, no band — so until a
+/// second bucket has a reading the chart is the empty one, with its note:
+/// which is five minutes after the first reading.
+static void kdChartUseFine(uint32_t now, TrendRing::Hour* tOut, TrendRing::Hour* tIn,
+                           bool haveOut, bool haveIn) {
+    if (haveOut) trendRing.recent(outdoorSensorId(), "temperature", now, tOut);
+    if (haveIn)  trendRing.recent(indoorSensorId(),  "temperature", now, tIn);
+    int most = 0;
+    for (int s = 0; s < 2; s++) {
+        const TrendRing::Hour* h = s ? tIn : tOut;
+        if (!(s ? haveIn : haveOut)) continue;
+        int n = 0;
+        for (int i = 0; i < TrendRing::HOURS; i++) if (h[i].count) n++;
+        if (n > most) most = n;
+    }
+    if (most < 2) {
+        memset(tOut, 0, sizeof(TrendRing::Hour) * TrendRing::HOURS);
+        memset(tIn,  0, sizeof(TrendRing::Hour) * TrendRing::HOURS);
+    }
+}
+
+/// The label under point i of the chart: "-23h" hourly, "-115m" fine.
+static void kdChartTick(char* buf, size_t n, int i, bool fine) {
+    const int back = TrendRing::HOURS - 1 - i;
+    if (fine) snprintf(buf, n, "-%dm", back * (int)(TrendRing::FINE_S / 60));
+    else      snprintf(buf, n, "-%dh", back);
+}
+
 static void appendChart(String& out,
                         const TrendRing::Hour* a, const TrendRing::Hour* b,
-                        bool haveA, bool haveB, int CHART_H, int chartW = CHART_W) {
+                        bool haveA, bool haveB, int CHART_H, int chartW = CHART_W,
+                        bool fine = false) {
     float lo =  1e9f, hi = -1e9f;
     for (int i = 0; i < TrendRing::HOURS; i++) {
         if (haveA && a[i].count) { if (a[i].min < lo) lo = a[i].min; if (a[i].max > hi) hi = a[i].max; }
         if (haveB && b[i].count) { if (b[i].min < lo) lo = b[i].min; if (b[i].max > hi) hi = b[i].max; }
     }
-    if (lo > hi) {
-        out += F("<p class=\"note\">");
-        out += kdT("The 24 hour record fills as readings arrive.",
-                   "24-часовият запис се попълва с постъпването на данни.");
-        out += F("</p>");
-        return;
-    }
+    // NOTHING RECORDED YET STILL GETS A CHART: the grid and the hour axis,
+    // with no scale down the side and the sentence inside the plot. The
+    // section used to collapse to a line of text, so the page changed shape
+    // the first hour a reading arrived; now it is the same page, filling in.
+    const bool empty = (lo > hi);
+    if (empty) { lo = 0.0f; hi = 1.0f; }
     float pad = (hi - lo) * 0.06f;
     if (pad < 0.4f) pad = 0.4f;
     lo -= pad; hi += pad;
     const float span = hi - lo;
+    if (empty) haveA = haveB = false;
 
     const int L = kdPx(40), R = chartW - kdPx(4), T = kdPx(10), B = CHART_H - kdPx(26);
     const float dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
@@ -400,6 +449,7 @@ static void appendChart(String& out,
         out += F("<line class=\""); out += (k == 4 ? "base" : "grid");
         out += F("\" x1=\""); out += L; out += F("\" y1=\""); out += y;
         out += F("\" x2=\""); out += R; out += F("\" y2=\""); out += y; out += F("\"/>");
+        if (empty) continue;
         char lbl[12]; fmtInt(lbl, sizeof(lbl), v);
         out += F("<text class=\"ax\" x=\""); out += L - kdPx(7);
         out += F("\" y=\""); out += y + kdPx(4);
@@ -450,9 +500,10 @@ static void appendChart(String& out,
     for (int i = 0; i < TrendRing::HOURS; i += 6) {
         out += F("<text class=\"ax\" x=\""); out += KD_X(i);
         out += F("\" y=\""); out += CHART_H - kdPx(8);
-        out += F("\" text-anchor=\"middle\">-");
-        out += (TrendRing::HOURS - 1 - i);
-        out += F("h</text>");
+        out += F("\" text-anchor=\"middle\">");
+        char tick[12]; kdChartTick(tick, sizeof(tick), i, fine);
+        out += tick;
+        out += F("</text>");
     }
     // The right-hand edge is now, and the stride above never lands on it.
     // Leaving it bare made the axis read as if it stopped five hours ago.
@@ -461,6 +512,15 @@ static void appendChart(String& out,
     out += F("\" text-anchor=\"end\">");
     out += kdT("now", "сега");
     out += F("</text>");
+
+    if (empty) {
+        out += F("<text class=\"ax\" x=\""); out += (L + R) / 2;
+        out += F("\" y=\""); out += (T + B) / 2 + kdPx(4);
+        out += F("\" text-anchor=\"middle\">");
+        out += kdT("The 24 hour record fills as readings arrive.",
+                   "24-часовият запис се попълва с постъпването на данни.");
+        out += F("</text>");
+    }
 
     #undef KD_X
     #undef KD_Y
@@ -744,6 +804,9 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     const uint32_t now = (uint32_t)time(nullptr);
     st->ctx.haveOut = trendRing.series(outdoorSensorId(), "temperature", now, st->ctx.tOut);
     st->ctx.haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, st->ctx.tIn);
+    // The same two hours in five minutes the payload's axis labels describe.
+    if (kdChartWantsFine(st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn))
+        kdChartUseFine(now, st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn);
     st->ctx.init(W, H);
     st->begin();
 
@@ -1051,6 +1114,7 @@ struct KdRender {
     KdResolved res[KZ_COUNT];
     char       sub[64];
     KdFlow     flow;
+    bool       chartFine = false;   ///< the first two hours — kdChartWantsFine()
 };
 
 static void kdRenderBegin(KdRender& r, const KindleConfig& skin, uint32_t now,
@@ -1432,6 +1496,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
     const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
     const bool haveP   = trendRing.series(outdoorSensorId(), "pressure",    now, tPress);
+    // Decided here, applied at the chart below: OUT_RANGE is the whole
+    // record's, and is read from the hourly buckets before they are swapped.
+    const bool chartFine = kdChartWantsFine(tOut, tIn, haveOut, haveIn);
 
     KindleConfig skin = config.kindle;
     kdSkinClamp(skin);
@@ -1690,7 +1757,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // ── UI labels ──
     kdShellVar(s, "LBL_OUTSIDE", KD_T("OUTSIDE", "НАВЪН"));
     kdShellVar(s, "LBL_INSIDE", KD_T("INSIDE", "ВЪТРЕ"));
-    kdShellVar(s, "LBL_LAST24", KD_T("LAST 24 HOURS", "ПОСЛЕДНИТЕ 24 ЧАСА"));
+    kdShellVar(s, "LBL_LAST24", chartFine ? KD_T("LAST 2 HOURS", "ПОСЛЕДНИТЕ 2 ЧАСА")
+                                          : KD_T("LAST 24 HOURS", "ПОСЛЕДНИТЕ 24 ЧАСА"));
     kdShellVar(s, "LBL_FORECAST", KD_T("FORECAST", "ПРОГНОЗА"));
     {
         char note[96];
@@ -1823,6 +1891,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // under it is drawn — the same test the page makes before drawing its own.
     // A key naming two lines over an empty grid describes a chart that is not
     // there.
+    if (chartFine) kdChartUseFine(now, tOut, tIn, haveOut, haveIn);
     s->printf("CHART_OUT=%d\n", (haveOut && seriesHasData(tOut)) ? 1 : 0);
     s->printf("CHART_IN=%d\n",  (haveIn  && seriesHasData(tIn))  ? 1 : 0);
 
@@ -1877,7 +1946,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         for (int k = 0; k < 5; k++) {
             char lbl[12];
             if (k == 4) snprintf(lbl, sizeof(lbl), "%s", KD_T("now", "сега"));
-            else        snprintf(lbl, sizeof(lbl), "-%dh", 23 - k * 6);
+            else        kdChartTick(lbl, sizeof(lbl), k * 6, chartFine);
             char key[16];
             snprintf(key, sizeof(key), "CH_H%d", k);
             kdShellVar(s, key, lbl);
@@ -1971,10 +2040,11 @@ static void appendChartSection(String& p, const KdRender& rd,
     // between the columns is the separator.
     if (rule) p += F("<div class=\"rule\"></div>");
     p += F("<div class=\"sec\">");
-    p += kdT("Last 24 hours", "Последните 24 часа");
+    p += rd.chartFine ? kdT("Last 2 hours", "Последните 2 часа")
+                      : kdT("Last 24 hours", "Последните 24 часа");
     p += F("</div>");
     appendChart(p, tOut, tIn, haveOut, haveIn, kdPx(kdFlowHtmlChartH(rd.flow)),
-                kdPx(rd.flow.grW));
+                kdPx(rd.flow.grW), rd.chartFine);
     // The key names the lines the chart DREW, which is what appendChart's
     // own lo > hi test turns on — not the series the ring is tracking.
     const bool drewOut = haveOut && seriesHasData(tOut);
@@ -2097,6 +2167,8 @@ static void handleKindle(AsyncWebServerRequest* req) {
     TrendRing::Hour tIn [TrendRing::HOURS];
     const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
     const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
+    const bool chartFine = kdChartWantsFine(tOut, tIn, haveOut, haveIn);
+    if (chartFine) kdChartUseFine(now, tOut, tIn, haveOut, haveIn);
 
     // A clamped COPY, not a reference into the live config. The page reads
     // this a dozen times while it builds; taking the values once means a save
@@ -2110,6 +2182,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     const uint8_t rot = kdRotFor(req, skin);
     KdRender rd;
     kdRenderBegin(rd, skin, now, kdStandalone(), true, kdRotLandscape(rot));
+    rd.chartFine = chartFine;
 
     String p;
     p.reserve(7000);

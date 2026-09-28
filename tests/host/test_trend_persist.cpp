@@ -306,6 +306,36 @@ static void test_a_snapshot_cannot_squat_on_the_slots() {
     CHECK(h[TrendRing::HOURS - 1].min == 21.5f);
 }
 
+// The five-minute buckets the chart draws in its first two hours.
+static void test_recent_keeps_five_minute_buckets() {
+    TrendRing t;
+    t.track("out", "temperature");
+    const uint32_t F = TrendRing::FINE_S;
+    t.add(rd(T0,          "out", "temperature", 5.0f));
+    t.add(rd(T0 + 60u,    "out", "temperature", 7.0f));   // same bucket
+    t.add(rd(T0 + F,      "out", "temperature", 9.0f));   // the next one
+    TrendRing::Hour h[TrendRing::HOURS];
+    CHECK(t.recent("out", "temperature", T0 + F + 10u, h));
+    const int last = TrendRing::HOURS - 1;
+    CHECK_EQ((long)h[last].count, 1L);
+    CHECK(h[last].min == 9.0f);
+    CHECK_EQ((long)h[last - 1].count, 2L);
+    CHECK(h[last - 1].min == 5.0f && h[last - 1].max == 7.0f);
+    CHECK_EQ((long)h[last - 2].count, 0L);
+    // Two hours later every one of them has aged out.
+    CHECK(t.recent("out", "temperature", T0 + F + 2u * HOUR + F, h));
+    for (int i = 0; i < TrendRing::HOURS; i++) CHECK_EQ((long)h[i].count, 0L);
+    // A reading after a long gap clears the stale ones rather than showing them.
+    t.add(rd(T0 + 3u * HOUR, "out", "temperature", 1.0f));
+    CHECK(t.recent("out", "temperature", T0 + 3u * HOUR, h));
+    int n = 0;
+    for (int i = 0; i < TrendRing::HOURS; i++) n += h[i].count ? 1 : 0;
+    CHECK_EQ((long)n, 1L);
+    CHECK(!t.recent("nope", "temperature", T0, h));
+    // And the snapshot's size did not change with them.
+    CHECK(TrendRing::snapshotBytes() <= TrendRing::SNAP_MAX_BYTES);
+}
+
 int main() {
     RUN(test_a_snapshot_restores_the_same_chart);
     RUN(test_time_passing_needs_no_special_case);
@@ -315,5 +345,6 @@ int main() {
     RUN(test_dirty_marks_finished_hours_and_not_every_reading);
     RUN(test_every_tracked_series_travels);
     RUN(test_a_snapshot_cannot_squat_on_the_slots);
+    RUN(test_recent_keeps_five_minute_buckets);
     return SUMMARY();
 }

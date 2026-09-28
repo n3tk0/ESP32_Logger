@@ -3552,19 +3552,28 @@ draw_chart_body() {
     draw_hline "$RULE2_X" "$RULE2_Y" "$RULE2_W" "GRAYA"
     draw_text_reg "$LAB_CHART_X" "$LAB_CHART_Y" "$LAB_SZ" "GRAY7" "$LBL_LAST24"
 
-    # NOTHING RECORDED YET IS NOT THE SAME AS NOTHING HAPPENING. The image is
-    # still a grid when the ring is empty, and a grid with no line in it reads
-    # as a sensor that has stopped. The page prints a sentence instead; so does
-    # this. CH_NOTE carries it, so the wording and the language are the page's.
+    # NOTHING RECORDED YET IS NOT THE SAME AS NOTHING HAPPENING, so an empty
+    # record is drawn as the chart it will become — the grid and the hour axis,
+    # no scale down the side (the collector sends none) — with the sentence the
+    # page prints inside the plot. CH_NOTE carries it, so the wording and the
+    # language are the page's. Without the image the sentence stands alone.
+    if graph_fits "$TMP/graph.bmp" && draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
+        draw_chart_axis
+        if [ -n "${CH_NOTE:-}" ]; then
+            # At the axis size plus a little, so the Bulgarian sentence still
+            # fits the narrower chart beside the readings on a turned page.
+            local nsz=$(( ${AX_SZ:-11} + 2 ))
+            draw_text_reg "$(( GR_X + ${CH_L:-40} + 8 ))" \
+                "$(( GR_Y + (${CH_T:-10} + ${CH_B:-174}) / 2 - nsz / 2 ))" \
+                "$nsz" "GRAY5" "$CH_NOTE"
+        else
+            draw_chart_key
+        fi
+        return 0
+    fi
     if [ -n "${CH_NOTE:-}" ]; then
         draw_text_reg "${GR_X:-20}" "$(( ${GR_Y:-278} + ${GR_H:-200} / 3 ))" \
                       "${LAB_SZ:-16}" "GRAY5" "$CH_NOTE"
-        return 0
-    fi
-
-    if graph_fits "$TMP/graph.bmp" && draw_image "$TMP/graph.bmp" "$GR_X" "$GR_Y"; then
-        draw_chart_axis
-        draw_chart_key
         return 0
     fi
 

@@ -2895,15 +2895,27 @@ reset_log
   exit 0 )
 check "$?" "the chart's axis is labelled, the way the page labels it"
 
-# An empty record is a sentence, not a grid. A grid with no line in it reads as
-# a sensor that has stopped, which is the one thing it does not mean.
+# An empty record is still a chart: the grid, the hour axis, no scale down the
+# side, and the sentence inside the plot. No key — there are no lines to name.
 ( reset_log
+  CH_Y0= CH_Y1= CH_Y2= CH_Y3= CH_Y4= \
   CH_NOTE="The 24 hour record fills as readings arrive." draw_chart_body || exit 1
   grep -q "24 hour record fills" "$FBINK_LOG" || exit 2
-  grep -q -- "-g	file=" "$FBINK_LOG" && exit 3      # and no empty image under it
-  grep -q -- "	--	33	" "$FBINK_LOG" && exit 4      # nor an axis for nothing
+  grep -q -- "file=$DASH_TMP/graph.bmp" "$FBINK_LOG" || exit 3
+  grep -q -- "	--	-23h	" "$FBINK_LOG" || exit 4
+  grep -q -- "	--	33	" "$FBINK_LOG" && exit 5
+  grep -q "outside mean" "$FBINK_LOG" && exit 6
   exit 0 )
-check "$?" "with nothing recorded yet it says so instead of drawing an empty grid"
+check "$?" "with nothing recorded yet it draws the empty chart and says so inside it"
+
+( reset_log
+  rm -f "$DASH_TMP/graph.bmp"
+  CH_NOTE="The 24 hour record fills as readings arrive." draw_chart_body || exit 1
+  grep -q "24 hour record fills" "$FBINK_LOG" || exit 2
+  grep -q "No chart yet" "$FBINK_LOG" && exit 3
+  exit 0 )
+check "$?" "and without the image the sentence still stands alone"
+printf 'BM\202\000\000\000' > "$DASH_TMP/graph.bmp"
 
 # An older collector sends no axis at all. Drawing the image alone is what this
 # script did before, and is still better than placing labels it has not been
