@@ -2183,7 +2183,10 @@ fetch_data() {
         normal|standalone) q="?shape=$LAYOUT"; sep="&" ;;
     esac
     # And which way up, when this panel has its own answer — or cannot turn.
-    rot_local && q="$q${sep}rot=$ROT_LOCAL"
+    rot_local && { q="$q${sep}rot=$ROT_LOCAL"; sep="&"; }
+    # This script draws three indoor readings as two columns (IN_COL); a
+    # collector sends that layout only to a reader that says so.
+    q="$q${sep}col=1"
     if wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.new" "$(host_url)/kindle/data$q" \
             2>/dev/null && payload_ok "$TMP/data.new"; then
         mv "$TMP/data.new" "$TMP/data.txt"
@@ -2880,13 +2883,13 @@ rule_h() {
 # DASHED AND DOTTED ARE AN IMAGE, NOT A ROW OF RECTANGLES. FBInk draws one
 # rectangle per process, and a dotted rule across the page is ninety of them —
 # seconds of the reader's time on every repaint, for six rules. So the pattern
-# is written once as a small BMP, kept in $DASH_TMP by its size, pen and style,
+# is written once as a small BMP, kept in $TMP by its size, pen and style,
 # and blitted like the chart. Anything that goes wrong there draws it solid.
 draw_rule() {
     local st="${RULE_STYLE:-0}" f
     case "$st" in 1|2) ;; *) fill_rect "$1" "$2" "$3" "$4" "$5"; return ;; esac
     [ "${3:-0}" -gt 0 ] 2>/dev/null && [ "${4:-0}" -gt 0 ] 2>/dev/null || return 0
-    f="$DASH_TMP/rule_${st}_${5}_${3}x${4}.bmp"
+    f="$TMP/rule_${st}_${5}_${3}x${4}.bmp"
     if [ -s "$f" ] || rule_bmp "$f" "$3" "$4" "$5" "$st"; then
         draw_image "$f" "$1" "$2" && return 0
     fi

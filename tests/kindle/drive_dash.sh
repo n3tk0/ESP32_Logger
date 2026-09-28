@@ -73,7 +73,7 @@ done
 case "$url" in
     # ?shape= is the page the reader chose, when it chose one; logged, so a
     # test can see it was asked for.
-    *"$WGET_OK_HOST"*/kindle/data|*"$WGET_OK_HOST"*/kindle/data\?shape=*)
+    *"$WGET_OK_HOST"*/kindle/data|*"$WGET_OK_HOST"*/kindle/data\?*)
         echo "$url" >> "${WGET_LOG:-/dev/null}"
         if [ "$out" = "-" ] || [ -z "$out" ]; then cat "$FIXTURE"
         # DATA_TRUNCATE=1 is the connection that died partway through the
@@ -1273,7 +1273,7 @@ check "$?" "the fixture still carries the file-page GRID_ROWS older scripts read
   grep -q "/kindle/graph.bmp?h=$GR_H\$" "$WORK/wget.log" || exit 1
   LAYOUT=standalone
   fetch_data >/dev/null 2>&1
-  grep -q "/kindle/data?shape=standalone\$" "$WORK/wget.log" || exit 2
+  grep -q "/kindle/data?shape=standalone&col=1$" "$WORK/wget.log" || exit 2
   exit 0 )
 check "$?" "the chart is fetched at the layout's height, the data for the chosen page"
 LAYOUT=auto; unset PAGE_MODE; RES_W=600; RES_H=800

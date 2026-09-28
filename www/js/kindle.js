@@ -548,16 +548,18 @@ function kdFlowIndoor(inp, bot, f) {
   if (m === 0) return;
   var top = f.inLabY + f.labSz + 18, ah = bot - top, cap = f.heroSz;
   var a1 = inp.inAdv[0] || 1000, pct = kdPct(inp.inPct), s1, s, wR, stackH;
-  if (m === 3 && !f.land) {
-    var colTop = f.inLabY + f.labSz + 6;
-    var a2 = Math.max(inp.inAdv[1] || 1000, inp.inAdv[2] || 1000);
-    for (s1 = Math.min(cap, ah); s1 > 20; s1--) {
-      s = kdQ(s1 * 6, 10);
+  var colTop = f.inLabY + f.labSz + 6;
+  var a2 = Math.max(inp.inAdv[1] || 1000, inp.inAdv[2] || 1000), c1 = 0, t;
+  if (m === 3 && !f.land && inp.inColOk !== false) {
+    for (t = Math.min(cap, ah); t >= 20 && !c1; t--) {
+      s = kdQ(t * 6, 10);
       wR = Math.max(kdQ(s * a2, 1000) + K.CELL_PAD, K.IN_CAP_W);
       stackH = 2 * (f.labSz + 4 + s) + 6;
-      if (kdQ(s1 * a1, 1000) + K.CELL_PAD + wR <= W && stackH <= bot - colTop) break;
+      if (kdQ(t * a1, 1000) + K.CELL_PAD + wR <= W && stackH <= bot - colTop) c1 = t;
     }
-    s1 = Math.max(20, kdQ(s1 * pct, 100));
+  }
+  if (c1) {
+    s1 = Math.max(20, kdQ(c1 * pct, 100));
     s = kdQ(s1 * 6, 10);
     wR = Math.max(kdQ(s * a2, 1000) + K.CELL_PAD, K.IN_CAP_W);
     stackH = 2 * (f.labSz + 4 + s) + 6;

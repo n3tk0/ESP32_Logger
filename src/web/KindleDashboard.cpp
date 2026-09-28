@@ -754,16 +754,30 @@ static void appendWeek(String& out, uint32_t now, bool rule = true) {
     out += F("</tr></table>");
 }
 
-/// Whether the week strip holds the forecast: the reader asked for it, and
-/// there is a fresh one to put there. Otherwise it is the calendar, as it
-/// always was — a strip of empty cells would say less than the dates do.
+/// Whether the week strip holds the forecast, and where today is in `fc`'s
+/// days: -1 for the calendar. The reader asked for it, the strip is on the
+/// page, and there is a fresh forecast whose first or second day is today —
+/// the second once a forecast fetched before midnight is read after it, when
+/// its first day is yesterday. Otherwise it is the calendar, as it always was:
+/// a strip of empty cells would say less than the dates do.
 #ifdef MODULE_FORECAST_ENABLED
-static bool kdWeekFcOn(const KindleConfig& k) {
-    if (!kdWeekForecast(k)) return false;
-    const auto& fc = forecastModule.snapshot();
-    const uint32_t now = (uint32_t)time(nullptr);
-    return fc.valid && fc.days[0].valid && fc.fetchedAt && now >= fc.fetchedAt &&
-           now - fc.fetchedAt <= KD_FORECAST_STALE_S;
+static int kdWeekFcStart(const KindleConfig& k, const ForecastModule::Data& fc,
+                         uint32_t now) {
+    if (!kdWeekForecast(k) || !(k.showFlags & KSHOW_WEEK)) return -1;
+    if (!fc.valid || !fc.fetchedAt || now < fc.fetchedAt ||
+        now - fc.fetchedAt > KD_FORECAST_STALE_S) return -1;
+    const time_t t = (time_t)now;
+    struct tm tmv;
+    if (now < 1000000000u || localtime_r(&t, &tmv) == nullptr) return -1;
+    for (int i = 0; i < 2; i++)
+        if (fc.days[i].valid && fc.days[i].wday == tmv.tm_wday) return i;
+    return -1;
+}
+
+/// The same, read off a snapshot of its own — for the outlook band, which
+/// steps through the hours whenever the strip holds the days.
+static bool kdWeekFcOn(const KindleConfig& k, uint32_t now) {
+    return kdWeekFcStart(k, forecastModule.snapshot(), now) >= 0;
 }
 
 /// The week strip holding the forecast: today and the six days after it, each
@@ -771,8 +785,9 @@ static bool kdWeekFcOn(const KindleConfig& k) {
 /// rather than inverted — an icon drawn in black on black is no icon — and
 /// the cells are one height with the calendar's, month heading included, so
 /// nothing else on the page moves when the reader switches between them.
-static void appendWeekFc(String& out, uint32_t now, bool rule) {
-    const auto& fc = forecastModule.snapshot();
+static void appendWeekFc(String& out, const ForecastModule::Data& fc, int start,
+                         uint32_t now, bool rule) {
+    static const ForecastModule::Period none;
     // A day the provider did not reach still carries its weekday, as on the
     // panel; the name is worked out from today when there is one.
     const time_t t = (time_t)now;
@@ -781,7 +796,8 @@ static void appendWeekFc(String& out, uint32_t now, bool rule) {
     if (rule) out += F("<div class=\"rule\"></div>");
     out += F("<table class=\"wk wf\"><tr>");
     for (int i = 0; i < ForecastModule::WEEK_N; i++) {
-        const ForecastModule::Period& d = fc.days[i];
+        const ForecastModule::Period& d =
+            start + i < ForecastModule::WEEK_N ? fc.days[start + i] : none;
         out += (i == 0) ? F("<td class=\"wd wd-now\">") : F("<td class=\"wd\">");
         out += F("<div class=\"wd-n\">");
         out += d.valid ? forecastPeriodLabel(d)
@@ -809,7 +825,11 @@ static void appendWeekFc(String& out, uint32_t now, bool rule) {
 static void appendWeekStrip(String& out, const KindleConfig& skin, uint32_t now,
                             bool rule = true) {
     #ifdef MODULE_FORECAST_ENABLED
-    if (kdWeekFcOn(skin)) { appendWeekFc(out, now, rule); return; }
+    {
+        const ForecastModule::Data fc = forecastModule.snapshot();
+        const int start = kdWeekFcStart(skin, fc, now);
+        if (start >= 0) { appendWeekFc(out, fc, start, now, rule); return; }
+    }
     #endif
     appendWeek(out, now, rule);
 }
@@ -1141,7 +1161,8 @@ static uint16_t kdPlaceAdvance(const KindleConfig& skin, const KindleSlot& sl,
 /// the forecast band is on the page; `haveSub` whether the line under the
 /// headline has anything in it; `html` whether it is for the browser page.
 static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT],
-                        bool standalone, bool haveSub, bool html, bool land) {
+                        bool standalone, bool haveSub, bool html, bool land,
+                        bool inCol) {
     const KindleZones& zones = kdSlots();
     bool visible[KZ_COUNT];
     kdZoneVisibility(res, visible);
@@ -1155,6 +1176,7 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     in.land     = land;
     in.outPct   = (uint8_t)kdOutSizePct(skin);
     in.inPct    = (uint8_t)kdInSizePct(skin);
+    in.inColOk  = inCol;
 
     uint8_t used[KZ_GRID_COUNT];
     const int n = (skin.showFlags & KSHOW_GRID) ? kdGridUsed(zones, visible, used) : 0;
@@ -1181,11 +1203,13 @@ struct KdRender {
     bool       chartFine = false;   ///< the first two hours — kdChartWantsFine()
 };
 
+/// `inCol`: the renderer knows the two-column indoor row — the browser page
+/// always, the FBInk panel when its request says ?col=1.
 static void kdRenderBegin(KdRender& r, const KindleConfig& skin, uint32_t now,
-                          bool standalone, bool html, bool land) {
+                          bool standalone, bool html, bool land, bool inCol = true) {
     kdResolveZones(skin, r.res);
     kdSubLine(r.sub, sizeof(r.sub), skin, r.res[KZ_HERO], now);
-    r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html, land);
+    r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html, land, inCol);
 }
 
 static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
@@ -1601,7 +1625,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     const bool standalone = kdStandaloneFor(req);
     const uint8_t rot = kdRotFor(req, skin.rotation);
     KdRender rd;
-    kdRenderBegin(rd, skin, now, standalone, false, kdRotLandscape(rot));
+    kdRenderBegin(rd, skin, now, standalone, false, kdRotLandscape(rot),
+                  req->hasParam("col"));
 
     AsyncResponseStream* s = req->beginResponseStream("text/plain");
 
@@ -1757,11 +1782,14 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         // the provider did not cover (OpenWeatherMap stops after five) keeps
         // its name and nothing under it.
         #ifdef MODULE_FORECAST_ENABLED
-        if (kdWeekFcOn(skin)) {
-            const auto& fc = forecastModule.snapshot();
+        const ForecastModule::Data wfc = forecastModule.snapshot();
+        const int wst = kdWeekFcStart(skin, wfc, now);
+        if (wst >= 0) {
+            static const ForecastModule::Period none;
             s->print("WK_FC=1\n");
             for (int i = 0; i < ForecastModule::WEEK_N; i++) {
-                const ForecastModule::Period& d = fc.days[i];
+                const ForecastModule::Period& d =
+                    wst + i < ForecastModule::WEEK_N ? wfc.days[wst + i] : none;
                 char wn[24];
                 kdUpperUtf8(wn, sizeof(wn), d.valid ? forecastPeriodLabel(d)
                                                     : kdWeekdayAhead(tm.tm_wday, i));
@@ -1853,7 +1881,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         // page's fourth and fifth after it was turned.
         // The hours whenever the week strip holds the days — see
         // appendForecastSection().
-        const bool olHourly = kdWeekFcOn(skin);
+        const bool olHourly = kdWeekFcStart(skin, fc, now) >= 0;
         for (int i = 0; i < KD_FC_COLS; i++) {
             const ForecastModule::Period& ol = fc.outlookAt(i, olHourly);
             // forecastPeriodLabel(), NOT .label — the same call the HTML renderer
@@ -2254,7 +2282,7 @@ static void appendLandBody(String& p, const KindleConfig& skin, uint32_t now,
     p += F("</td></tr></table>");
 
 #ifdef MODULE_FORECAST_ENABLED
-    if (f.forecast) appendForecastSection(p, ForecastModule::OUTLOOK_N, kdWeekFcOn(skin));
+    if (f.forecast) appendForecastSection(p, ForecastModule::OUTLOOK_N, kdWeekFcOn(skin, now));
 #endif
 }
 
@@ -2769,7 +2797,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
         // The hours in the outlook whenever the week strip holds the days:
         // the same days twice on one page would be a strip and a half of
         // nothing new.
-        if (rd.flow.forecast) appendForecastSection(p, 3, kdWeekFcOn(skin));
+        if (rd.flow.forecast) appendForecastSection(p, 3, kdWeekFcOn(skin, now));
 #endif
 
         if (skin.showFlags & KSHOW_WEEK) appendWeekStrip(p, skin, now);

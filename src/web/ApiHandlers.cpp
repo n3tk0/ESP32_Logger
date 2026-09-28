@@ -18,6 +18,9 @@
 // the in-memory ring buffer only — historical FS queries return 0 rows.
 #include "../core/Globals.h"         // config, activeFS
 #include "../core/ModuleRegistry.h"  // Pass 5 phase 3: /api/modules
+#ifdef MODULE_FORECAST_ENABLED
+#  include "../modules/ForecastModule.h"   // a fetch when the week strip wants the days
+#endif
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
 #ifdef FEATURE_REMOTE_NODES
 #include "../sensors/RemoteIngest.h"
@@ -961,7 +964,20 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     // here, where the settings-import path could not reach them.
     kdSkinClamp(k);
 
+    // The week strip taking the forecast needs the days, which OpenWeatherMap
+    // only fetches on request (ForecastModule::_fetchOwmOutlook): fetch them
+    // now rather than leave the calendar up until the next poll.
+    const bool wantDays = (k.weekStyle & KWEEK_FORECAST) &&
+                          !(config.kindle.weekStyle & KWEEK_FORECAST);
     config.kindle = k;
+#ifdef MODULE_FORECAST_ENABLED
+    if (wantDays) {
+        uint32_t waitS = 0;
+        forecastModule.requestRefresh(millis(), waitS);
+    }
+#else
+    (void)wantDays;
+#endif
     if (!saveConfig()) {
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"save failed\"}");
         return;

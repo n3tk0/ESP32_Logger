@@ -267,8 +267,9 @@ static void checkPage(const KdFlowIn& in, const KdFlow& f) {
         CHECK(f.inValY >= f.inLabY + f.labSz + 18);
         CHECK(f.inValSz1 <= f.heroSz);
         CHECK(!f.inStack);
-        // Three, upright, are two columns; anything else is one line.
-        CHECK_EQ(f.inCol, in.nIn == 3 && !in.land);
+        // Only three, upright, are ever two columns; anything else is one
+        // line, as are three whose column would not fit.
+        if (f.inCol) CHECK(in.nIn == 3 && !in.land);
         if (f.inCol) {
             const int s = f.inValSz, lab = f.labSz;
             // The first field and the lower of the other two share a bottom line.
@@ -419,6 +420,29 @@ static void test_every_combination() {
                   KDF_COL_R || f.inValSz1 <= 40);
     }
     std::printf("  %d pages checked\n", g_cases);
+}
+
+static void test_indoor_columns() {
+    KdFlowIn in = defaultPage();
+    in.nIn = 3;
+    in.inAdv[0] = 2600; in.inAdv[1] = 1200; in.inAdv[2] = 1200;
+    KdFlow f = kdFlowCompute(in);
+    CHECK(f.inCol);
+    // A reader that does not know the columns gets the one line.
+    in.inColOk = false;
+    f = kdFlowCompute(in);
+    CHECK(!f.inCol);
+    CHECK_EQ(f.inVal2Y, f.inValY + f.inValSz1 - f.inValSz);
+    // Readings too wide for any column: one line, not a column that overflows.
+    in.inColOk = true;
+    in.inAdv[0] = 9000; in.inAdv[1] = 9000; in.inAdv[2] = 9000;
+    f = kdFlowCompute(in);
+    CHECK(!f.inCol);
+    // And the size setting shrinks what fits, never grows it.
+    in.inAdv[0] = 2600; in.inAdv[1] = 1200; in.inAdv[2] = 1200;
+    const int full = kdFlowCompute(in).inValSz1;
+    in.inPct = 70;
+    CHECK(kdFlowCompute(in).inValSz1 < full);
 }
 
 static void test_switching_a_section_off_never_shrinks_anything() {
@@ -583,6 +607,7 @@ int main() {
     RUN(test_four_readings_fill_two_rows);
     RUN(test_two_indoor_fields_take_the_row);
     RUN(test_every_combination);
+    RUN(test_indoor_columns);
     RUN(test_switching_a_section_off_never_shrinks_anything);
     RUN(test_panel_keys);
     RUN(test_page_css);

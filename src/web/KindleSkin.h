@@ -331,20 +331,35 @@ inline void kdSkinCss(StringT& out, const KindleConfig& k) {
     const uint8_t ws = kdWeekStyle(k);
     if (ws != KWEEK_FILLED) {
         out += ".wd,.wd-we{background:none}.wd-we .wd-n{color:#444}";
+        // A design padding at the page's size, less `w` page pixels, never
+        // below none.
+        auto kdPxLess = [](int design, int w) { const int v = (int)kdPx(design) - w;
+                                                return v > 0 ? v : 0; };
+        // A border is height the sheet measured to fit without, so each one
+        // below gives its width back out of the cell's padding: the strip
+        // stays the height it was, and the footer where it was.
         if (ws == KWEEK_OUTLINE) {
+            // As thick as the page's rules, as the panel draws it (RULE_T).
+            const int w = kdPx(kdRulePx(k));
             out += ".wk{border-collapse:collapse}.wd{border:";
-            out += kdPx(1);
+            out += w;
             out += "px solid ";
             out += kdRuleCss(kdRuleInk(k), false);
-            out += "}";
+            out += ";padding-top:";    out += kdPxLess(6, w);
+            out += "px;padding-bottom:"; out += kdPxLess(5, w);
+            out += "px}.wf .wd{padding-top:"; out += kdPxLess(3, w);
+            out += "px;padding-bottom:";      out += kdPxLess(3, w);
+            out += "px}";
         }
         if (ws == KWEEK_MINIMAL) {
             // Underlined, not inverted: the lightest mark that still says
             // which day it is from across the room.
             out += ".wd-now{background:none;color:#000;border-bottom:";
             out += kdPx(3);
-            out += "px solid #000}.wd-now .wd-n{color:#000}.wd-now .wd-d{font-weight:bold}"
-                   ".wf .wd-now{outline:none}";
+            out += "px solid #000;padding-bottom:";
+            out += kdPxLess(5, kdPx(3));
+            out += "px}.wd-now .wd-n{color:#000}.wd-now .wd-d{font-weight:bold}"
+                   ".wf .wd-now{outline:none;padding-bottom:0}";
         } else {
             out += ".wd-now{background:#000;color:#fff}";
         }

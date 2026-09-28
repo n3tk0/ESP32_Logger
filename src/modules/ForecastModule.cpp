@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <math.h>
+#include "../core/Globals.h"        // config.kindle: whether the week strip wants the days
 #include "../web/DashboardStrings.h"
 #include "../web/KindleDashboard.h"   // kdPx(): the glyphs scale with the page
 
@@ -542,16 +543,22 @@ bool ForecastModule::_fetchOwm() {
 }
 
 bool ForecastModule::_fetchOwmOutlook(Data& d) {
-    // The whole of the free tier's 40 slots: the hours are the first five,
-    // and the week is aggregated out of all of them — today and the next
-    // four days, the fifth only partly covered. The free tier has no daily
-    // endpoint and nothing past five days, so the last cells of a seven-day
-    // week stay empty on this provider.
+    // As few 3-hourly slots as are used, which is also the bound on how much
+    // JSON lands in heap on a 4 MB C3: the hourly columns are the first five
+    // of eight. The days — the daily outlook, or the Kindle's week strip
+    // holding the forecast — are aggregated out of the whole of the free
+    // tier's 40: today and the next four days, the fifth only partly
+    // covered. The free tier has no daily endpoint and nothing past five
+    // days, so the last cells of a seven-day week stay empty here.
+    bool days = (_outlook == OUTLOOK_DAILY);
+#ifdef FEATURE_KINDLE_DASHBOARD
+    days = days || (config.kindle.weekStyle & KWEEK_FORECAST);
+#endif
     char url[256];
     snprintf(url, sizeof(url),
              "https://api.openweathermap.org/data/2.5/forecast"
-             "?lat=%.4f&lon=%.4f&units=metric&cnt=40&appid=%s",
-             (double)_lat, (double)_lon, _apiKey);
+             "?lat=%.4f&lon=%.4f&units=metric&cnt=%d&appid=%s",
+             (double)_lat, (double)_lon, days ? 40 : 8, _apiKey);
 
     const String body = httpsGet(url);
     if (body.isEmpty()) return false;

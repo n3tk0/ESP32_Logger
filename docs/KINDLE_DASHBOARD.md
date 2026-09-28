@@ -648,7 +648,10 @@ The indoor row, upright:
 - three are two columns: the first large on the left, the other two one above
   the other beside it, the lower one on the first one's bottom line. The
   panel gets `IN_COL=1` and `IN_VAL3_Y` (the lower one's top); `IN_VAL2_Y` is
-  the upper one's.
+  the upper one's. Only a panel script that asks for it with `?col=1` gets
+  this layout: an older script would draw the column's two readings side by
+  side in its width, so it gets the one line. When three readings are too
+  wide for the column, they stay on one line too.
 
 On the landscape page the indoor row is too short for two readings one above
 the other, and all three stay on one line.

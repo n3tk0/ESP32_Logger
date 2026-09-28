@@ -237,6 +237,10 @@ struct KdFlowIn {
     uint16_t inAdv[3]   = {0, 0, 0};
     uint8_t outPct   = 100;     ///< the grid's values, per cent of the most that fits
     uint8_t inPct    = 100;     ///< the indoor values, likewise
+    /// Whoever draws it knows the two-column indoor row. An FBInk script from
+    /// before it would draw the column's two readings side by side in the
+    /// column's width, one over the other; it says ?col=1 when it knows.
+    bool    inColOk  = true;
 };
 
 /// Outlook columns at most: five on the landscape page, three upright.
@@ -456,20 +460,23 @@ static inline void kdFlowIndoor(const KdFlowIn& in, int bot, KdFlow& f) {
     const int a1    = in.inAdv[0] ? in.inAdv[0] : 1000;
     const int pct   = kdfPct(in.inPct);
 
-    if (m == 3 && !f.land) {
-        // The column beside the first field: as wide as the wider of the two,
-        // or of their captions, and two captions and two values tall.
-        const int colTop = f.inLabY + f.labSz + 6;
-        const int a2 = kdfMax(in.inAdv[1] ? in.inAdv[1] : 1000,
-                              in.inAdv[2] ? in.inAdv[2] : 1000);
-        int s1 = kdfMin(cap, areaH);
-        for (; s1 > 20; s1--) {
-            const int s  = s1 * 6 / 10;
+    // The column beside the first field: as wide as the wider of the two, or
+    // of their captions, and two captions and two values tall. When nothing
+    // down to 20 fits, the row stays on one line.
+    const int colTop = f.inLabY + f.labSz + 6;
+    const int a2 = kdfMax(in.inAdv[1] ? in.inAdv[1] : 1000,
+                          in.inAdv[2] ? in.inAdv[2] : 1000);
+    int c1 = 0;
+    if (m == 3 && !f.land && in.inColOk) {
+        for (int t = kdfMin(cap, areaH); t >= 20 && !c1; t--) {
+            const int s  = t * 6 / 10;
             const int wR = kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
             const int stackH = 2 * (f.labSz + 4 + s) + 6;
-            if (s1 * a1 / 1000 + KDF_CELL_PAD + wR <= W && stackH <= bot - colTop) break;
+            if (t * a1 / 1000 + KDF_CELL_PAD + wR <= W && stackH <= bot - colTop) c1 = t;
         }
-        s1 = kdfMax(20, s1 * pct / 100);
+    }
+    if (c1) {
+        const int s1 = kdfMax(20, c1 * pct / 100);
         const int s  = s1 * 6 / 10;
         const int wR = kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
         const int stackH = 2 * (f.labSz + 4 + s) + 6;
@@ -963,8 +970,11 @@ inline void kdFlowCss(StringT& out, const KdFlow& f, uint8_t clockStyle, PxFn px
         out += ".iv-1{font-size:"; KDF_PX(f.inValSz1); out += "}";
         // Down to where the layout put the first field: centred in what the
         // column has left under the clock, not hard against its heading.
+        // In two columns the second cell is the taller, and the row's top is
+        // its upper caption, not the first field's top.
+        const int rowTop = f.inCol ? f.inVal2Y - f.labSz - 4 : f.inValY;
         out += ".inrow{margin-top:";
-        KDF_PX(8 + f.inValY - (f.inLabY + f.labSz + 18)); out += "}";
+        KDF_PX(kdfMax(0, 8 + rowTop - (f.inLabY + f.labSz + 18))); out += "}";
         out += ".inrow2{margin-top:"; KDF_PX(10); out += "}";
         out += ".inrow td.c1{text-align:center}";
         if (f.inCol) {
