@@ -780,6 +780,138 @@ function clRemoveSensor(idx) {
   }
 }
 
+// ── Corrections (calibration) ───────────────────────────────────────────────
+// Every driver applies  value × scale + offset  per metric (CalibrationAxis,
+// src/sensors/ISensor.h), read from an object keyed by metric name. The
+// water-flow driver keeps a scalar "calibration" (its Multiplier field) and
+// reads the per-metric object from "cal" instead. A remote sensor applies it
+// on the collector to whatever metrics its node sends (RemoteNodeSensor).
+// The lists mirror each driver's _cal*.load() calls.
+var CL_CAL_METRICS = {
+  bme280: ["temperature", "humidity", "pressure"],
+  bmp280: ["temperature", "pressure"],
+  bme688: ["temperature", "humidity", "pressure", "gas_resistance"],
+  bme680: ["temperature", "humidity", "pressure", "gas_resistance"],
+  ds18b20: ["temperature"],
+  scd4x: ["co2", "temperature", "humidity"],
+  sds011: ["pm25", "pm10"],
+  pms5003: ["pm1", "pm25", "pm10"],
+  sps30: ["pm1", "pm25", "pm4", "pm10"],
+  ens160: ["tvoc", "eco2"],
+  sgp30: ["tvoc", "eco2"],
+  bh1750: ["lux"],
+  veml7700: ["lux", "white"],
+  veml6075: ["uva", "uvb", "uv_index"],
+  hcsr04: ["distance"],
+  rain: ["rain_rate", "rain_total"],
+  wind: ["wind_speed"],
+  soil_moisture: ["moisture"],
+  zmct103c: ["current_arms"],
+  zmpt101b: ["voltage_vrms"],
+  yfs201: ["flow_rate", "volume"],
+  yfs403: ["flow_rate", "volume"],
+  water_flow: ["flow_rate", "volume"],
+  remote: []
+};
+var CL_CAL_UNITS = {
+  temperature: "°C", humidity: "%", pressure: "hPa", gas_resistance: "Ω",
+  co2: "ppm", eco2: "ppm", tvoc: "ppb", pm1: "µg/m³", pm25: "µg/m³",
+  pm4: "µg/m³", pm10: "µg/m³", lux: "lx", white: "lx", distance: "cm",
+  rain_rate: "mm/h", rain_total: "mm", wind_speed: "m/s", moisture: "%",
+  current_arms: "A", voltage_vrms: "V", flow_rate: "L/min", volume: "L"
+};
+
+function clCalKey(s) {
+  return (s.type === "yfs201" || s.type === "yfs403" || s.type === "water_flow") ? "cal" : "calibration";
+}
+
+function clCalRowHtml(metric, entry, unit) {
+  entry = entry || {};
+  var off = (entry.offset !== undefined && entry.offset !== 0) ? entry.offset : "";
+  var sc = (entry.scale !== undefined && entry.scale !== 1) ? entry.scale : "";
+  var u = unit || CL_CAL_UNITS[metric] || "";
+  return '<div class="form-grid cal-row" data-metric="' + esc(metric) + '" style="margin-top:6px">' +
+    '<div class="field"><label class="field-label"><span class="mono">' + esc(metric) + '</span> · ' +
+      esc(spT("fieldCalOffset", "Offset")) + (u ? " (" + esc(u) + ")" : "") + '</label>' +
+      '<input type="number" step="any" name="cal_off_' + esc(metric) + '" class="input" placeholder="0" value="' + esc(String(off)) + '"></div>' +
+    '<div class="field"><label class="field-label">' + esc(spT("fieldCalScale", "Multiplier")) + '</label>' +
+      '<input type="number" step="any" name="cal_sc_' + esc(metric) + '" class="input" placeholder="1" value="' + esc(String(sc)) + '"></div>' +
+    '</div>';
+}
+
+// The section's rows: the driver's metrics, plus any already configured.
+function clCalSectionHtml(s) {
+  var key = clCalKey(s);
+  var cal = (s[key] && typeof s[key] === "object") ? s[key] : {};
+  var list = (CL_CAL_METRICS[s.type] || []).slice();
+  Object.keys(cal).forEach(function (m) { if (list.indexOf(m) === -1) list.push(m); });
+  var html = '<div class="field" style="margin-top:1rem"><label class="field-label">' +
+             esc(spT("fieldCorrections", "Corrections")) + '</label>' +
+             '<p class="hint">' + esc(spT("correctionsHint", "Corrected value = reading × multiplier + offset. Empty means no correction. Applies to new readings only.")) + '</p>' +
+             '<div id="sensor-cal">';
+  list.forEach(function (m) { html += clCalRowHtml(m, cal[m]); });
+  html += '</div>';
+  if (s.type === "remote") {
+    html += '<p class="hint" id="sensor-cal-wait"' + (list.length ? ' style="display:none"' : '') + '>' +
+            esc(spT("correctionsRemoteWait", "The node's metrics appear here once it has reported.")) + '</p>';
+  }
+  return html + '</div>';
+}
+
+// A remote node's metrics are whatever it sends, so they come from the
+// ingest mailbox; a local sensor's live list can name one the table lacks.
+function clWireCal(s) {
+  var box = document.getElementById("sensor-cal");
+  if (!box) return;
+  function add(metric, unit) {
+    if (!metric || box.querySelector('.cal-row[data-metric="' + metric + '"]')) return;
+    box.insertAdjacentHTML("beforeend", clCalRowHtml(metric, null, unit));
+    var w = document.getElementById("sensor-cal-wait");
+    if (w) w.style.display = "none";
+  }
+  if (s.type === "remote") {
+    var node = s.node || s.id;
+    fetchWithTimeout("/api/remote/status", {}, 15000)
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (d) {
+        (d.nodes || []).forEach(function (n) {
+          if (n.id !== node) return;
+          (n.metrics || []).forEach(function (m) { add(m.metric, m.unit); });
+        });
+      })
+      .catch(function () {});
+  } else if (typeof getSensors === "function") {
+    getSensors().then(function (d) {
+      (d.sensors || []).forEach(function (x) {
+        if (x.id === s.id && x.type === s.type) (x.metrics || []).forEach(function (m) {
+          if ((CL_CAL_METRICS[s.type] || []).indexOf(m) !== -1) add(m);
+        });
+      });
+    }).catch(function () {});
+  }
+}
+
+// Read the rows back. Only non-identity entries are stored, and an empty
+// object is dropped so an untouched sensor keeps a tidy config.
+function clReadCal(form, s) {
+  var key = clCalKey(s);
+  var rows = form.querySelectorAll(".cal-row");
+  if (!rows.length) return;
+  var cal = {};
+  rows.forEach(function (row) {
+    var m = row.getAttribute("data-metric");
+    var offEl = row.querySelector('[name="cal_off_' + m + '"]');
+    var scEl = row.querySelector('[name="cal_sc_' + m + '"]');
+    var off = parseFloat(String(offEl ? offEl.value : "").replace(",", "."));
+    var sc = parseFloat(String(scEl ? scEl.value : "").replace(",", "."));
+    if (!isFinite(off)) off = 0;
+    if (!isFinite(sc) || sc === 0) sc = 1;
+    if (off !== 0 || sc !== 1) cal[m] = { offset: off, scale: sc };
+  });
+  if (Object.keys(cal).length) s[key] = cal;
+  else if (s[key] && typeof s[key] === "object") delete s[key];
+}
+
 window.clCurrentEditingSensor = -1;
 
 // Build the inner HTML for the sensor-edit form.  Called by both the popup
@@ -857,6 +989,8 @@ function _clBuildEditFormHtml(s) {
     }
   }
 
+  html += clCalSectionHtml(s);
+
   // Support for custom JSON fields (advanced)
   // A yellow pin (strap, console, no pad) is allowed, as on the node's page:
   // the sensor is saved with allow_unsafe_pins so the firmware accepts it at
@@ -864,6 +998,9 @@ function _clBuildEditFormHtml(s) {
   html += '<p id="sensor-pinwarn" class="hint" style="display:none;color:var(--warn)"></p>';
 
   var stdKeys = ["id", "type", "enabled", "interface", "read_interval_ms", "sda", "scl", "bus", "uart_rx", "uart_tx", "baud", "pin", "node", "work_period_min", "pulses_per_liter", "calibration", "humidityCorrectionEnabled", "humidityCorrectionKappa", "allow_unsafe_pins"];
+  // The per-metric object has its own section now; a scalar "calibration"
+  // (water flow) is the Multiplier field, so both stay out of the overlay.
+  stdKeys.push(clCalKey(s));
   var advObj = {};
   for (var k in s) {
     if (stdKeys.indexOf(k) === -1) advObj[k] = s[k];
@@ -987,6 +1124,7 @@ function _clEditInline(idx, s) {
   row.parentNode.insertBefore(panel, row.nextSibling);
   if (window.Icons && Icons.swap) Icons.swap(panel);
   clWirePinWarn();
+  clWireCal(s);
 
   function dismiss() { panel.remove(); window.clCurrentEditingSensor = -1; }
   panel.querySelector('[data-role="close"]').addEventListener("click", dismiss);
@@ -1019,6 +1157,7 @@ function clEditSensor(idx) {
   btn.onclick = clSaveEditedSensor;
   document.getElementById("sensorPopup").style.display = "flex";
   clWirePinWarn();
+  clWireCal(s);
 }
 
 function clSaveEditedSensor() {
@@ -1066,6 +1205,8 @@ function clSaveEditedSensor() {
       s.calibration = parseFloat(fd.get("calibration") || 1.0);
     }
   }
+
+  clReadCal(form, s);
 
   var adv = fd.get("advanced");
   if (adv && adv !== "{}") {

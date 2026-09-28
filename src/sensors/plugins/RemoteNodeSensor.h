@@ -17,8 +17,14 @@
 //     "enabled":         true,
 //     "node":            "balcony",       // must match the node's own id
 //     "stale_after_ms":  600000,          // 0 disables the freshness check
-//     "read_interval_ms": 30000
+//     "read_interval_ms": 30000,
+//     "calibration":     { "temperature": { "offset": -0.5, "scale": 1.0 } }
 //   }
+//
+// `calibration` is keyed by the metric name the node sends, since a node's
+// metric list is whatever it reports rather than fixed by a driver. It is
+// applied here, on the collector, so WiFi and ESP-NOW nodes are corrected
+// the same way without the node firmware or the radio protocol knowing.
 //
 // `node` defaults to `id` when omitted, which is the common case — name the
 // node after the place and the sensor id after the same place.
@@ -65,4 +71,9 @@ private:
     static constexpr int MAX_METRICS = 8;
     mutable char _metricNames[MAX_METRICS][16] = {};
     mutable int  _metricCount = 0;
+
+    // Per-metric corrections from config["calibration"], matched by name.
+    struct MetricCal { char metric[16]; CalibrationAxis axis; };
+    MetricCal _cal[MAX_METRICS] = {};
+    int       _calCount = 0;
 };

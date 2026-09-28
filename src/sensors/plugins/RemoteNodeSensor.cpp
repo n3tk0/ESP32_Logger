@@ -38,6 +38,20 @@ bool RemoteNodeSensor::init(JsonObjectConst config) {
     _staleAfterMs   = config["stale_after_ms"]   | 600000UL;
     _readIntervalMs = config["read_interval_ms"] | 30000UL;
 
+    _calCount = 0;
+    JsonObjectConst cal = config["calibration"];
+    for (JsonPairConst kv : cal) {
+        if (_calCount >= MAX_METRICS) break;
+        MetricCal& c = _cal[_calCount];
+        strncpy(c.metric, kv.key().c_str(), sizeof(c.metric) - 1);
+        c.metric[sizeof(c.metric) - 1] = '\0';
+        c.axis = CalibrationAxis();
+        c.axis.load(cal, c.metric);
+        // An identity entry is a form left at its defaults: nothing to do.
+        if (c.axis.offset == 0.0f && c.axis.scale == 1.0f) continue;
+        _calCount++;
+    }
+
     if (_node[0] == '\0') {
         Serial.printf("[%s.remote] init refused: no node id\n", getId());
         return false;
@@ -53,6 +67,17 @@ bool RemoteNodeSensor::init(JsonObjectConst config) {
 
 int RemoteNodeSensor::readAll(SensorReading* out, int maxOut) {
     const int n = remoteIngest.drain(_node, out, maxOut, _staleAfterMs);
+
+    // drain() copies out of the mailbox, so correcting the copy here never
+    // compounds on a value handed back again (a stale repeat, a backlog).
+    for (int i = 0; i < n && _calCount > 0; i++) {
+        for (int j = 0; j < _calCount; j++) {
+            if (strcmp(_cal[j].metric, out[i].metric) == 0) {
+                out[i].value = _cal[j].axis.apply(out[i].value);
+                break;
+            }
+        }
+    }
 
     // Remember the metric names for getMetrics(). Rebuilt from each drain so
     // a node that starts reporting humidity mid-life (BMP280 swapped for a
