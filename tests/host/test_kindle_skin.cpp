@@ -412,6 +412,23 @@ static void test_clock_sync_days() {
     CHECK(kdClockSyncDays(k) == 0);
 }
 
+static void test_page_rotation_follows_or_stands_alone() {
+    KindleConfig k = defaults();
+    k.rotation = KROT_90;
+    CHECK(k.pageRot == 0 && kdPageRot(k) == KROT_90 && kdPageRotDeg(k) == -1);
+    k.pageRot = kdPageRotFromDeg(180, k.pageRot);
+    CHECK(kdPageRot(k) == KROT_180 && kdPageRotDeg(k) == 180);
+    k.pageRot = kdPageRotFromDeg(0, k.pageRot);
+    CHECK(kdPageRot(k) == KROT_0 && kdPageRotDeg(k) == 0);   // upright, not "same"
+    k.pageRot = kdPageRotFromDeg(45, k.pageRot);                // not a rotation: kept
+    CHECK(kdPageRotDeg(k) == 0);
+    k.pageRot = kdPageRotFromDeg(-1, k.pageRot);
+    CHECK(kdPageRot(k) == KROT_90 && kdPageRotDeg(k) == -1);
+    k.pageRot = 200;                                             // a byte off storage
+    kdSkinClamp(k);
+    CHECK(k.pageRot == 0 && kdPageRot(k) == KROT_90);
+}
+
 static void test_clamp_leaves_a_valid_config_alone() {
     KindleConfig k = defaults();
     k.face = KFACE_FUTURA;
@@ -444,5 +461,6 @@ int main() {
     RUN(test_clamp_filters_the_font_list);
     RUN(test_clamp_leaves_a_valid_config_alone);
     RUN(test_clock_sync_days);
+    RUN(test_page_rotation_follows_or_stands_alone);
     return SUMMARY();
 }

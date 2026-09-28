@@ -418,7 +418,12 @@ struct KindleConfig {
     // default, every day; KCLOCK_SYNC_OFF never; 1..KCLOCK_SYNC_MAX days.
     // Read through kdClockSyncDays().
     uint8_t  clockSync;
-    uint8_t  reserved[4];
+    // v15.3 — which way up the BROWSER page at /kindle is, apart from the
+    // FBInk panel's `rotation` above. Formerly in reserved[]; 0 is what an
+    // older config holds and means "the same as the panel", 1..4 are
+    // KROT_0..KROT_270 plus one. Read through kdPageRot().
+    uint8_t  pageRot;
+    uint8_t  reserved[3];
 };
 
 struct DeviceConfig {

@@ -602,7 +602,11 @@ cached one never does. The last setting is remembered in `clocksync` beside
 ### On its side: the landscape page
 
 **Rotation** (`rotation` in `/api/kindle/config`: 0, 90, 180 or 270 degrees
-clockwise) turns the page. 180° is the ordinary page upside down. 90° and 270°
+clockwise) turns the FBInk panel's page. The browser page at `/kindle` has a
+rotation of its own, `page_rotation`: -1 (the default, and what an older
+config holds) follows the panel, and 0/90/180/270 turn it independently, so a
+browser on one device can stand one way while the FBInk panel stands another.
+`?rot=` on either request still wins over both. 180° is the ordinary page upside down. 90° and 270°
 are **the landscape page, 800 × 600 design pixels**, laid out by
 `kdFlowLand()`:
 

@@ -288,6 +288,7 @@ KINDLE = {
     # The clock on (a switch the page keeps apart from `show`), upright.
     "clock": 1,
     "rotation": 0,
+    "page_rotation": -1,
     "clock_sync": 1,
     "outdoor_sensor": "balcony",
     "indoor_sensor": "",
@@ -1009,7 +1010,7 @@ class H(http.server.SimpleHTTPRequestHandler):
             for k in ("face", "bold", "show", "clock_style", "time_format",
                       "date_format", "pressure_unit", "decimals", "lang",
                       "refresh_sec", "follow_data", "clock_pin_refresh",
-                      "fbink_res_w", "layout_mode", "clock", "rotation", "clock_sync"):
+                      "fbink_res_w", "layout_mode", "clock", "rotation", "page_rotation", "clock_sync"):
                 if k in body:
                     KINDLE[k] = int(body[k][0])
             for k in ("face_custom", "outdoor_sensor", "indoor_sensor"):

@@ -369,6 +369,19 @@ inline uint16_t kdShowMask(const KindleConfig& k) {
     return (uint16_t)((k.showFlags & KSHOW_ALL) | (k.clockOff ? 0 : KSHOW_CLOCK));
 }
 
+/// Which way up the browser page is: its own setting, or the FBInk panel's
+/// when it has none (KindleConfig::pageRot == 0, an older config's value).
+inline uint8_t kdPageRot(const KindleConfig& k) {
+    return (k.pageRot >= 1 && k.pageRot <= KROT_270 + 1) ? (uint8_t)(k.pageRot - 1)
+                                                         : k.rotation;
+}
+
+/// The browser page's rotation as the API spells it: degrees, or -1 for
+/// "the same as the panel".
+inline int kdPageRotDeg(const KindleConfig& k) {
+    return (k.pageRot >= 1 && k.pageRot <= KROT_270 + 1) ? (k.pageRot - 1) * 90 : -1;
+}
+
 /// A rotation in degrees, as the API and the reader's ?rot= spell it, to a
 /// KROT_* value; anything that is not one of the four is `fallback`.
 inline uint8_t kdRotFromDeg(long deg, uint8_t fallback) {
@@ -379,6 +392,15 @@ inline uint8_t kdRotFromDeg(long deg, uint8_t fallback) {
         case 270: return KROT_270;
         default:  return fallback;
     }
+}
+
+/// The stored KindleConfig::pageRot for what a form or a file sends: -1 is
+/// "the same as the panel", 0/90/180/270 a rotation of its own; anything
+/// else keeps `fallback`.
+inline uint8_t kdPageRotFromDeg(long deg, uint8_t fallback) {
+    if (deg == -1) return 0;
+    const uint8_t r = kdRotFromDeg(deg, 0xFF);
+    return r == 0xFF ? fallback : (uint8_t)(r + 1);
 }
 
 /// Days between the FBInk reader setting its clock from the collector's, as
@@ -422,6 +444,7 @@ inline void kdSkinClamp(KindleConfig& k) {
     // Upright is both what an older config holds and the one answer that is
     // always drawable, so a byte nobody recognises lands there.
     if (k.rotation > KROT_270)          k.rotation = KROT_0;
+    if (k.pageRot > KROT_270 + 1)       k.pageRot = 0;       // the panel's
     if (k.clockOff > 1)                 k.clockOff = 1;
     // Every day — the default, and an older config's 0 — for a byte nobody
     // recognises: a clock set too often costs nothing, one never set drifts.

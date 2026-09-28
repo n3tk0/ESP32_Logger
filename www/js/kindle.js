@@ -1372,7 +1372,7 @@ function kdSnapshot() {
     press:kdVal("kd-press","0"), dec:kdVal("kd-dec","1"),
     refresh:kdVal("kd-refresh",""), follow:kdVal("kd-follow","1"),
     pin:kdVal("kd-clockpin","1"), res:kdVal("kd-fbink-res","0"),
-    layout:kdVal("kd-layout","0"), rot:kdVal("kd-rot","0"), csync:kdCsyncDays(),
+    layout:kdVal("kd-layout","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
     out:kdVal("kd-outdoor-sensor",""), inn:kdVal("kd-indoor-sensor",""),
     show:kdMaskOf(KD_SHOW,"kd-s-"), bold:kdMaskOf(KD_BOLD,"kd-b-"),
     zones:kdZones, groups:kdGroups
@@ -1662,6 +1662,9 @@ function kindleRender(d) {
   kdSet("kd-fbink-res", d.fbink_res_w || 0);
   kdSet("kd-layout",    d.layout_mode || 0);
   kdSet("kd-rot",       d.rotation || 0);
+  // -1 is "the same as the panel", and what a collector too old to send the
+  // key means too.
+  kdSet("kd-prot",      d.page_rotation == null ? -1 : d.page_rotation);
   kdCsyncSet(d.clock_sync);
   kdSet("kd-outdoor-sensor", d.outdoor_sensor || "");
   kdSet("kd-indoor-sensor",  d.indoor_sensor || "");
@@ -1780,6 +1783,7 @@ function kdConfigBody() {
   body.set("show",          show & 0xFF);
   body.set("clock",         (show & 0x0100) ? 1 : 0);
   body.set("rotation",      kdVal("kd-rot", "0"));
+  body.set("page_rotation", kdVal("kd-prot", "-1"));
   body.set("clock_sync",    kdCsyncDays());
   body.set("refresh_sec",   kdVal("kd-refresh", "") || "0");
   body.set("follow_data",   kdVal("kd-follow", "1"));
@@ -1907,6 +1911,7 @@ function kindleDefaults() {
   // did not make.
   kdSet("kd-layout", "0");
   kdSet("kd-rot", "0");
+  kdSet("kd-prot", "-1");
   kdCsyncSet(1);
 
   kdShowInit = 0x1FF;  // KSHOW_ALL, and the clock

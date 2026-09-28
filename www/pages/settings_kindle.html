@@ -311,7 +311,7 @@
                 <p class="hint" id="kd-layout-says"></p>
 
                 <div class="field" style="margin-top:14px">
-                  <label class="field-label" for="kd-rot" data-i18n="kindle.rotation">Which way up</label>
+                  <label class="field-label" for="kd-rot" data-i18n="kindle.rotation">Which way up — the FBInk panel</label>
                   <select id="kd-rot" class="input" data-change="kindleTouched">
                     <option value="0" data-i18n="kindle.rot0">0° — upright, USB at the bottom</option>
                     <option value="90" data-i18n="kindle.rot90">90° — on its side, USB on the right</option>
@@ -319,7 +319,17 @@
                     <option value="270" data-i18n="kindle.rot270">270° — on its side, USB on the left</option>
                   </select>
                 </div>
-                <p class="hint" data-i18n="kindle.rotHint">90° and 270° draw the landscape page: the clock and the week across the top, the readings beside the chart, five forecast columns. The FBInk panel can also be turned on the Kindle itself (KUAL → Settings → Screen), which wins over this.</p>
+                <div class="field" style="margin-top:14px">
+                  <label class="field-label" for="kd-prot" data-i18n="kindle.pageRotation">Which way up — the browser page (/kindle)</label>
+                  <select id="kd-prot" class="input" data-change="kindleTouched">
+                    <option value="-1" data-i18n="kindle.protSame">The same as the FBInk panel</option>
+                    <option value="0" data-i18n="kindle.rot0">0° — upright, USB at the bottom</option>
+                    <option value="90" data-i18n="kindle.rot90">90° — on its side, USB on the right</option>
+                    <option value="180" data-i18n="kindle.rot180">180° — upside down, USB at the top</option>
+                    <option value="270" data-i18n="kindle.rot270">270° — on its side, USB on the left</option>
+                  </select>
+                </div>
+                <p class="hint" data-i18n="kindle.rotHint">90° and 270° draw the landscape page: the clock and the week across the top, the readings beside the chart, five forecast columns. The FBInk panel can also be turned on the Kindle itself (KUAL → Settings → Screen), which wins over this. The browser page can be turned on its own, or follow the panel; the preview shows the panel.</p>
                 <p class="hint" id="kd-pagew"></p>
               </div>
             </div>

@@ -101,11 +101,13 @@ static bool kdStandaloneFor(AsyncWebServerRequest* req) {
 // Which way up the page is. The FBInk reader can carry its own — ROTATE= in
 // dash.conf, KUAL's Settings → Screen → Rotation — and sends it as ?rot= in
 // degrees, so the layout is worked out for the page it will actually draw; the
-// browser page takes it the same way, for a reader to bookmark.
-static uint8_t kdRotFor(AsyncWebServerRequest* req, const KindleConfig& skin) {
+// browser page takes it the same way, for a reader to bookmark. Without one,
+// `stored` — the panel's rotation for the FBInk payload, the page's own
+// (kdPageRot(), which may differ) for the browser page.
+static uint8_t kdRotFor(AsyncWebServerRequest* req, uint8_t stored) {
     if (req && req->hasParam("rot"))
-        return kdRotFromDeg(req->getParam("rot")->value().toInt(), skin.rotation);
-    return skin.rotation;
+        return kdRotFromDeg(req->getParam("rot")->value().toInt(), stored);
+    return stored;
 }
 
 // The ?rot= this request came with, to carry on: every link and meta refresh
@@ -1507,7 +1509,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // The page's shape and everything on it, decided once for this payload:
     // the forecast keys, PAGE_MODE and the layout all have to agree on it.
     const bool standalone = kdStandaloneFor(req);
-    const uint8_t rot = kdRotFor(req, skin);
+    const uint8_t rot = kdRotFor(req, skin.rotation);
     KdRender rd;
     kdRenderBegin(rd, skin, now, standalone, false, kdRotLandscape(rot));
 
@@ -2179,7 +2181,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     // The places and where everything goes, once for the whole page: the
     // stylesheet's sizes and the markup's rows have to come from one answer.
-    const uint8_t rot = kdRotFor(req, skin);
+    const uint8_t rot = kdRotFor(req, kdPageRot(skin));
     KdRender rd;
     kdRenderBegin(rd, skin, now, kdStandalone(), true, kdRotLandscape(rot));
     rd.chartFine = chartFine;

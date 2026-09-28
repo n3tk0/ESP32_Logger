@@ -793,6 +793,7 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     kd["outdoorSensor"]   = config.kindle.outdoorSensor;
     kd["indoorSensor"]    = config.kindle.indoorSensor;
     kd["rotation"]        = config.kindle.rotation * 90;   // degrees, as the API and ?rot= spell it
+    kd["pageRotation"]    = kdPageRotDeg(config.kindle);   // -1: the same as the panel
     kd["clockOff"]        = config.kindle.clockOff;
     kd["clockSync"]       = kdClockSyncDays(config.kindle);   // days, 0 never
 
@@ -2529,6 +2530,9 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 if (kd["rotation"].is<int>())
                     config.kindle.rotation = kdRotFromDeg(kd["rotation"].as<int>(),
                                                           config.kindle.rotation);
+                if (kd["pageRotation"].is<int>())
+                    config.kindle.pageRot = kdPageRotFromDeg(kd["pageRotation"].as<int>(),
+                                                             config.kindle.pageRot);
                 if (kd["clockOff"].is<int>())
                     config.kindle.clockOff = (uint8_t)kd["clockOff"].as<int>();
                 if (kd["clockSync"].is<int>())

@@ -745,6 +745,29 @@ with sync_playwright() as p:
     got = pg.evaluate(
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(got.get("rotation") == 90, "the rotation reaches the device (%r)" % got.get("rotation"))
+    check(got.get("page_rotation") == -1,
+          "and the browser page still follows the panel (%r)" % got.get("page_rotation"))
+
+    # The browser page on a rotation of its own, and back to following.
+    tab(pg, "reader")
+    pg.select_option("#kd-prot", "180")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("page_rotation") == 180 and got.get("rotation") == 90,
+          "the browser page turns on its own, the panel stays (%r, %r)"
+          % (got.get("page_rotation"), got.get("rotation")))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "reader")
+    check(pg.input_value("#kd-prot") == "180", "and it comes back on the re-read")
+    pg.select_option("#kd-prot", "-1")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("page_rotation") == -1, "and Same as the panel goes out as -1")
 
     # The clock is a region switch like the others, but it goes out as
     # `clock`, and `show` keeps only the stored bits — a page that posted the
