@@ -2898,7 +2898,7 @@ check "$?" "the chart's axis is labelled, the way the page labels it"
 # An empty record is still a chart: the grid, the hour axis, no scale down the
 # side, and the sentence inside the plot. No key — there are no lines to name.
 ( reset_log
-  CH_Y0= CH_Y1= CH_Y2= CH_Y3= CH_Y4= \
+  CH_Y0= CH_Y1= CH_Y2= CH_Y3= CH_Y4= CHART_OUT=0 CHART_IN=0 \
   CH_NOTE="The 24 hour record fills as readings arrive." draw_chart_body || exit 1
   grep -q "24 hour record fills" "$FBINK_LOG" || exit 2
   grep -q -- "file=$DASH_TMP/graph.bmp" "$FBINK_LOG" || exit 3

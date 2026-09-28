@@ -3566,9 +3566,10 @@ draw_chart_body() {
             draw_text_reg "$(( GR_X + ${CH_L:-40} + 8 ))" \
                 "$(( GR_Y + (${CH_T:-10} + ${CH_B:-174}) / 2 - nsz / 2 ))" \
                 "$nsz" "GRAY5" "$CH_NOTE"
-        else
-            draw_chart_key
         fi
+        # Names no line on an empty record: the collector sends CHART_OUT and
+        # CHART_IN as 0 there, and the key draws only what those name.
+        draw_chart_key
         return 0
     fi
     if [ -n "${CH_NOTE:-}" ]; then
