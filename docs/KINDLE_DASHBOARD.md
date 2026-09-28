@@ -599,6 +599,40 @@ when the two are more than ten minutes apart. Only a payload fetched that minute
 cached one never does. The last setting is remembered in `clocksync` beside
 `dash.conf`.
 
+### The week strip and the dividing lines
+
+**Week strip** on the Whole page tab sets what the strip holds and how its
+cells are drawn; the strip itself is still switched on and off in the Zones
+tab (`KSHOW_WEEK`).
+
+- `week_forecast` in `/api/kindle/config`: 0 the calendar week, 1 the next
+  seven days' forecast (today first), each cell the weekday, the condition
+  and the high over the low, in the calendar's cells and its month heading's
+  height. It needs the forecast module and a forecast no older than six
+  hours; otherwise the calendar is drawn. While it is there, the forecast
+  band's outlook columns show the +3 h steps whatever the module's outlook
+  setting is, so the page does not show the same days twice. Open-Meteo
+  gives all seven days; OpenWeatherMap's free tier stops after five, and the
+  last cells keep only their weekday. `/kindle/data` sends `WK_FC=1` and
+  `WF<i>_NAME/_ICON/_HI/_LO` with their widths.
+- `week_style`: 0 filled (grey cells, the weekend darker, as before), 1
+  outlined, 2 only today marked, 3 minimal (today underlined, its date bold).
+  In the forecast, today is framed rather than inverted in every style but
+  minimal. The panel's unfilled styles use the white-ground icons
+  `fc_<code>_<size>w.bmp`. Sent to the panel as `WK_STYLE`.
+
+**Dividing lines** set the rules between the sections and between the two
+columns, on both renderers: `rule_weight` 0..2 (1, 2 or 3 design pixels,
+scaled to the panel, so thin is 1 px at 600 × 800 and 2 px at 1072 × 1448),
+`rule_ink` 0..3 (light grey, mid grey, dark grey, black; the line under the
+clock is one step lighter) and `rule_style` 0..2 (solid, dashed, dotted).
+All three 0 is the page as it was. The panel gets `RULE_PX`, `RULE_INK`,
+`RULE_SOFT` and `RULE_STYLE`, and draws a dashed or dotted rule as a small
+BMP it writes once into its temp directory and then reuses.
+
+The two settings live in `KindleConfig::weekStyle` and `KindleConfig::rules`,
+two of the old reserved bytes, so an older config reads as the old page.
+
 ### On its side: the landscape page
 
 **Rotation** (`rotation` in `/api/kindle/config`: 0, 90, 180 or 270 degrees

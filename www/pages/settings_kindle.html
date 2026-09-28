@@ -151,6 +151,69 @@
               </div>
             </div>
 
+            <div class="card" id="kd-card-week" style="margin-top:var(--gap)">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="layout"></span> <span data-i18n="kindle.weekTitle">Week strip</span></div>
+              </div>
+              <div class="card-body">
+                <div class="kd-fields">
+                  <div class="field">
+                    <label class="field-label" for="kd-wkfc" data-i18n="kindle.weekHolds">What it holds</label>
+                    <select id="kd-wkfc" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.weekHolds0">The calendar week</option>
+                      <option value="1" data-i18n="kindle.weekHolds1">The forecast for the next seven days</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-wkst" data-i18n="kindle.weekStyle">The day cells</label>
+                    <select id="kd-wkst" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.weekStyle0">Filled — grey, the weekend darker</option>
+                      <option value="1" data-i18n="kindle.weekStyle1">Outlined — a line round each, no fill</option>
+                      <option value="2" data-i18n="kindle.weekStyle2">Only today marked</option>
+                      <option value="3" data-i18n="kindle.weekStyle3">Minimal — today underlined</option>
+                    </select>
+                  </div>
+                </div>
+                <p class="hint" data-i18n="kindle.weekHint">The forecast takes the calendar's place and height: today and the six days after it, each with its condition and its high and low. While it is there, the forecast band's columns step through the next hours. It needs the Weather forecast module and a fresh forecast; without one the calendar is drawn. The week strip itself is switched on and off in the Zones tab.</p>
+              </div>
+            </div>
+
+            <div class="card" id="kd-card-rules" style="margin-top:var(--gap)">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="sliders"></span> <span data-i18n="kindle.rulesTitle">Dividing lines</span></div>
+              </div>
+              <div class="card-body">
+                <div class="kd-fields">
+                  <div class="field">
+                    <label class="field-label" for="kd-rulew" data-i18n="kindle.ruleWeight">Thickness</label>
+                    <select id="kd-rulew" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.ruleWeight0">Thin — 1 px</option>
+                      <option value="1" data-i18n="kindle.ruleWeight1">Medium — 2 px</option>
+                      <option value="2" data-i18n="kindle.ruleWeight2">Thick — 3 px</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-rulei" data-i18n="kindle.ruleInk">Colour</label>
+                    <select id="kd-rulei" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.ruleInk0">Light grey</option>
+                      <option value="1" data-i18n="kindle.ruleInk1">Mid grey</option>
+                      <option value="2" data-i18n="kindle.ruleInk2">Dark grey</option>
+                      <option value="3" data-i18n="kindle.ruleInk3">Black</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="kd-rules" data-i18n="kindle.ruleStyle">Line</label>
+                    <select id="kd-rules" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.ruleStyle0">Solid</option>
+                      <option value="1" data-i18n="kindle.ruleStyle1">Dashed</option>
+                      <option value="2" data-i18n="kindle.ruleStyle2">Dotted</option>
+                    </select>
+                  </div>
+                </div>
+                <p class="hint" data-i18n="kindle.rulesHint">The lines between the sections and between the two columns, on the browser page and the FBInk panel alike. The design pixel is scaled to the panel, so Thin is one pixel on a 600 x 800 Kindle and two on a 1072 x 1448 one. The line under the clock is drawn one step lighter.</p>
+              </div>
+            </div>
+
             <div class="card" id="kd-card-units" style="margin-top:var(--gap)">
               <div class="card-head">
                 <div class="card-title"><span data-icon="gauge"></span> <span data-i18n="kindle.unitsTitle">Units and language</span></div>

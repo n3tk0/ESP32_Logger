@@ -114,7 +114,7 @@ var KD_ZONES = [
   { id:"week", name:"Week strip",
     where:"The seven days above the footer, today knocked out in black.",
     show:0x0040, bold:0x0080,
-    fill:["text","Drawn from the device's own date."] },
+    fill:["jump","kd-card-week","The calendar or the forecast, and how its cells are drawn"] },
 
   { id:"batt", name:"Low-battery badge",
     where:"Beside the outdoor heading, when a node is nearly flat.",
@@ -337,6 +337,21 @@ function kdT(x, y, size, text, o) {
 function kdBox(x, y, w, h, cls) {
   return "<u class='" + cls + "' style='left:" + x + "px;top:" + y + "px;width:" +
          w + "px;height:" + h + "px'></u>";
+}
+
+// A dividing line as the reader set them (kd-rulew / kd-rulei / kd-rules):
+// kdSkinCss() for the page and rule_*() in update_dash.sh for the panel draw
+// the same one. Across when w >= h, down otherwise; `soft` is the rule under
+// the clock, one step lighter.
+function kdRl(x, y, w, h, soft) {
+  var wt = (kdVal("kd-rulew", "0") | 0) + 1;
+  var ink = Math.min(3, Math.max(0, kdVal("kd-rulei", "0") | 0));
+  var st = ["solid", "dashed", "dotted"][kdVal("kd-rules", "0") | 0] || "solid";
+  var col = ["#000000", "#444444", "#777777", "#aaaaaa", "#d8d8d8"][3 - ink + (soft ? 1 : 0)];
+  var across = w >= h;
+  return "<u style='left:" + x + "px;top:" + y + "px;width:" + (across ? w : 0) +
+         "px;height:" + (across ? 0 : h) + "px;" + (across ? "border-top:" : "border-left:") +
+         wt + "px " + st + " " + col + "'></u>";
 }
 
 function kdPvValue(z) {
@@ -880,7 +895,7 @@ function kdRenderPreview() {
   if (show & 0x0080) h += kdBox(L.battX, L.battY, 22, 22, "kd-pl dk");
 
   // The hairline between the columns
-  if (L.sepH > 0) h += kdBox(L.sepX, L.sepY, 1, L.sepH, "kd-rl");
+  if (L.sepH > 0) h += kdRl(L.sepX, L.sepY, 1, L.sepH);
 
   // ── The clock: the right column's top upright, the top row's left on its side ──
   var cs = kdVal("kd-clock", "0") | 0, cb = !!(bold & 0x0008);
@@ -906,7 +921,7 @@ function kdRenderPreview() {
   // ── The indoor row: under the clock upright, under the outdoor grid on its side ──
   var ilive = L.inside, IX = L.inX, IW = L.inW;
   if (ilive.length) {
-    if (L.clock || L.land) h += kdBox(IX, L.inRuleY, IW, 1, "kd-rl soft");
+    if (L.clock || L.land) h += kdRl(IX, L.inRuleY, IW, 1, true);
     h += kdT(IX, L.inLabY, L.labSz, kdGroups["in"] || kdGroupPh["in"],
              { ink:"#777777", bold:capB });
     // The first field's share is what it needs to be set larger, not a
@@ -932,7 +947,7 @@ function kdRenderPreview() {
   }
 
   // ── The chart: under the readings upright, beside them on its side ──
-  if (L.rule2W > 0) h += kdBox(L.rule2X, L.rule2Y, L.rule2W, 1, "kd-rl");
+  if (L.rule2W > 0) h += kdRl(L.rule2X, L.rule2Y, L.rule2W, 1);
   if (L.chart) {
     h += kdT(L.labChartX, L.rule2Y + 6, L.labSz, "24 HOURS", { ink:"#777777", bold:capB });
     h += kdBox(L.grX, L.grY, L.grW, L.grH, "kd-pl");
@@ -954,7 +969,7 @@ function kdRenderPreview() {
   if (L.forecast) {
     var fy = L.rule3Y;
     var olT = ["21:00","00:00","03:00","06:00","09:00"], olV = ["6°","4°","3°","5°","9°"];
-    h += kdBox(18, fy + 0, RW, 1, "kd-rl");
+    h += kdRl(18, fy + 0, RW, 1);
     h += kdT(18, fy + 6, 14, "FORECAST", { ink:"#777777", bold:capB });
     h += kdBox(18, fy + 28, 52, 52, "kd-pl");
     h += kdT(78, fy + 28, 31, "Showers", { bold:!!(bold & 0x0040) });
@@ -970,25 +985,59 @@ function kdRenderPreview() {
   }
 
   // ── The week strip: above the footer upright, beside the clock on its side ──
+  // Its cells in the style chosen (kd-wkst), holding the calendar or the
+  // forecast (kd-wkfc) — draw_week() and draw_week_fc() in update_dash.sh.
   if (L.week) {
-    var wc = L.wkCellW, wx = L.wkX;
-    if (L.wkRule) h += kdBox(18, L.wkHdgY - 5, RW, 1, "kd-rl");
-    h += kdT(wx, L.wkHdgY, 15, "august", { ink:"#777777", bold:capB });
-    var nm = ["MO","TU","WE","TH","FR","SA","SU"], dy = [24,25,26,27,28,29,30];
-    for (i = 0; i < 7; i++) {
-      var cls = i === 3 ? "kd-wk today" : (i >= 5 ? "kd-wk we" : "kd-wk");
-      h += kdBox(wx + i * wc, L.wkY, wc, 58, cls);
-      h += kdT(wx + i * wc + kdQ(wc * 22, 81), L.wkY + 6, 14, nm[i],
-               { ink:i === 3 ? "#ffffff" : "#777777" });
-      h += kdT(wx + i * wc + kdQ(wc * 26, 81), L.wkY + 26, 30, dy[i],
-               { ink:i === 3 ? "#ffffff" : "#111111", bold:!!(bold & 0x0080) });
+    var wc = L.wkCellW, wx = L.wkX, wst = kdVal("kd-wkst", "0") | 0;
+    var wfc = kdVal("kd-wkfc", "0") === "1";
+    var wink = ["#000000","#444444","#777777","#aaaaaa"][3 - Math.min(3, kdVal("kd-rulei", "0") | 0)];
+    var ruled = function (cx, cy, cw, ch) {
+      return "<u style='left:" + cx + "px;top:" + cy + "px;width:" + cw + "px;height:" + ch +
+             "px;box-sizing:border-box;border:1px solid " + wink + "'></u>";
+    };
+    if (L.wkRule) h += kdRl(18, L.wkHdgY - 5, RW, 1);
+    if (wfc) {
+      var ft = L.wkHdgY, fh = L.wkY + 58 - L.wkHdgY;
+      var fn = ["SU","MO","TU","WE","TH","FR","SA"], fv = ["14°","12°","9°","11°","15°","17°","16°"];
+      for (i = 0; i < 7; i++) {
+        var fx = wx + i * wc;
+        if (wst === 0) h += kdBox(fx, ft, wc, fh, "kd-wk");
+        if (wst === 1) h += ruled(fx, ft, wc, fh);
+        if (i === 0) {
+          h += wst === 3 ? kdBox(fx, ft + fh - 3, wc, 3, "kd-pl dk")
+                         : "<u style='left:" + fx + "px;top:" + ft + "px;width:" + wc + "px;height:" +
+                           fh + "px;box-sizing:border-box;border:3px solid #111111'></u>";
+        }
+        h += kdT(fx + kdQ(wc - kdTw(fn[i], 14), 2), ft + 4, 14, fn[i],
+                 { ink:i === 0 ? "#111111" : "#777777" });
+        h += kdBox(fx + kdQ(wc - 34, 2), ft + 22, 34, 34, wst === 0 ? "kd-pl" : "kd-wk we");
+        h += kdT(fx + kdQ(wc - kdTw(fv[i] + "/4°", 16), 2), ft + 58, 16, fv[i] + "/4°",
+                 { bold:!!(bold & 0x0080) });
+      }
+    } else {
+      h += kdT(wx, L.wkHdgY, 15, "august", { ink:"#777777", bold:capB });
+      var nm = ["MO","TU","WE","TH","FR","SA","SU"], dy = [24,25,26,27,28,29,30];
+      for (i = 0; i < 7; i++) {
+        var today = i === 3, we = i >= 5;
+        var inv = today && wst !== 3;
+        if (wst === 0) h += kdBox(wx + i * wc, L.wkY, wc, 58, today ? "kd-wk today" : (we ? "kd-wk we" : "kd-wk"));
+        else {
+          if (wst === 1) h += ruled(wx + i * wc, L.wkY, wc, 58);
+          if (inv) h += kdBox(wx + i * wc, L.wkY, wc, 58, "kd-wk today");
+          if (today && wst === 3) h += kdBox(wx + i * wc, L.wkY + 55, wc, 3, "kd-pl dk");
+        }
+        h += kdT(wx + i * wc + kdQ(wc * 22, 81), L.wkY + 6, 14, nm[i],
+                 { ink:inv ? "#ffffff" : (today ? "#111111" : (we && wst ? "#444444" : "#777777")) });
+        h += kdT(wx + i * wc + kdQ(wc * 26, 81), L.wkY + 26, 30, dy[i],
+                 { ink:inv ? "#ffffff" : "#111111", bold:!!(bold & 0x0080) || (today && wst === 3) });
+      }
     }
   }
   // On its side, the rule under the top row.
-  if (L.land && L.topRowY) h += kdBox(18, L.topRowY, RW, 1, "kd-rl");
+  if (L.land && L.topRowY) h += kdRl(18, L.topRowY, RW, 1);
 
   // ── The footer, and the status line the FBInk panel draws ──
-  h += kdBox(18, L.footY, RW, 1, "kd-rl");
+  h += kdRl(18, L.footY, RW, 1);
   h += kdT(18, L.footY + 8, 15, "measured on site", { ink:"#545c68" });
 
   // ── The hit targets ──
@@ -1372,6 +1421,8 @@ function kdSnapshot() {
     refresh:kdVal("kd-refresh",""), follow:kdVal("kd-follow","1"),
     pin:kdVal("kd-clockpin","1"), res:kdVal("kd-fbink-res","0"),
     layout:kdVal("kd-layout","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
+    wkfc:kdVal("kd-wkfc","0"), wkst:kdVal("kd-wkst","0"),
+    rulew:kdVal("kd-rulew","0"), rulei:kdVal("kd-rulei","0"), rules:kdVal("kd-rules","0"),
     out:kdVal("kd-outdoor-sensor",""), inn:kdVal("kd-indoor-sensor",""),
     show:kdMaskOf(KD_SHOW,"kd-s-"), bold:kdMaskOf(KD_BOLD,"kd-b-"),
     zones:kdZones, groups:kdGroups
@@ -1665,6 +1716,13 @@ function kindleRender(d) {
   // key means too.
   kdSet("kd-prot",      d.page_rotation == null ? -1 : d.page_rotation);
   kdCsyncSet(d.clock_sync);
+  // The week strip and the rules; 0 in each is the page as it always was,
+  // and what a collector too old to send them means.
+  kdSet("kd-wkfc",  d.week_forecast || 0);
+  kdSet("kd-wkst",  d.week_style || 0);
+  kdSet("kd-rulew", d.rule_weight || 0);
+  kdSet("kd-rulei", d.rule_ink || 0);
+  kdSet("kd-rules", d.rule_style || 0);
   kdSet("kd-outdoor-sensor", d.outdoor_sensor || "");
   kdSet("kd-indoor-sensor",  d.indoor_sensor || "");
 
@@ -1784,6 +1842,11 @@ function kdConfigBody() {
   body.set("rotation",      kdVal("kd-rot", "0"));
   body.set("page_rotation", kdVal("kd-prot", "-1"));
   body.set("clock_sync",    kdCsyncDays());
+  body.set("week_forecast", kdVal("kd-wkfc", "0"));
+  body.set("week_style",    kdVal("kd-wkst", "0"));
+  body.set("rule_weight",   kdVal("kd-rulew", "0"));
+  body.set("rule_ink",      kdVal("kd-rulei", "0"));
+  body.set("rule_style",    kdVal("kd-rules", "0"));
   body.set("refresh_sec",   kdVal("kd-refresh", "") || "0");
   body.set("follow_data",   kdVal("kd-follow", "1"));
   body.set("clock_pin_refresh", kdVal("kd-clockpin", "1"));
@@ -1912,6 +1975,11 @@ function kindleDefaults() {
   kdSet("kd-rot", "0");
   kdSet("kd-prot", "-1");
   kdCsyncSet(1);
+  kdSet("kd-wkfc", "0");
+  kdSet("kd-wkst", "0");
+  kdSet("kd-rulew", "0");
+  kdSet("kd-rulei", "0");
+  kdSet("kd-rules", "0");
 
   kdShowInit = 0x1FF;  // KSHOW_ALL, and the clock
   kdBoldInit = 0;

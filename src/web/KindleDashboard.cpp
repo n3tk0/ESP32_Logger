@@ -757,34 +757,35 @@ static void appendWeek(String& out, uint32_t now, bool rule = true) {
 /// Whether the week strip holds the forecast: the reader asked for it, and
 /// there is a fresh one to put there. Otherwise it is the calendar, as it
 /// always was — a strip of empty cells would say less than the dates do.
+#ifdef MODULE_FORECAST_ENABLED
 static bool kdWeekFcOn(const KindleConfig& k) {
-    #ifdef MODULE_FORECAST_ENABLED
     if (!kdWeekForecast(k)) return false;
     const auto& fc = forecastModule.snapshot();
     const uint32_t now = (uint32_t)time(nullptr);
     return fc.valid && fc.days[0].valid && fc.fetchedAt && now >= fc.fetchedAt &&
            now - fc.fetchedAt <= KD_FORECAST_STALE_S;
-    #else
-    (void)k;
-    return false;
-    #endif
 }
 
-#ifdef MODULE_FORECAST_ENABLED
 /// The week strip holding the forecast: today and the six days after it, each
 /// cell its weekday, the condition and the high over the low. Today is framed
 /// rather than inverted — an icon drawn in black on black is no icon — and
 /// the cells are one height with the calendar's, month heading included, so
 /// nothing else on the page moves when the reader switches between them.
-static void appendWeekFc(String& out, bool rule) {
+static void appendWeekFc(String& out, uint32_t now, bool rule) {
     const auto& fc = forecastModule.snapshot();
+    // A day the provider did not reach still carries its weekday, as on the
+    // panel; the name is worked out from today when there is one.
+    const time_t t = (time_t)now;
+    struct tm tmv;
+    const bool haveDay = now > 1000000000u && localtime_r(&t, &tmv) != nullptr;
     if (rule) out += F("<div class=\"rule\"></div>");
     out += F("<table class=\"wk wf\"><tr>");
     for (int i = 0; i < ForecastModule::WEEK_N; i++) {
         const ForecastModule::Period& d = fc.days[i];
         out += (i == 0) ? F("<td class=\"wd wd-now\">") : F("<td class=\"wd\">");
         out += F("<div class=\"wd-n\">");
-        out += d.valid ? forecastPeriodLabel(d) : "";
+        out += d.valid ? forecastPeriodLabel(d)
+                       : (haveDay ? kdWeekdayAhead(tmv.tm_wday, i) : "");
         out += F("</div>");
         if (d.valid) {
             appendWeatherIcon(out, d.code, kdPx(30));
@@ -808,7 +809,7 @@ static void appendWeekFc(String& out, bool rule) {
 static void appendWeekStrip(String& out, const KindleConfig& skin, uint32_t now,
                             bool rule = true) {
     #ifdef MODULE_FORECAST_ENABLED
-    if (kdWeekFcOn(skin)) { appendWeekFc(out, rule); return; }
+    if (kdWeekFcOn(skin)) { appendWeekFc(out, now, rule); return; }
     #endif
     appendWeek(out, now, rule);
 }

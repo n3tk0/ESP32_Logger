@@ -41,8 +41,7 @@
 //      numbers do not jump about from cell to cell; ties go to more rows, which
 //      is the one that fills the height.
 //   5. The indoor row divides its width by what each field needs rather than by
-//      fixed percentages, and may put its first field on a line of its own when
-//      that sets it larger.
+//      fixed percentages, and keeps all of them on one line.
 //
 // EVERY NUMBER HERE IS A 600 x 800 DESIGN PIXEL, the unit kindle/layout/
 // 600x800.conf and the KD_N() sheet are written in. The panel's values are

@@ -896,6 +896,104 @@ check "$?" "turned back upright, nothing the landscape page set is left behind"
   exit 0 )
 check "$?" "on its side: five forecast columns, and the week strip beside the clock"
 
+# ── The week strip's styles, its forecast, and the rules ────────────────────
+# Upright 600x800, the layout the collector would send, the strip filled in.
+# The fake FBInk logs one call a line, its arguments separated by tabs.
+T=$(printf '\t')
+wk_fixture() {
+    flow_payload "$WORK/ly.txt" res=600; ly_load "$WORK/ly.txt"
+    LAYOUT=auto; unset PAGE_MODE PAGE_ROT LAND; RES_W=600 RES_H=800; load_layout
+    WK_TODAY=2 WK_MON_MONTH="MAY" WK_SUN_MONTH=""
+    for i in 0 1 2 3 4 5 6; do eval "WK${i}_NAME=N$i WK${i}_DAY=1$i WK${i}_NAMEW=1000 WK${i}_DAYW=1000"; done
+    unset WK_FC WK_STYLE RULE_PX RULE_INK RULE_SOFT RULE_STYLE
+}
+
+# Outlined: no grey cells, a line round each in the rule's pen, today still
+# knocked out of black.
+( wk_fixture; WK_STYLE=1 RULE_INK=GRAY7
+  : > "$FBINK_LOG"; draw_week
+  grep -q 'GRAYE\|GRAYD' "$FBINK_LOG" && exit 1
+  [ "$(grep -c -- "-B${T}GRAY7" "$FBINK_LOG")" -ge 21 ] || exit 2
+  grep -q -- "-B${T}BLACK.*width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" || exit 3
+  exit 0 )
+check "$?" "the outlined week: a line round each day, no grey, today still black"
+
+# Minimal: no plate at all, today's date bold and a bar under it.
+( wk_fixture; WK_STYLE=3
+  : > "$FBINK_LOG"; draw_week
+  grep -q -- "width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" && exit 1
+  mark_t
+  grep -q -- "-B${T}BLACK.*width=$WK_CELL_W,height=$WK_MARK_T" "$FBINK_LOG" || exit 2
+  grep -- "--${T}12${T}" "$FBINK_LOG" | grep -q "Bold" || exit 3
+  exit 0 )
+check "$?" "the minimal week: no cells, today bold with a bar under it"
+
+# The forecast in the strip: seven days, the white-ground icons in an
+# unfilled style and the outlook's grey ones in the filled style, today framed
+# and never on a black plate.
+( wk_fixture; WK_FC=1 WK_STYLE=1
+  for i in 0 1 2 3 4 5 6; do
+      eval "WF${i}_NAME=D$i WF${i}_NAMEW=1000 WF${i}_ICON=3 WF${i}_HI=1${i}° WF${i}_LO=/${i}° WF${i}_HIW=1500 WF${i}_LOW=1500"
+  done
+  WF6_ICON="" WF6_HI="" WF6_LO=""                   # a day the provider stopped short of
+  : > "$FBINK_LOG"; draw_week
+  [ "$(grep -c -- "fc_3_${FC_OL_SZ}w.bmp" "$FBINK_LOG")" = "6" ] || exit 1
+  grep -q -- "--${T}16°" "$FBINK_LOG" && exit 2
+  grep -q -- "--${T}D6${T}" "$FBINK_LOG" || exit 3
+  grep -q 'MAY' "$FBINK_LOG" && exit 4              # no month over a forecast
+  grep -q -- "-B${T}BLACK.*width=$WK_CELL_W,height=$WK_CELL_H" "$FBINK_LOG" && exit 5
+  mark_t
+  [ "$(grep -c -- "-B${T}BLACK.*\(width=$WK_MARK_T,\|height=$WK_MARK_T\)" "$FBINK_LOG")" = "4" ] || exit 6
+  WK_STYLE=0; : > "$FBINK_LOG"; draw_week
+  [ "$(grep -c -- "fc_3_${FC_OL_SZ}.bmp" "$FBINK_LOG")" = "6" ] || exit 7
+  for f in "$ICON_DIR"/fc_*_"${FC_OL_SZ}".bmp; do
+      [ -f "${f%.bmp}w.bmp" ] || { echo "no white twin for $f" >&2; exit 8; }
+  done
+  exit 0 )
+check "$?" "the forecast in the week strip: seven days, the right icons, today framed"
+
+# The rules: the collector's thickness and pen, a pen that is not one refused,
+# and dashed or dotted drawn as one cached image rather than dozens of boxes.
+( wk_fixture
+  RULE_PX=3 RULE_INK=BLACK RULE_SOFT=GRAY4
+  : > "$FBINK_LOG"; draw_hline 18 100 564 GRAYA; draw_hline 18 120 264 GRAYD
+  grep -q -- "-B${T}BLACK${T}.*top=100,left=18,width=564,height=3" "$FBINK_LOG" || exit 1
+  grep -q -- "-B${T}GRAY4${T}.*top=120,left=18,width=264,height=3" "$FBINK_LOG" || exit 2
+  RULE_INK='BLACK;reboot'; : > "$FBINK_LOG"; draw_hline 18 100 564 GRAYA
+  grep -q -- "-B${T}GRAYA${T}" "$FBINK_LOG" || exit 3
+  RULE_INK=GRAY7 RULE_STYLE=2; : > "$FBINK_LOG"; draw_hline 18 100 564 GRAYA
+  f="$DASH_TMP/rule_2_GRAY7_564x3.bmp"
+  [ -s "$f" ] || exit 4
+  grep -q -- "file=$f" "$FBINK_LOG" || exit 5
+  [ "$(wc -l < "$FBINK_LOG")" -le 1 ] || exit 6
+  [ "$(od -An -tu1 -j54 -N3 "$f" | tr -s ' ')" = " 119 119 119" ] || exit 7
+  [ "$(wc -c < "$f")" -eq $(( 54 + (564 * 3) * 3 )) ] || exit 8
+  RULE_STYLE=1; : > "$FBINK_LOG"; draw_vline 300 20 200 1
+  [ -s "$DASH_TMP/rule_1_GRAY7_3x200.bmp" ] || exit 9
+  unset RULE_PX RULE_INK RULE_SOFT RULE_STYLE
+  : > "$FBINK_LOG"; draw_hline 18 100 564 GRAYA
+  grep -q -- "-B${T}GRAYA${T}.*height=${RULE_H:-1}" "$FBINK_LOG" || exit 10
+  exit 0 )
+check "$?" "the rules: the collector's thickness and pen, dashed or dotted as one image"
+
+# A headline with nothing beside it is centred in its column, and the line
+# under it with it; with the value beside it, both stay at the left edge.
+( load_kv "$FIXTURE" PAYLOAD
+  flow_payload "$WORK/ly.txt" res=600; ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE PAGE_ROT LAND; RES_W=600 RES_H=800; load_layout
+  load_kv "$FIXTURE" PAYLOAD; ly_load "$WORK/ly.txt"; load_layout
+  Z_SUB_ADVW=9000
+  : > "$FBINK_LOG"; draw_zones >/dev/null 2>&1
+  hp=$(px_of "$HERO_SZ")
+  grep -q -- "px=$hp,left=${COL_L_X:-18}," "$FBINK_LOG" || exit 1
+  unset Z_BIG_VALUE
+  : > "$FBINK_LOG"; draw_zones >/dev/null 2>&1
+  grep -q -- "px=$hp,left=${COL_L_X:-18}," "$FBINK_LOG" && exit 2
+  grep -q -- "px=$hp,left=" "$FBINK_LOG" || exit 3
+  grep -- "--${T}-2.4 to" "$FBINK_LOG" | grep -q "left=${COL_L_X:-18}," && exit 4
+  exit 0 )
+check "$?" "a headline with nothing beside it is centred, and the line under it"
+
 # A tap lands where the turned page drew the button: the touch layer keeps
 # the upright panel's axes.
 ( RES_W=800 RES_H=600 TOUCH_MAXX=0 TOUCH_MAXY=0 TOUCH_SWAP=0 TRACE=0
