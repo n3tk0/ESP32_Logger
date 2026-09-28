@@ -13,6 +13,8 @@
 #include "src/sensors/plugins/RemoteNodeSensor.cpp"
 #include "check.h"
 
+HostSerial Serial;   // the shim declares it; RemoteNodeSensor logs through it
+
 static const uint32_t T0 = 1750000000u;
 
 static void initSensor(RemoteNodeSensor& s, const char* json) {
