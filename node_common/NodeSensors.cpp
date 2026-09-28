@@ -680,6 +680,7 @@ static uint8_t readEntry(uint8_t si, const SensorCfg& s, float altitude, bool bh
     for (uint8_t i = 0; i < cap; i++) v[i] = NAN;
     switch (s.type) {
         case SensorType::Bmx280: {
+            if (!s_bmx.measure()) return 4;   // forced mode: all four stay NAN
             const float t  = s_bmx.readTemperature();
             const float pa = s_bmx.readPressure();
             const float hPa = isfinite(pa) ? pa / 100.0f : NAN;

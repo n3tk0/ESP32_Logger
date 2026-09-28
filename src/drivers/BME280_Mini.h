@@ -14,6 +14,10 @@ public:
     static constexpr uint8_t CHIP_ID_BMP280_B = 0x57;
     static constexpr uint8_t CHIP_ID_BMP280_C = 0x58;
 
+    // ctrl_meas: osrs_t = 1x (bits 7:5 = 001), osrs_p = 1x (bits 4:2 = 001),
+    // mode = sleep (bits 1:0 = 00). measure() ORs in forced mode.
+    static constexpr uint8_t CTRL_MEAS_SLEEP = 0x24;
+
     bool begin(uint8_t addr = 0x76, TwoWire* wire = &Wire) {
         _addr = addr;
         _wire = wire;
@@ -43,32 +47,41 @@ public:
         // Read calibration data
         _readCalibration();
 
-        // Configure: normal mode, 16x oversampling for all
-        _write8(0xF2, 0x05);       // ctrl_hum: osrs_h = 16x (only BME280)
-        _write8(0xF5, 0x00);       // config: standby 0.5ms, filter off
-        _write8(0xF4, 0xB7);       // ctrl_meas: osrs_t=16x, osrs_p=16x, normal mode
+        // Configure for FORCED mode: one conversion per measure(), then the
+        // chip sleeps. Normal mode with a 0.5 ms standby measured non-stop at
+        // 16x (about 113 ms per cycle, so the die was converting ~99 % of the
+        // time) and warmed its own temperature reading. 1x/1x/1x with the
+        // filter off is Bosch's "weather monitoring" setting (datasheet
+        // §3.5.1); a conversion takes under 10 ms.
+        _write8(0xF5, 0x00);       // config: filter off
+        _write8(0xF2, 0x01);       // ctrl_hum: osrs_h = 1x (only BME280; latched by the ctrl_meas write)
+        _write8(0xF4, CTRL_MEAS_SLEEP);
 
-        // Long enough for the FIRST conversion to finish, which 50 ms was not.
-        //
-        // The datasheet's worst case for the 16x/16x/16x set just written is
-        //   1.25 + (2.3*16) + (2.3*16 + 0.575) + (2.3*16 + 0.575) = 112.8 ms
-        // and until it completes every data register still holds its reset
-        // value, 0x800000 — which readTemperature() and friends correctly
-        // report as NaN.
-        //
-        // begin() returning while that is still true makes it a promise the
-        // function does not keep, and whether anyone noticed came down to what
-        // the caller did next. The collector and the ESP8266 node read on a
-        // timer seconds later, so they never saw it. The ESP-NOW battery node
-        // calls sensorBegin() and readSample() back to back and then deep
-        // sleeps: every wake shipped battery voltage and NaN for temperature,
-        // humidity and pressure — a node that pairs, reports on schedule, and
-        // carries no measurement at all.
-        //
-        // 120 ms, once, at begin. It is not a hot path on any of the three.
-        delay(120);
+        // One conversion now, so begin() still returns with valid data
+        // registers. The ESP-NOW battery node calls sensorBegin() and
+        // readSample() back to back and then deep sleeps; before a first
+        // conversion every data register holds its reset value, 0x800000,
+        // which the reads report as NaN — a node that reports on schedule
+        // and carries no measurement at all.
+        if (!measure()) return false;
 
         return true;
+    }
+
+    /// Run one forced conversion and wait for it. Call before each set of
+    /// readTemperature()/readPressure()/readHumidity(): in forced mode the
+    /// data registers only change when this is called.
+    bool measure() {
+        _write8(0xF4, CTRL_MEAS_SLEEP | 0x01);   // mode = forced
+        // Worst case for 1x/1x/1x is 9.3 ms (datasheet appendix B).
+        delay(10);
+        for (int i = 0; i < 40; i++) {
+            const uint8_t st = _read8(0xF3);
+            if (st == 0xFF) return false;          // short read: bus trouble
+            if ((st & 0x08) == 0) return true;     // `measuring` cleared
+            delay(1);
+        }
+        return false;
     }
 
     bool isBME280() const { return _isBME280; }
