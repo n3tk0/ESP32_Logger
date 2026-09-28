@@ -1312,7 +1312,9 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         // that, and FBInk draws one size per call — so each piece is a separate
         // draw at an x that depends on the width of the one before it, and
         // FBInk will not say what that width was.
-        s->printf("Z_%s_VADVW=%u\n", up, kdAdvanceMille(res[i].text));
+        // The value's figures at KDF_FIG_SIZE — see kdFigAdvance(): at the
+        // estimate's 0.5 the unit was drawn onto the last figure.
+        s->printf("Z_%s_VADVW=%u\n", up, kdFigAdvance(res[i].text));
         s->printf("Z_%s_UADVW=%u\n", up, kdAdvanceMille(res[i].unit));
         // The caption as the panel prints it, upper case, for a grid row of
         // one, which is centred.
@@ -1328,7 +1330,7 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         if (i == KZ_HERO) {
             char whole[40];
             snprintf(whole, sizeof(whole), "%s%s", res[i].text, res[i].unit);
-            s->printf("Z_HERO_ADVW=%u\n", kdAdvanceMille(whole));
+            s->printf("Z_HERO_ADVW=%u\n", kdFigAdvance(whole));
         }
     }
 

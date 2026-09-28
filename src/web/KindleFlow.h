@@ -150,20 +150,25 @@ static inline bool kdFlowSigned(const char* metric) {
 /// A figure's width when a reading is SIZED, in thousandths of the type size.
 static const unsigned KDF_FIG_SIZE = 620;
 
+/// kdAdvanceMille() with each figure at KDF_FIG_SIZE: what a large value is
+/// sized by, and where the panel puts the unit after it.
+///
+/// The 0.5 kdAdvanceMille() gives a figure is too narrow for both. The
+/// page's fallback, Georgia, has figures of about 0.62 em, and the panel's
+/// Bookerly is wider than 0.5 too. With the readings as large as their column
+/// allows, a pressure of 1013 was cut at its right edge, and the panel set
+/// "hPa" onto its last figure.
+static inline unsigned kdFigAdvance(const char* text) {
+    unsigned figs = 0;
+    for (const char* c = text ? text : ""; *c; c++) if (*c >= '0' && *c <= '9') figs++;
+    return kdAdvanceMille(text) + figs * (KDF_FIG_SIZE - 500u);
+}
+
 /// How wide a value comes out with its unit and arrow, in thousandths of the
 /// value's type size — kdFlowWorstAdvance() without the widening, for the
 /// headline, which is sized to what it prints (see kdFlowHeadFit()).
-///
-/// Every figure a little wider than kdAdvanceMille() puts it. That weight is
-/// right for placing a unit after a value the script already drew, but a size
-/// is a promise the value FITS: the page's fallback, Georgia, has figures of
-/// about 0.62 em, the panel's bold faces are wider again, and with the
-/// readings as large as their column allows, a pressure of 1013 was cut at its
-/// right edge. So each figure counts for KDF_FIG_SIZE here.
 static inline unsigned kdFlowFieldAdvance(const char* text, const char* unit, bool arrow) {
-    unsigned figs = 0;
-    for (const char* c = text ? text : ""; *c; c++) if (*c >= '0' && *c <= '9') figs++;
-    unsigned adv = kdAdvanceMille(text) + figs * (KDF_FIG_SIZE - 500u);
+    unsigned adv = kdFigAdvance(text);
     if (unit && *unit) {
         if (!strcmp(unit, "\xC2\xB0"))   adv += 330u * 34u / 100u;      // the degree
         else if (!strcmp(unit, "%"))     adv += 800u * 42u / 100u;
