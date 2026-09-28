@@ -56,6 +56,16 @@ with sync_playwright() as p:
     pg.on("pageerror", lambda e: console.append(("pageerror", str(e))))
     pg.on("response", lambda r: notfound.append(r.url) if r.status == 404 else None)
 
+    # The remote sensor's corrections are keyed by what its node sends, read
+    # from the ingest mailbox. The shared mock's node list is the Nodes page's
+    # fixture, so this node is added here rather than there.
+    def remote_status(route):
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "nodes": [{"id": "outside", "online": True, "age_ms": 1000,
+                       "metrics": [{"metric": "temperature", "value": 18.2, "unit": "C"},
+                                   {"metric": "humidity", "value": 71, "unit": "%"}]}]}))
+    pg.route("**/api/remote/status", remote_status)
+
     pg.goto(URL, wait_until="networkidle")
     pg.wait_for_timeout(1500)
 
@@ -109,6 +119,16 @@ with sync_playwright() as p:
 
         node_field.fill("balcony_2")
 
+    print("\nCorrections for the node's metrics:")
+    pg.wait_for_timeout(500)
+    rows = pg.locator('#sensorEditForm .cal-row')
+    names = [rows.nth(i).get_attribute("data-metric") for i in range(rows.count())]
+    check(names == ["temperature", "humidity"],
+          f"one row per metric the node reports ({names})")
+    off = pg.locator('#sensorEditForm input[name="cal_off_temperature"]')
+    if off.count() == 1:
+        off.fill("-0.3")
+
     # Save, and read back the document the page POSTed.
     posted = {}
 
@@ -132,6 +152,22 @@ with sync_playwright() as p:
           .find("Node:balcony_2") >= 0,
           "the edited node id is back in the list before anything is sent")
 
+    print("\nCorrections for a wired sensor:")
+    row = pg.locator('.sensor-list-row', has_text="env_indoor").first
+    row.locator('button[data-click="clEditSensor"]').first.click()
+    pg.wait_for_timeout(800)
+    rows = pg.locator('#sensorEditForm .cal-row')
+    names = [rows.nth(i).get_attribute("data-metric") for i in range(rows.count())]
+    check(names == ["temperature", "humidity", "pressure"],
+          f"one row per metric the BME280 driver corrects ({names})")
+    adv = pg.locator('#sensorEditForm input[name="advanced"]')
+    check(adv.count() == 1 and "calibration" not in adv.input_value(),
+          "and the Advanced overlay no longer carries them")
+    pg.locator('#sensorEditForm input[name="cal_off_humidity"]').fill("2")
+    pg.locator('#sensorEditForm input[name="cal_sc_humidity"]').fill("1.02")
+    pg.locator('button[data-role="save"]').first.click()
+    pg.wait_for_timeout(400)
+
     pg.locator('button[data-click="clSave"]').first.click()
     pg.wait_for_timeout(1500)
 
@@ -149,6 +185,15 @@ with sync_playwright() as p:
               "no pin was invented for a sensor that has no pins")
         check("sda" not in remote and "scl" not in remote,
               "and no I2C pins either")
+        check(remote.get("calibration") == {"temperature": {"offset": -0.3, "scale": 1}},
+              f"the node's correction was saved, untouched rows left out "
+              f"({remote.get('calibration')!r})")
+    wired = next((s for s in sensors if s.get("id") == "env_indoor"), None)
+    if wired:
+        check(wired.get("calibration") == {"humidity": {"offset": 2, "scale": 1.02}},
+              f"the wired sensor's correction was saved ({wired.get('calibration')!r})")
+        check(wired.get("address") == 119,
+              "and its Advanced keys survived the round trip")
 
     # A page that throws while saving still looks like it saved.
     unexpected_404 = [u for u in notfound
@@ -176,4 +221,4 @@ if fails:
     for f in fails:
         print("  - " + f)
     sys.exit(1)
-print("OK: a remote sensor can be named, edited and saved")
+print("OK: a remote sensor can be named, edited and saved; corrections round-trip")

@@ -95,6 +95,7 @@ float BME280Sensor::_ambientTempC(float fallbackC) const {
 // ---------------------------------------------------------------------------
 bool BME280Sensor::read(SensorReading& out) {
     if (!_ready) return false;
+    if (!_bme.measure()) return false;
     float t = _calTemp.apply(_bme.readTemperature());
     if (isnan(t)) return false;
     out = _makeReading(0, "temperature", t, "C");
@@ -104,6 +105,7 @@ bool BME280Sensor::read(SensorReading& out) {
 // ---------------------------------------------------------------------------
 int BME280Sensor::readAll(SensorReading* out, int maxOut) {
     if (!_ready) return 0;
+    if (!_bme.measure()) return 0;   // forced mode: one fresh conversion
 
     const float tDie = _bme.readTemperature();       // uncalibrated, self-heated
     float t = _calTemp.apply(tDie);
