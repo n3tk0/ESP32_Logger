@@ -62,7 +62,23 @@ Over USB instead: copy `kindle/` into `extensions/`, renaming it `esp32dash`.
 it, which strips carriage returns out of the folder every time a menu entry
 runs.
 
-`tools/mk_kindle_package.sh` builds both artifacts locally; it needs
+### 4 · Later updates — through the collector
+
+Once a reader runs a script from this version on, it never needs the cable
+again. Download `esp32dash-kindle-<version>.tar` from the same Releases page,
+upload it on the collector's **E-ink dashboard → Reader → Update the reader's
+scripts** card (it needs an SD card in the collector), and press **Offer to
+the readers**. Each reader sees the offer on its next fetch, downloads the
+package, checks it — size, MD5, no links, nothing outside its folder, its own
+settings untouched, every script parses — installs it over itself and
+restarts into it. The card lists every reader with the version it runs and how
+its update went; a refusal leaves the reader exactly as it was and says why.
+The whole contract is [docs/KINDLE_UPDATE.md](../docs/KINDLE_UPDATE.md).
+
+A reader still on a script from before this has to be updated once by one of
+the ways above; the card marks it "script too old".
+
+`tools/mk_kindle_package.sh` builds all three artifacts locally; it needs
 [KindleTool](https://github.com/NiLuJe/KindleTool) for the `.bin`, and
 `--stage-only` skips that and produces just the zip.
 

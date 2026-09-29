@@ -428,6 +428,46 @@
               </div>
             </div>
 
+            <!-- The reader's own scripts, updated through this collector —
+                 docs/KINDLE_UPDATE.md. Drawn by kdPkgRender() from
+                 GET /api/kindle/pkg; hidden on a build without it (404). -->
+            <div class="card" id="kd-card-pkg" style="margin-top:var(--gap);display:none">
+              <div class="card-head">
+                <div class="card-title"><span data-icon="download"></span> <span data-i18n="kindle.pkgTitle">Update the reader's scripts</span></div>
+                <span id="kd-pkg-badge" class="badge dim" style="text-transform:none"></span>
+              </div>
+              <div class="card-body">
+                <p class="hint" data-i18n-html="kindle.pkgHint">
+                  Upload <code>esp32dash-kindle-&lt;version&gt;.tar</code> from the
+                  repository's Releases and press <strong>Offer to the readers</strong>.
+                  Every reader running a newer script picks it up on its next fetch,
+                  checks it, installs it over itself and restarts — its settings stay.
+                  A reader on a script from before this needs one install by hand.
+                </p>
+                <div id="kd-pkg"></div>
+                <div class="kd-row" style="margin-top:12px">
+                  <input type="file" id="kd-pkg-file" accept=".tar,application/x-tar" hidden
+                         data-change="kindlePkgPick">
+                  <button class="btn" id="kd-pkg-upload" data-click="kindlePkgChoose">
+                    <span data-icon="upload"></span> <span data-i18n="kindle.pkgUpload">Upload a package…</span>
+                  </button>
+                  <button class="btn primary" id="kd-pkg-offer" data-click="kindlePkgAction" data-args='["offer"]'>
+                    <span data-icon="rocket"></span> <span data-i18n="kindle.pkgOffer">Offer to the readers</span>
+                  </button>
+                  <button class="btn" id="kd-pkg-stop" data-click="kindlePkgAction" data-args='["stop"]'>
+                    <span data-icon="x"></span> <span data-i18n="kindle.pkgStop">Stop offering</span>
+                  </button>
+                  <button class="btn" id="kd-pkg-delete" data-click="kindlePkgAction" data-args='["delete"]'>
+                    <span data-icon="trash"></span> <span data-i18n="kindle.pkgDelete">Delete</span>
+                  </button>
+                </div>
+                <div class="ota-bar-wrap" id="kd-pkg-progress" style="margin-top:10px;display:none">
+                  <div class="ota-bar"><span style="width:0%"></span></div>
+                  <span class="ota-pct">0%</span>
+                </div>
+              </div>
+            </div>
+
             <div class="card" style="margin-top:var(--gap)">
               <div class="card-body kd-row">
                 <button class="btn" data-click="kindleDefaults">

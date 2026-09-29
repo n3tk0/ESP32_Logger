@@ -334,6 +334,9 @@ payload_key_ok() {
         # The chart's axis: the five values, the five hours, their widths, and
         # where the image's plot area is inside the image.
         CH_Y[0-9]|CH_Y[0-9]W|CH_H[0-9]|CH_H[0-9]W|CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
+        # A newer copy of these scripts, on offer from the collector — see
+        # pkg_check(). Each one is checked again where it is used.
+        PKG_VER|PKG_MD5|PKG_SIZE) return 0 ;;
     esac
     return 1
 }
@@ -2256,11 +2259,19 @@ fetch_data() {
     # This script draws three indoor readings as two columns (IN_COL); a
     # collector sends that layout only to a reader that says so.
     q="$q${sep}col=1"
+    # Which version of these scripts this is, so the collector can offer a
+    # newer one — and, while the last one it offered was refused, why.
+    # docs/KINDLE_UPDATE.md §3.
+    [ -n "${DASH_VER:-}" ] || pkg_version
+    q="$q&pkg=$DASH_VER_Q"
+    [ -n "${PKG_ERR:-}" ] && q="$q&pkgerr=$PKG_ERR&pkgfor=$PKG_TRIED"
     if wget -q -T "$FETCH_TIMEOUT" -O "$TMP/data.new" "$(host_url)/kindle/data$q" \
             2>/dev/null && payload_ok "$TMP/data.new"; then
         mv "$TMP/data.new" "$TMP/data.txt"
         # The time in it is this minute's, which a cached payload's is not.
         TIME_FRESH=1
+        # And so is the offer in it: a cached page must never start an update.
+        PKG_FRESH=1
         FAILS=0
         TRUNC_WARNED=0
         return 0
@@ -2327,6 +2338,8 @@ cache_save() {
 cache_load() {
     [ -s "$CACHE" ] || return 1
     cp "$CACHE" "$TMP/data.txt" 2>/dev/null || return 1
+    # An offer is only ever acted on from a payload fetched this run.
+    PKG_FRESH=0
     load_data || return 1
     # load_data believes what it loaded is current, because every other caller
     # has just fetched it. Here it is not.
@@ -2347,6 +2360,184 @@ cache_load() {
     # worth having whatever their age.
     DATA_FRESH=0
     return 0
+}
+
+# ── Updating these scripts from the collector ────────────────────────────────
+#
+# THE SAME MODEL AS THE SENSOR NODES' FIRMWARE: the collector holds one copy of
+# this extension, the person offers it on the collector's E-ink dashboard page,
+# and every reader PULLS it. docs/KINDLE_UPDATE.md is the contract.
+#
+#   1. Every fetch says which version this is (?pkg=, from VERSION).
+#   2. While a package is on offer and this reader runs something else, the
+#      payload carries PKG_VER, PKG_MD5 and PKG_SIZE.
+#   3. pkg_install() downloads /kindle/pkg.tar, checks it, and only then
+#      touches this folder. Any refusal leaves the folder exactly as it was,
+#      is logged, and is reported on every fetch (?pkgerr=, with ?pkgfor= the
+#      MD5 it was about) until the next start — a package that failed once is
+#      not retried every five minutes.
+#   4. pkg_restart() hands the device back and becomes the new copy.
+#
+# EVERYTHING HERE RUNS AS ROOT, on a file that came over plain HTTP. The
+# collector refuses anything that is not a package before offering it
+# (src/web/KindlePkgTar.h), but that is what stops a wrong upload, not what
+# makes this safe: the checks below are the ones that count, and they are made
+# before a single byte lands outside $TMP.
+
+# This copy's version, and the same spelled for a query string. "none" for a
+# folder copied from a checkout, which has no VERSION: it can still update, it
+# just cannot say what it runs.
+pkg_version() {
+    local v=""
+    [ -f "$DASH_DIR/VERSION" ] && IFS= read -r v < "$DASH_DIR/VERSION"
+    v=${v%"$(printf '\r')"}
+    case "$v" in ''|*[!A-Za-z0-9._+-]*) v=none ;; esac
+    DASH_VER="$v"
+    # '+' is a space in a query string.
+    DASH_VER_Q=$(printf '%s' "$v" | sed 's/+/%2B/g')
+    return 0
+}
+
+#: The MD5 of the last package tried this run, and why it was refused (empty
+#: when it was not). Only the dashboard's own process acts on an offer:
+#: settings.sh sources this file and fetches too.
+PKG_TRIED=""
+PKG_ERR=""
+PKG_MAIN=0
+
+pkg_check() {
+    [ "${PKG_MAIN:-0}" = "1" ] || return 0
+    [ -n "${PKG_VER:-}" ] || return 0
+    [ -n "${DASH_VER:-}" ] || pkg_version
+    [ "$PKG_VER" != "$DASH_VER" ] || return 0
+    # Once per package per run. A new upload is a new MD5, and is tried.
+    [ "$PKG_TRIED" = "${PKG_MD5:-}" ] && return 0
+    PKG_TRIED="${PKG_MD5:-}"
+    PKG_ERR=""
+    echo "$(date '+%H:%M') update: the collector offers $PKG_VER (this is $DASH_VER)" >&2
+    if pkg_install; then
+        pkg_log "updated from $DASH_VER to $PKG_VER by the collector"
+        echo "$(date '+%H:%M') update: installed $PKG_VER, restarting into it" >&2
+        pkg_restart
+        return 0
+    fi
+    PKG_ERR="$PKG_WHY"
+    pkg_log "update to $PKG_VER refused: $PKG_WHY - nothing was changed"
+    echo "$(date '+%H:%M') update: $PKG_VER refused ($PKG_WHY), nothing was changed" >&2
+    return 0
+}
+
+# One line in kual.log, beside the scripts: "which version is on this reader,
+# and when did it get there" is the first question asked of one that behaves
+# oddly, and /tmp/dash.log does not survive a reboot.
+pkg_log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') --- $1" >> "$DASH_DIR/kual.log" 2>/dev/null
+    return 0
+}
+
+#: Why pkg_install() refused, as one word the collector shows.
+PKG_WHY=""
+
+pkg_fail() {
+    PKG_WHY="$1"
+    rm -rf "$TMP/pkg" "$TMP/pkg.tar" "$TMP/pkg.list" 2>/dev/null
+    return 1
+}
+
+# Download, check, unpack into $TMP, check again, then put every file in place.
+pkg_install() {
+    local tar="$TMP/pkg.tar" d="$TMP/pkg" n sum mode rest name f rel v
+    PKG_WHY=""
+    rm -rf "$d" "$tar" "$TMP/pkg.list" 2>/dev/null
+
+    # The offer itself, before it is used for anything.
+    case "${PKG_SIZE:-}" in ''|*[!0-9]*) pkg_fail bad_offer; return 1 ;; esac
+    case "${PKG_MD5:-}" in *[!0-9a-f]*) pkg_fail bad_offer; return 1 ;; esac
+    [ "${#PKG_MD5}" -eq 32 ] || { pkg_fail bad_offer; return 1; }
+    case "$PKG_VER" in *[!A-Za-z0-9._+-]*) pkg_fail bad_offer; return 1 ;; esac
+    [ "$PKG_SIZE" -le 1572864 ] 2>/dev/null || { pkg_fail too_big; return 1; }
+
+    # Whole, and the file that was offered: the size and the MD5 the payload
+    # named. wget does not always call a short read an error.
+    wget -q -T 60 -O "$tar" "$(host_url)/kindle/pkg.tar" 2>/dev/null ||
+        { pkg_fail download; return 1; }
+    n=$(wc -c < "$tar" 2>/dev/null | tr -dc '0-9')
+    [ "$n" = "$PKG_SIZE" ] || { pkg_fail size; return 1; }
+    command -v md5sum >/dev/null 2>&1 || { pkg_fail no_md5sum; return 1; }
+    sum=$(md5sum "$tar" 2>/dev/null | cut -d' ' -f1)
+    [ "$sum" = "$PKG_MD5" ] || { pkg_fail md5; return 1; }
+
+    # WHAT IS IN IT, BEFORE ANY OF IT IS UNPACKED — unpacking is where a link
+    # in the archive becomes a write through that link. Regular files and
+    # directories under esp32dash/, plain names, none of this reader's own
+    # files. A tar that cannot list modes (-v) fails here, which is the safe
+    # way to fail.
+    tar -tvf "$tar" > "$TMP/pkg.list" 2>/dev/null || { pkg_fail not_package; return 1; }
+    [ -s "$TMP/pkg.list" ] || { pkg_fail not_package; return 1; }
+    while read -r mode rest; do
+        name=${rest##* }
+        case "$mode" in -*|d*) ;; *) pkg_fail bad_entry; return 1 ;; esac
+        case "$name" in esp32dash/*) ;; *) pkg_fail bad_path; return 1 ;; esac
+        case "$name" in *[!A-Za-z0-9._/-]*|*//*|*/./*|*/.|*/../*|*/..) pkg_fail bad_path; return 1 ;; esac
+        case "$name" in
+            esp32dash/dash.conf|esp32dash/collectors|esp32dash/kual.log|esp32dash/last.txt)
+                pkg_fail bad_path; return 1 ;;
+        esac
+    done < "$TMP/pkg.list"
+
+    mkdir -p "$d" && tar -xf "$tar" -C "$d" 2>/dev/null || { pkg_fail unpack; return 1; }
+    rm -f "$tar"
+    # And what landed, in case the listing and the unpacking disagreed.
+    [ -z "$(find "$d" -type l 2>/dev/null)" ] || { pkg_fail bad_entry; return 1; }
+
+    # Complete, and the version it was offered as.
+    for f in update_dash.sh start.sh stop.sh menu.json VERSION; do
+        [ -s "$d/esp32dash/$f" ] || { pkg_fail missing_files; return 1; }
+    done
+    v=""
+    IFS= read -r v < "$d/esp32dash/VERSION"
+    v=${v%"$(printf '\r')"}
+    [ "$v" = "$PKG_VER" ] || { pkg_fail version; return 1; }
+    # Every script at least parses. A package that cannot is one this reader
+    # would restart into and never come back from on its own.
+    for f in "$d"/esp32dash/*.sh; do
+        [ -f "$f" ] || continue
+        sh -n "$f" 2>/dev/null || { pkg_fail syntax; return 1; }
+    done
+
+    # INTO PLACE IN TWO PASSES. Every file is copied beside its target as
+    # .new first — the step that can fail on a full volume — and only when
+    # all of them are there is anything renamed over the old one. So a
+    # failure leaves the old copy whole, and the renames are quick enough that
+    # nothing in between is a real window. Renamed rather than written in
+    # place: this script is itself one of the files, and the shell running it
+    # still has the old one open.
+    (cd "$d/esp32dash" && find . -type d) > "$TMP/pkg.list" 2>/dev/null
+    while read -r rel; do
+        mkdir -p "$DASH_DIR/$rel" 2>/dev/null || { pkg_fail write; return 1; }
+    done < "$TMP/pkg.list"
+    (cd "$d/esp32dash" && find . -type f) > "$TMP/pkg.list" 2>/dev/null
+    while read -r rel; do
+        if ! cp "$d/esp32dash/$rel" "$DASH_DIR/$rel.new" 2>/dev/null; then
+            while read -r rel; do rm -f "$DASH_DIR/$rel.new"; done < "$TMP/pkg.list"
+            pkg_fail write
+            return 1
+        fi
+    done < "$TMP/pkg.list"
+    while read -r rel; do
+        mv -f "$DASH_DIR/$rel.new" "$DASH_DIR/$rel" 2>/dev/null
+    done < "$TMP/pkg.list"
+    rm -rf "$d" "$TMP/pkg.list"
+    sync 2>/dev/null
+    return 0
+}
+
+# The device handed back exactly as Stop would, then this process becomes the
+# new copy — the same PID, so the pidfile and stop.sh stay right. The new copy
+# starts as a fresh Start does: cached page first, then its own fetch.
+pkg_restart() {
+    handback
+    exec sh "$DASH_DIR/update_dash.sh"
 }
 
 # Is this a WHOLE BMP, or the first part of one?
@@ -2477,6 +2668,9 @@ zones_forget() {
     # firmware that works none out has to take the panel back to the file's.
     for z in $FLOW_KEYS GRID_ROWS CH_T CH_B CH_L CH_R; do unset "LY_$z" 2>/dev/null; done
     unset CACHED_AT CACHED_ON 2>/dev/null
+    # And the offer: a collector that stops offering a package stops sending
+    # the keys, and load_kv only ever assigns.
+    unset PKG_VER PKG_MD5 PKG_SIZE 2>/dev/null
     return 0
 }
 
@@ -2519,6 +2713,12 @@ load_data() {
     DATA_FRESH=1
     EVER_FRESH=1
     LAST_OK=$(now_clock)
+    # LAST, once everything this payload says has been taken in: an update
+    # that installs does not come back here — it restarts into the new copy.
+    if [ "${PKG_FRESH:-0}" = "1" ]; then
+        PKG_FRESH=0
+        pkg_check
+    fi
     return 0
 }
 
@@ -4452,6 +4652,15 @@ flash_due() {
 
 # ── Cleanup on exit ──────────────────────────────────────────────────────────
 cleanup() {
+    handback
+    rm -f "${DASH_PIDFILE:-/tmp/dash.pid}"
+    exit 0
+}
+
+# Everything cleanup() gives back, without the exit — pkg_restart() hands the
+# device back like this and then becomes the new copy of this script, in the
+# same process, so the pidfile stays true and stop.sh still finds it.
+handback() {
     # The sleep is a child process and does not get the signal we did. Left
     # alone it holds the script here for the rest of the minute, which is what
     # made Stop look like it had failed.
@@ -4473,8 +4682,7 @@ cleanup() {
     # that looks broken.
     [ "${RADIO_OFF:-0}" = "1" ] && radio_set 1
     rm -rf "$TMP"
-    rm -f "${DASH_PIDFILE:-/tmp/dash.pid}"
-    exit 0
+    return 0
 }
 
 # A sleep that can be interrupted.
@@ -4635,6 +4843,10 @@ if ! command -v fbink >/dev/null 2>&1; then
 fi
 
 trap cleanup INT TERM
+# This process, and not settings.sh sourcing the same file, is the one that
+# acts on an update the collector offers — see pkg_check().
+PKG_MAIN=1
+pkg_version
 
 mkdir -p "$TMP"
 conf_init

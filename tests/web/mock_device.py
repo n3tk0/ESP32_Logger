@@ -736,6 +736,60 @@ def fw_post(doc):
     return {"ok": False, "error": "bad_request"}, 400
 
 
+# The Kindle dashboard package — /api/kindle/pkg, docs/KINDLE_UPDATE.md §2.
+# One reader seen, on an older version, so offering has someone to reach.
+KPKG = {"sd": True, "pkg": None, "offer": False, "posts": [], "uploads": 0,
+        "readers": [{"ip": "192.168.7.40", "ver": "t1.0", "seen": 42, "st": "idle"},
+                    {"ip": "192.168.7.41", "ver": "", "seen": 300, "st": "old"}]}
+
+
+def kpkg_get():
+    rs = []
+    for r in KPKG["readers"]:
+        r = dict(r)
+        if r["st"] != "old":
+            if KPKG["pkg"] and r["ver"] == KPKG["pkg"]["ver"]:
+                r["st"] = "current"
+            elif KPKG["pkg"] and KPKG["offer"]:
+                r["st"] = "pending"
+            else:
+                r["st"] = "idle"
+        rs.append(r)
+    return {"sd": KPKG["sd"], "pkg": KPKG["pkg"],
+            "offer": bool(KPKG["pkg"]) and KPKG["offer"], "readers": rs}
+
+
+def kpkg_upload(content_type, body):
+    """Enough of src/web/KindlePkgTar.h to show the page each answer: the SD,
+    a ustar archive, esp32dash/VERSION inside it."""
+    import re, hashlib, io, tarfile
+    KPKG["uploads"] += 1
+    if not KPKG["sd"]:
+        return {"ok": False, "error": "no_sd"}, 409
+    m = re.search(r'boundary="?([^";]+)"?', content_type or "")
+    if not m:
+        return {"ok": False, "error": "bad_request"}, 400
+    sep = b"--" + m.group(1).encode()
+    data = None
+    for part in body.split(sep):
+        head, _, rest = part.partition(b"\r\n\r\n")
+        if b'name="pkg"' in head:
+            data = rest[:-2] if rest.endswith(b"\r\n") else rest
+    if data is None:
+        return {"ok": False, "error": "bad_request"}, 400
+    if data[257:262] != b"ustar":
+        return {"ok": False, "error": "not_package"}, 400
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data)) as t:
+            ver = t.extractfile("esp32dash/VERSION").read().decode().splitlines()[0]
+    except Exception:
+        return {"ok": False, "error": "missing_files"}, 400
+    KPKG["pkg"] = {"ver": ver, "size": len(data), "md5": hashlib.md5(data).hexdigest(),
+                   "uploaded": 1790086400}
+    KPKG["offer"] = False     # stored unoffered, as the firmware does
+    return {"ok": True, "ver": ver, "size": len(data)}, 200
+
+
 def fw_upload(content_type, body):
     """Just enough of §2.1's checks to show the page each answer: the SD,
     the marker (kind + version), the head byte, the size limit."""
@@ -847,6 +901,10 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._json({"posts": NODE_CFG_POSTS, "handover": HANDOVER})
         if path == "/api/kindle/config":
             return self._json(KINDLE)
+        if path == "/api/kindle/pkg":
+            return self._json(kpkg_get())
+        if path == "/__mock/kpkg":
+            return self._json(KPKG)
         if path == "/api/csrf-token":
             return self._json({"token": "test-token"})
         if path == "/api/platform_config":
@@ -967,6 +1025,10 @@ class H(http.server.SimpleHTTPRequestHandler):
         if path == "/api/modules/wifi/test":
             self._read_json()
             return self._json({"started": True}, 202)
+        if path == "/api/kindle/pkg/upload":
+            n = int(self.headers.get("Content-Length") or 0)
+            body, code = kpkg_upload(self.headers.get("Content-Type"), self.rfile.read(n))
+            return self._json(body, code)
         if path == "/api/nodes/fw/upload":
             n = int(self.headers.get("Content-Length") or 0)
             body, code = fw_upload(self.headers.get("Content-Type"), self.rfile.read(n))
@@ -1034,6 +1096,21 @@ class H(http.server.SimpleHTTPRequestHandler):
                 if str(node["node_id"]) == body.get("node_id", [""])[0]:
                     if body.get("label"): node["id"] = body["label"][0]
                     if body.get("interval"): node["interval"] = int(body["interval"][0])
+            return self._json({"ok": True})
+        if path == "/api/kindle/pkg":
+            a = body.get("action", [""])[0]
+            KPKG["posts"].append(a)
+            if not KPKG["sd"]:
+                return self._json({"ok": False, "error": "no_sd"}, 409)
+            if a in ("offer", "stop"):
+                if not KPKG["pkg"]:
+                    return self._json({"ok": False, "error": "no_pkg"}, 409)
+                KPKG["offer"] = a == "offer"
+            elif a == "delete":
+                KPKG["pkg"] = None
+                KPKG["offer"] = False
+            else:
+                return self._json({"ok": False, "error": "bad_request"}, 400)
             return self._json({"ok": True})
         if path == "/api/kindle/config":
             # Stored back, so the driver can assert that what it set is what a

@@ -21,6 +21,7 @@
 #include "KindleSlotStore.h"            // the configurable slot list
 #include "KindleFlow.h"                 // where everything goes, for what is on the page
 #include "FormArgs.h"                   // queryArg
+#include "KindlePkg.h"                  // PKG_* — the reader's own update
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
 #endif
@@ -2190,6 +2191,22 @@ static void handleKindleData(AsyncWebServerRequest* req) {
                         "Записът се попълва с постъпването на данни."));
     }
 
+    // ── An update for the reader's own scripts ──────────────────────────────
+    //
+    // Sent only to a reader that said which version it runs (?pkg=), only
+    // while a package is on offer, and only when that reader runs something
+    // else — docs/KINDLE_UPDATE.md §3. The reader downloads /kindle/pkg.tar,
+    // checks it against these three and installs it; a reader on an older
+    // script sends no ?pkg= and is never offered anything it cannot use.
+    {
+        KindlePkgOffer po;
+        if (kindlePkgOffer(req, po)) {
+            kdShellVar(s, "PKG_VER", po.ver);
+            kdShellVar(s, "PKG_MD5", po.md5);
+            kdShellUint(s, "PKG_SIZE", (unsigned long)po.size);
+        }
+    }
+
     // ── The last line, and the reason there is one ──────────────────────────
     //
     // THE PANEL CANNOT OTHERWISE TELL A WHOLE PAYLOAD FROM THE FIRST PART OF
@@ -3149,6 +3166,8 @@ void registerKindleDashboard(AsyncWebServer& server) {
     server.on("/kindle/forecast", HTTP_GET, handleKindleForecast);
 #endif
     server.on("/kindle/data",  HTTP_GET, handleKindleData);
+    // The package a reader updates itself from — docs/KINDLE_UPDATE.md §3.
+    server.on("/kindle/pkg.tar", HTTP_GET, handleKindlePkgTar);
     server.on("/kindle/graph.bmp", HTTP_GET, handleKindleGraph);
     server.on("/kindle",       HTTP_GET, handleKindle);
 }
