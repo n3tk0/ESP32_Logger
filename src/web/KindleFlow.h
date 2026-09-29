@@ -184,11 +184,6 @@ static inline unsigned kdFlowFieldAdvance(const char* text, const char* unit, bo
 /// tendency arrow at 0.5 with its 0.15 em of padding.
 ///
 /// `text` is what the place prints now, already at its decimals.
-///
-/// `assumeSign` false drops the minus a temperature is otherwise given room for
-/// whatever it reads: for the indoor row's first field, which is sized as the
-/// headline is — by what it prints, the two digits kept but not a sign a room
-/// does not reach. A reading that IS below zero still counts its own.
 static inline unsigned kdFlowWorstAdvance(const char* metric, const char* text,
                                           const char* unit, bool arrow,
                                           bool assumeSign = true) {
@@ -203,13 +198,36 @@ static inline unsigned kdFlowWorstAdvance(const char* metric, const char* text,
     int need = kdFlowMinDigits(metric, unit);
     if (intDigits > need) need = intDigits;
     if (need < 1) need = 1;
-    if (neg || (assumeSign && kdFlowSigned(metric))) worst[at++] = '-';
+    // assumeSign false: no sign reserved, not even the reading's own — the
+    // caller measures what is printed separately (kdFlowFirstInAdvance()).
+    if (assumeSign && (neg || kdFlowSigned(metric))) worst[at++] = '-';
     for (int i = 0; i < need && at < sizeof(worst) - 1; i++) worst[at++] = '0';
     // Whatever follows the integer part — the decimals — as it is printed.
     for (; *q && at < sizeof(worst) - 1; q++) worst[at++] = *q;
     worst[at] = '\0';
 
     return kdFlowFieldAdvance(worst, unit, arrow);
+}
+
+/// What the indoor row's FIRST place is sized by — every producer of
+/// KdFlowIn::inAdv[0] calls this, and the settings page's copy of it.
+///
+/// An indoor air temperature keeps room for two digits and its decimals, but
+/// not for the minus sign every other temperature on the page is given: a
+/// room does not reach it, and the reservation cost this field a sixth of its
+/// size. NOT by the reading's sign, though — that would re-lay the whole row
+/// every time an unheated room crossed zero. The printed text counts only
+/// when it is wider than the reservation, which a reading does below -9.9.
+///
+/// Any other metric in that place — a dew point, which a heated room in
+/// winter does take below zero — is measured as everywhere else.
+static inline unsigned kdFlowFirstInAdvance(const char* metric, const char* text,
+                                            const char* unit, bool arrow) {
+    if (!metric || strcmp(metric, "temperature") != 0)
+        return kdFlowWorstAdvance(metric, text, unit, arrow);
+    const unsigned worst = kdFlowWorstAdvance(metric, text, unit, arrow, false);
+    const unsigned now   = kdFlowFieldAdvance(text ? text : "", unit, arrow);
+    return now > worst ? now : worst;
 }
 
 // ---------------------------------------------------------------------------
@@ -529,17 +547,25 @@ static inline void kdFlowIndoor(const KdFlowIn& in, int bot, KdFlow& f) {
     // stopped well short of the room it stands in — the headline across the
     // rule fills its line, and this did not. They may now go down to half of
     // it, and do only when that is what lets the first one grow.
+    //
+    // Not a search over both: this runs for every height kdFlowComputeAt()
+    // tries, on every render. For a first field at t, the side size is the
+    // largest the width and the column's height allow, at most six tenths of
+    // t — worked out, then checked, and stepped down past a rounding edge.
     int c1 = 0, cs = 0;
     if (m == 3 && !f.land && in.inColOk) {
+        const int room = bot - colTop;
+        const int sH   = (room - 6) / 2 - f.labSz - 4;       // the stack's height
         for (int t = kdfMin(cap, areaH); t >= 20 && !c1; t--) {
-            for (int s = t * 6 / 10; s >= t / 2 && !c1; s--) {
-                const int wR = kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
-                const int stackH = 2 * (f.labSz + 4 + s) + 6;
-                if (t * a1 / 1000 + KDF_CELL_PAD + wR <= W && stackH <= bot - colTop) {
-                    c1 = t;
-                    cs = s;
-                }
-            }
+            const int w1 = t * a1 / 1000 + KDF_CELL_PAD;
+            if (w1 + KDF_IN_CAP_W > W) continue;
+            const int sW = ((W - w1 - KDF_CELL_PAD + 1) * 1000 - 1) / a2;   // its width
+            int s = kdfMin(t * 6 / 10, kdfMin(sH, sW));
+            while (s >= t / 2 &&
+                   !(w1 + kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W) <= W &&
+                     2 * (f.labSz + 4 + s) + 6 <= room))
+                s--;
+            if (s >= t / 2) { c1 = t; cs = s; }
         }
     }
     if (c1) {

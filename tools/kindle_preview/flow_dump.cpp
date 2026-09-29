@@ -12,6 +12,7 @@
 //   ./flow_dump css  ... clock=2 pagew=600 html=1
 //   ./flow_dump json ...
 //   ./flow_dump adv  'pressure:1008:hPa:1;dew_point:-3.1:°'
+//   ./flow_dump adv1 'temperature:21.0:°'   (each as the indoor row's first place)
 //
 // grid= and in= are each place's kdFlowWorstAdvance(), comma-separated; or
 // place=metric:text:unit[:arrow] pairs through gridp= and inp=, which are
@@ -40,7 +41,7 @@ static int parseList(const char* v, uint16_t* out, int max) {
 }
 
 /// "pressure:1008:hPa:1;dew_point:3.1:°" -> each place's advance.
-static int parsePlaces(const char* v, uint16_t* out, int max, bool firstUnsigned = false) {
+static int parsePlaces(const char* v, uint16_t* out, int max, bool firstIn = false) {
     int n = 0;
     std::string all(v);
     size_t at = 0;
@@ -57,11 +58,11 @@ static int parsePlaces(const char* v, uint16_t* out, int max, bool firstUnsigned
                 f[i] = one.substr(p, c - p);
                 p = c + 1;
             }
-            // The indoor row's first field without the assumed sign, as
-            // KindleDashboard.cpp's kdFlowFor() measures it.
-            out[n] = (uint16_t)kdFlowWorstAdvance(f[0].c_str(), f[1].c_str(),
-                                                 f[2].c_str(), f[3] == "1",
-                                                 !(firstUnsigned && n == 0));
+            // The indoor row's first place as KindleDashboard.cpp's
+            // kdFlowFor() measures it.
+            out[n] = (uint16_t)(firstIn && n == 0
+                ? kdFlowFirstInAdvance(f[0].c_str(), f[1].c_str(), f[2].c_str(), f[3] == "1")
+                : kdFlowWorstAdvance(f[0].c_str(), f[1].c_str(), f[2].c_str(), f[3] == "1"));
             n++;
         }
         at = end + 1;
@@ -75,10 +76,25 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string mode = argv[1];
-    if (mode == "adv") {
-        // flow_dump adv "pressure:1008:hPa:1;dew_point:3.1:°" -> one per line
+    if (mode == "adv" || mode == "adv1") {
+        // flow_dump adv "pressure:1008:hPa:1;dew_point:3.1:°" -> one per line;
+        // adv1 measures each as the indoor row's first place.
         for (int i = 2; i < argc; i++) {
             uint16_t a[64];
+            if (mode == "adv1") {
+                // One place per call: parsePlaces() treats only the first as first.
+                std::string all(argv[i]);
+                size_t at = 0;
+                while (at <= all.size()) {
+                    size_t end = all.find(';', at);
+                    if (end == std::string::npos) end = all.size();
+                    const std::string one = all.substr(at, end - at);
+                    if (!one.empty() && parsePlaces(one.c_str(), a, 1, true) == 1)
+                        printf("%u\n", (unsigned)a[0]);
+                    at = end + 1;
+                }
+                continue;
+            }
             const int n = parsePlaces(argv[i], a, 64);
             for (int k = 0; k < n; k++) printf("%u\n", (unsigned)a[k]);
         }

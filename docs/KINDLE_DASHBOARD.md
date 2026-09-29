@@ -669,11 +669,16 @@ The indoor row, upright:
   first could be, and it stopped well short of the room it stands in.
 
 The first indoor reading is sized closer to what it prints, like the
-headline: a temperature there keeps room for two digits but not for a minus
-sign a room does not reach, which every other temperature on the page is
-given. A reading that is below zero still counts its own. Together the two
-took the ordinary page's three-reading row from 62 to 72 px (111 to 129 on a
-1072 × 1448 panel), and two readings from 61 to 67.
+headline (`kdFlowFirstInAdvance()`): an indoor temperature there keeps room
+for two digits but not for the minus sign every other temperature on the page
+is given, because a room does not reach it. It is still not sized by the
+reading's sign, which would re-lay the row each time an unheated room crossed
+zero: -9.9 and 21.0 give one layout, and only below that is what it prints
+wider than the room kept for it. Any other metric in that place, such as a
+dew point, which a heated room takes below zero all winter, is measured as
+everywhere else. Together the two took the ordinary page's three-reading row
+from 62 to 72 px (111 to 129 on a 1072 × 1448 panel), and two readings from
+61 to 67.
 
 On the landscape page the indoor row is too short for two readings one above
 the other, and all three stay on one line.
