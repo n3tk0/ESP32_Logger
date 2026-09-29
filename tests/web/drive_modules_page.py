@@ -181,6 +181,30 @@ with sync_playwright() as p:
           "ticking the switch flips the checkbox behind it")
     check(ip_row.is_visible(), "and revealed once the condition holds")
 
+    # ── an enum saves as the number the firmware reads ──────────────────────
+    # A <select> yields "0"; the firmware's `cfg["wifiMode"] | cur` keeps
+    # `cur` for a string, so a posted "0" saved ok and changed nothing.
+    posted = []
+
+    def on_save(route):
+        posted.append(json.loads(route.request.post_data or "{}"))
+        route.fulfill(status=200, content_type="application/json",
+                      body='{"ok":true}')
+
+    pg.route(re.compile(r".*/api/modules/wifi(\?.*)?$"), on_save)
+    host.locator('[name="wifiMode"]').select_option("0")
+    pg.click("#mod-save")
+    pg.wait_for_timeout(800)
+    pg.unroute(re.compile(r".*/api/modules/wifi(\?.*)?$"))
+    cfg = posted[0].get("config", {}) if posted else {}
+    check(cfg.get("wifiMode") == 0 and isinstance(cfg.get("wifiMode"), int),
+          "an enum posts its option's number, not the select's string (%r)"
+          % cfg.get("wifiMode"))
+    check(cfg.get("useStatic") is True and cfg.get("ssid") == "MonkeyNet",
+          "and the other fields keep their types")
+    # Dirty again, for the leave-asks-first step below.
+    host.locator('[name="wifiMode"]').select_option("1")
+
     # ── the forecast's refresh button ────────────────────────────────────────
     # A panel under the form: provider, age, failures, and a button that asks
     # /kindle/forecast and then polls the module for as long as it says the

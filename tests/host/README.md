@@ -29,6 +29,7 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_espnow_node_fw.cpp` | the ESP-NOW node's firmware update (docs/NODE_OTA.md §4.3–4.4): `node_espnow/src/FwFetch.h` against a simulated collector and NOR flash — the first answer's verdicts (running, rolled back, low battery, refused before), resuming across wakes, sectors erased as entered, a new image or attempt starting over, lost replies, the budget — and `FwTrial.h`'s boot / wake counting |
 | `test_node_fw_offer.cpp` | `node/src/FwOffer.h` — the WiFi node's side of docs/NODE_OTA.md §3: which `fw` offer to act on, the failed `(md5, attempt)` not retried, `fw_error` held until a POST carrying it is answered, the verdict on a whole image |
 | `test_ipv4_parse.cpp` | `src/utils/Ipv4Parse.h` — the dotted-quad parser that replaced `sscanf` (300 is refused, not wrapped to 44) |
+| `test_json_enum.cpp` | `src/utils/JsonEnum.h` — a module's enum field read as a number or a numeric string (the Modules form used to post `"2"`) |
 | `test_espnow_nodetable.cpp` | the three decisions the collector makes about an arriving frame |
 | `test_remote_ingest.cpp` | the mailbox and the separate historical queue it grew |
 | `test_battery_model.cpp` | that the remaining-life model **refuses** to answer when it cannot |

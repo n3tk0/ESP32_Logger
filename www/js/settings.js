@@ -2084,6 +2084,16 @@ var Modules = (function () {
     refresh();
   }
 
+  // A <select> only ever yields a string, but most module enums are numbers
+  // in the firmware (`cfg["rotation"] | (int)d.rotation`), and ArduinoJson's
+  // `|` falls back to the default for "2" — the change was silently dropped
+  // while the save answered ok. Send the option's own value, with its type.
+  function _enumValue(f, v) {
+    var opts = f.options || [];
+    for (var i = 0; i < opts.length; i++) if (String(opts[i].v) === v) return opts[i].v;
+    return v;
+  }
+
   function collect(form, schema) {
     var out = {};
     (schema.fields || []).forEach(function (f) {
@@ -2093,6 +2103,7 @@ var Modules = (function () {
       if (f.type === "bool")        out[f.id] = el.checked;
       else if (f.type === "int")    out[f.id] = el.value === "" ? 0 : parseInt(el.value, 10);
       else if (f.type === "float")  out[f.id] = el.value === "" ? 0 : parseFloat(el.value);
+      else if (f.type === "enum")   out[f.id] = _enumValue(f, el.value);
       else                          out[f.id] = el.value;
     });
     return out;

@@ -98,6 +98,10 @@ MODULE_SCHEMA = {
         {"id": "lon", "type": "float", "label": "Longitude"},
     ]}),
     "wifi": json.dumps({"fields": [
+        # An enum with numeric values, as most firmware enums are: the form
+        # must post 1, not "1" (see _enumValue in settings.js).
+        {"id": "wifiMode", "type": "enum", "label": "Mode",
+         "options": [{"v": 0, "l": "Access Point"}, {"v": 1, "l": "Client"}]},
         {"id": "ssid", "type": "string", "max": 32, "label": "SSID"},
         {"id": "useStatic", "type": "bool", "label": "Use a static IP"},
         {"id": "ip", "type": "ipv4", "label": "IP address",
@@ -113,7 +117,7 @@ FORECAST = {"asked": False, "polls": 0, "left": 0, "offline": False}
 MODULE_CONFIG = {
     "forecast": {"provider": "open-meteo", "lat": 42.7, "lon": 23.3, "interval_min": 30},
     "time": {"ntpServer": "pool.ntp.org", "timezone": 2, "dstOffsetHours": 1},
-    "wifi": {"ssid": "MonkeyNet", "useStatic": False, "ip": "192.168.1.214"},
+    "wifi": {"wifiMode": 1, "ssid": "MonkeyNet", "useStatic": False, "ip": "192.168.1.214"},
 }
 
 # GET /api/remote/status — the WiFi-remote half of the merged Nodes page

@@ -3,6 +3,7 @@
 #include "../core/Config.h"
 #include <WiFi.h>
 #include "../utils/Ipv4Parse.h"
+#include "../utils/JsonEnum.h"
 
 namespace {
 
@@ -41,15 +42,18 @@ const char WIFI_SCHEMA[] PROGMEM =
 // ---------------------------------------------------------------------------
 bool WiFiModule::load(JsonObjectConst cfg) {
     NetworkConfig& n = config.network;
-    n.wifiMode       = (WiFiModeType)(cfg["wifiMode"] | (int)n.wifiMode);
+    n.wifiMode       = (WiFiModeType)jsonEnumInt(cfg["wifiMode"], (int)n.wifiMode);
     bool ok = true;
     if ((int)n.wifiMode < 0 || (int)n.wifiMode > 1) { n.wifiMode = WIFIMODE_AP; ok = false; }
     n.useStaticIP    = cfg["useStaticIP"] | n.useStaticIP;
 
     const char* ssid = cfg["clientSSID"] | (const char*)nullptr;
     if (ssid) strlcpy(n.clientSSID, ssid, sizeof(n.clientSSID));
+    // save() never sends the password back, so the form's field is always
+    // empty and an untouched field posts "" — which used to wipe the stored
+    // password on any WiFi save. Blank keeps it, as the field's help says.
     const char* pw = cfg["clientPassword"] | (const char*)nullptr;
-    if (pw) strlcpy(n.clientPassword, pw, sizeof(n.clientPassword));
+    if (pw && pw[0]) strlcpy(n.clientPassword, pw, sizeof(n.clientPassword));
 
     ok &= parseIPv4(cfg["staticIP"] | (const char*)nullptr, n.staticIP);
     ok &= parseIPv4(cfg["gateway"]  | (const char*)nullptr, n.gateway);
