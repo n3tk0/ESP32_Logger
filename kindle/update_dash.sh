@@ -3500,8 +3500,11 @@ draw_zones() {
         local big_sz="${BIG_SZ:-44}"
         local hw=$(( hero_sz * ${Z_HERO_ADVW:-0} / 1000 ))
         local sx=$(( lx + hw + ${HEAD_GAP:-8} ))
+        # The slash is always the regular face, the value may be bold: each
+        # on the headline's baseline by its own face's numbers.
+        draw_text_reg "$sx" "$(baseline_y "$hero_y" "$hero_sz" "$big_sz" "${Z_HERO_BOLD:-0}" 0)" \
+                      "$big_sz" "GRAYA" "/"
         y=$(baseline_y "$hero_y" "$hero_sz" "$big_sz" "${Z_HERO_BOLD:-0}" "${Z_BIG_BOLD:-0}")
-        draw_text_reg "$sx" "$y" "$big_sz" "GRAYA" "/"
         draw_field "$(( sx + ${SLASH_W:-22} ))" "$y" "$big_sz" "${Z_BIG_BOLD:-0}" \
                    "$Z_BIG_VALUE" "$Z_BIG_UNIT" "$Z_BIG_ARROW" \
                    "${Z_BIG_VADVW:-0}" "${Z_BIG_UADVW:-0}" "${Z_BIG_INK:-BLACK}"
