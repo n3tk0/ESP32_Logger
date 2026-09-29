@@ -393,6 +393,17 @@ jobs:
           rm www/js/sensors.js.orig
           echo "the driver fails without the field, as it should"
 
+      - name: Drive the Sensors page cards and chart
+        # The page's Refresh button left the cards one full-width row each
+        # until a browser reload (zone grouping missed the second render),
+        # and the Sensor chart showed only the ring's last few minutes, never
+        # the data log's history. The driver serves a day of data log rows,
+        # a rotated file from yesterday and one from last month.
+        run: |
+          python3 tests/web/mock_device.py 8796 &
+          sleep 2
+          MOCK_PORT=8796 python3 tests/web/drive_sensor_chart.py
+
       - name: Drive the pin fields (first-run, Hardware, sensor editor, wizard)
         # www/js/pins.js: a pin typed as the board prints it ("D9") or as a
         # GPIO, a strap or console pin warned about and allowed, and only the

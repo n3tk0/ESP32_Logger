@@ -313,6 +313,203 @@ function sensorsFilter() {
   });
 }
 
+// ── Sensor chart history from the data log ───────────────────────────────
+// /api/data serves the in-memory ring only, and a request sees just its
+// newest 300 readings across every sensor: a few minutes. Anything older is
+// in the data log, one TIMER row per aggregation interval with a column per
+// logged metric (src/storage/DatalogFormat.h). So the chart reads the active
+// log file, and the files rotation moved aside that can still hold rows of
+// the range, and puts the ring's readings after them.
+//
+// Row times are the device's local time, read here in the browser's time
+// zone: the same zone on the network the logger sits on.
+
+var _scLogCache = {};                   // storage|path -> { size, text }
+var SC_MAX_ARCHIVED = 12;               // older files read at most per load
+
+function _scLogText(path, size, storage) {
+  var key = storage + "|" + path;
+  var c = _scLogCache[key];
+  if (c && c.size === size) return Promise.resolve(c.text);
+  return fetchWithTimeout("/download?file=" + encodeURIComponent(path) +
+                          "&storage=" + encodeURIComponent(storage), {}, 30000)
+    .then(function (r) { return r.ok ? r.text() : ""; })
+    .then(function (t) { _scLogCache[key] = { size: size, text: t }; return t; })
+    .catch(function () { return ""; });
+}
+
+// The last moment a file moved aside can hold, from the suffix archive()
+// gave it: _YYYY-MM-DD (daily/weekly), _YYYY-MM (monthly), _YYYYMMDD-HHMMSS
+// (size or header change). null = not a suffix of those.
+function _scArchiveEnd(suffix) {
+  var m = suffix.match(/^(\d{4})-?(\d{2})(?:-?(\d{2}))?/);
+  if (!m) return null;
+  var y = +m[1], mo = +m[2];
+  var end = m[3] ? new Date(y, mo - 1, +m[3] + 1) : new Date(y, mo, 1);
+  return Math.floor(end.getTime() / 1000);
+}
+
+// The data log files that can hold rows at or after `from`, newest first.
+function _scLogFiles(from) {
+  var hw = (window.CFG && CFG.hardware) || {};
+  var storage = +hw.storageType === 1 ? "sdcard" : "internal";
+  return fetchWithTimeout("/api/filelist?filter=log&recursive=1&storage=" + storage, {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var active = (d && d.currentFile) || "";
+      if (!d || !d.files || !active) return [];
+      var slash = active.lastIndexOf("/");
+      var dir = slash > 0 ? active.substring(0, slash) : "";
+      var base = active.substring(slash + 1);
+      var dot = base.lastIndexOf(".");
+      var stem = dot > 0 ? base.substring(0, dot) : base;
+      var ext = dot > 0 ? base.substring(dot) : "";
+      var out = [], archived = [];
+      d.files.forEach(function (f) {
+        var fs = f.path.lastIndexOf("/");
+        var fdir = fs > 0 ? f.path.substring(0, fs) : "";
+        var name = f.path.substring(fs + 1);
+        if (fdir !== dir) return;
+        if (f.path === active) { out.push({ path: f.path, size: f.size }); return; }
+        if (name.indexOf(stem + "_") !== 0 || (ext && name.slice(-ext.length) !== ext)) return;
+        var end = _scArchiveEnd(name.substring(stem.length + 1, name.length - ext.length));
+        if (end !== null && end >= from) archived.push({ path: f.path, size: f.size, end: end });
+      });
+      archived.sort(function (a, b) { return b.end - a.end; });
+      return out.concat(archived.slice(0, SC_MAX_ARCHIVED)).map(function (f) {
+        f.storage = storage;
+        return f;
+      });
+    })
+    .catch(function () { return []; });
+}
+
+// A row's Date and Start fields as an epoch, or NaN.
+function _scRowEpoch(dateStr, timeStr, dateFormat) {
+  var m, y, mo, d;
+  if ((m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else if ((m = dateStr.match(/^(\d{2})\.(\d{2})\.(\d{4})$/))) { d = +m[1]; mo = +m[2]; y = +m[3]; }
+  else if ((m = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/))) {
+    y = +m[3];
+    if (dateFormat === 2) { mo = +m[1]; d = +m[2]; } else { d = +m[1]; mo = +m[2]; }
+  } else return NaN;
+  var t = timeStr.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!t) return NaN;
+  var h = +t[1];
+  if (t[4]) h = (h % 12) + (t[4].toUpperCase() === "PM" ? 12 : 0);
+  return Math.floor(new Date(y, mo - 1, d, h, +t[2], +(t[3] || 0)).getTime() / 1000);
+}
+
+// Points {ts, v} of one sensor metric in one data log file's text.
+function _scParseLog(text, labels, from, to, dateFormat, halfWin) {
+  var lines = text.split("\n");
+  var head = (lines[0] || "").replace(/\r$/, "").split("|");
+  if (/\d/.test(head[0] || "")) return [];          // no header: no sensor columns
+  var iDate = head.indexOf("Date"), iStart = head.indexOf("Start");
+  var iTrig = head.indexOf("Trigger"), col = -1;
+  for (var k = 0; k < labels.length && col < 0; k++) col = head.indexOf(labels[k]);
+  if (col < 0 || iDate < 0 || iStart < 0) return [];
+  var pts = [];
+  for (var i = 1; i < lines.length; i++) {
+    var p = lines[i].replace(/\r$/, "").split("|");
+    if (p.length <= col || p[col] === "") continue;
+    var v = parseFloat(p[col]);
+    if (!isFinite(v)) continue;
+    var ts = _scRowEpoch(p[iDate], p[iStart], dateFormat);
+    if (!isFinite(ts)) continue;
+    // A TIMER row's time is the start of the window it averages.
+    if (iTrig >= 0 && p[iTrig] === "TIMER") ts += halfWin;
+    if (ts < from || ts > to) continue;
+    pts.push({ ts: ts, v: v });
+  }
+  return pts;
+}
+
+function _scLogHistory(sid, metric, from, to) {
+  var dl = (window.CFG && CFG.datalog) || {};
+  var cols = (dl.sensorCols && dl.sensorCols.cols) || [];
+  var labels = [];
+  cols.forEach(function (c) {
+    if (c.s === sid && c.m === metric && c.l) labels.push(String(c.l).replace(/[|\x00-\x1f]/g, "_"));
+  });
+  labels.push(sid + "_" + metric);                 // the label a column gets by default
+  var dateFormat = +dl.dateFormat;
+  var lg = (window.CFG && CFG.logger) || {};
+  var halfWin = Math.floor((+lg.aggregationIntervalSec || 60) / 2);
+  return _scLogFiles(from).then(function (files) {
+    return Promise.all(files.map(function (f) {
+      return _scLogText(f.path, f.size, f.storage).then(function (t) {
+        return _scParseLog(t, labels, from, to, dateFormat, halfWin);
+      });
+    }));
+  }).then(function (lists) {
+    var all = [].concat.apply([], lists);
+    all.sort(function (a, b) { return a.ts - b.ts; });
+    return all;
+  });
+}
+
+var SC_BUCKET_SEC = { "5m": 300, "1h": 3600, "1d": 86400, raw: 0 };
+var SC_MAX_POINTS = 250;
+
+// Buckets the points by `sec` (0 = as they are), one value per bucket by
+// `mode` (avg for lttb), then thins them to SC_MAX_POINTS.
+function _scAggregate(pts, sec, mode, from, to) {
+  if (sec > 0 && pts.length) {
+    var out = [], cur = null;
+    pts.forEach(function (p) {
+      var b = Math.floor(p.ts / sec) * sec;
+      if (!cur || cur.ts !== b) {
+        cur = { ts: b, sum: 0, n: 0, min: Infinity, max: -Infinity };
+        out.push(cur);
+      }
+      cur.sum += p.v; cur.n++;
+      if (p.v < cur.min) cur.min = p.v;
+      if (p.v > cur.max) cur.max = p.v;
+    });
+    pts = out.map(function (c) {
+      var v = mode === "min" ? c.min : mode === "max" ? c.max : c.sum / c.n;
+      return { ts: c.ts, v: Math.round(v * 100) / 100 };
+    });
+  }
+  if (pts.length > SC_MAX_POINTS) {
+    var wider = Math.ceil((to - from) / SC_MAX_POINTS);
+    if (wider > sec) return _scAggregate(pts, wider, mode, from, to);
+    pts = pts.slice(pts.length - SC_MAX_POINTS);
+  }
+  return pts;
+}
+
+// One chart series: data log history, then the ring's readings after it.
+function _scSeries(sid, metric, from, to, agg, mode) {
+  var ringUrl = "/api/data?sensor=" + encodeURIComponent(sid) +
+    "&metric=" + encodeURIComponent(metric) +
+    "&from=" + from + "&to=" + to + "&agg=raw&mode=raw&limit=300";
+  var ring = fetchWithTimeout(ringUrl, {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; });
+  var hist = _scLogHistory(sid, metric, from, to).catch(function () { return []; });
+  return Promise.all([ring, hist]).then(function (res) {
+    var rd = (res[0] && res[0].data) || [];
+    var unit = rd.length ? (rd[0].unit || "") : "";
+    if (!unit) {
+      var s = ((_sensorsCache && _sensorsCache.sensors) || []).find(function (x) { return x.id === sid; });
+      var lv = s && s.last_values && s.last_values[metric];
+      if (lv && typeof lv === "object") unit = lv.u || "";
+    }
+    var firstRing = rd.length ? rd[0].ts : Infinity;
+    var pts = res[1].filter(function (p) { return p.ts < firstRing; })
+      .concat(rd.map(function (p) { return { ts: p.ts, v: p.v }; }));
+    pts = _scAggregate(pts, SC_BUCKET_SEC[agg] || 0, mode, from, to);
+    return {
+      agg: agg, mode: mode, count: pts.length,
+      data: pts.map(function (p) { return { ts: p.ts, v: p.v, unit: unit }; }),
+    };
+  });
+}
+
+var _scLoadSeq = 0;
+
 function sensorChartLoad() {
   var sid = (document.getElementById("sc-sensor") || {}).value;
   var metric = (document.getElementById("sc-metric") || {}).value;
@@ -336,37 +533,20 @@ function sensorChartLoad() {
   var now = Math.floor(Date.now() / 1000);
   var from = now - range;
 
-  // Build primary URL
-  var url1 =
-    "/api/data?sensor=" +
-    encodeURIComponent(sid) +
-    "&metric=" +
-    encodeURIComponent(metric) +
-    "&from=" + from + "&to=" + now +
-    "&agg=" + agg + "&mode=" + mode + "&limit=250";
-
   // Secondary overlay sensor
   var sid2 = (document.getElementById("sc-sensor2") || {}).value;
   var metric2 = (document.getElementById("sc-metric2") || {}).value;
-  var url2 = null;
-  if (sid2 && metric2) {
-    url2 =
-      "/api/data?sensor=" +
-      encodeURIComponent(sid2) +
-      "&metric=" +
-      encodeURIComponent(metric2) +
-      "&from=" + from + "&to=" + now +
-      "&agg=" + agg + "&mode=" + mode + "&limit=250";
-  }
 
   if (msg) msg.textContent = window.I18n ? I18n.t("common.loading") : "Loading…";
 
-  // Fetch primary (and optionally secondary) data
-  var fetches = [fetchWithTimeout(url1, {}, 15000).then(function (r) { return r.ok ? r.json() : null; })];
-  if (url2) fetches.push(fetchWithTimeout(url2, {}, 15000).then(function (r) { return r.ok ? r.json() : null; }));
+  // Primary (and optionally secondary) series: data log history + ring.
+  var myLoad = ++_scLoadSeq;
+  var fetches = [_scSeries(sid, metric, from, now, agg, mode)];
+  if (sid2 && metric2) fetches.push(_scSeries(sid2, metric2, from, now, agg, mode));
 
   Promise.all(fetches)
     .then(function (results) {
+      if (myLoad !== _scLoadSeq) return;   // a newer selection is loading
       var d1 = results[0];
       var d2 = results.length > 1 ? results[1] : null;
 

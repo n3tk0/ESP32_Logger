@@ -95,9 +95,10 @@ the ring and benefit immediately.
 **What it does not reach yet:** `/api/data` charts. That endpoint materialises
 raw readings into a fixed 300-entry array before aggregating, so one request
 sees the newest ~300 readings (~2.5 min) no matter how deep the ring is.
-Serving hours in a single request needs aggregation that accumulates per bucket
-while scanning the ring instead of copying raw readings out first — the same
-work the planned CSV reader ("chunk F") implies for the filesystem side.
+The Sensors page's chart therefore takes its history from the data log
+instead (the TIMER rows, one per aggregation interval, read in the browser
+from the active file and the rotated files that cover the range) and puts
+the ring's readings after it. The Dashboard sparklines still read the ring only.
 
 PSRAM is volatile — a reboot loses it. It extends live retention, it does not
 replace CSV logging to flash.

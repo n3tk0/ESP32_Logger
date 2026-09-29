@@ -1602,11 +1602,15 @@
     var grid = document.getElementById("sensors-grid");
     if (!grid) return;
 
+    // Stays connected: the Refresh button clears the grid and fills it again
+    // once /api/sensors answers, two separate mutations. Disconnecting for a
+    // while after the first (the empty grid) missed the second whenever the
+    // answer came back sooner, and the cards stayed ungrouped in a grid that
+    // grouping had switched to display:block — one full-width card per row.
+    // The records of the grouping's own rebuild are dropped instead.
     var mo = new MutationObserver(function () {
-      mo.disconnect();
       doZoneGrouping();
-      // Re-observe in case sensorsLoad fires again
-      setTimeout(function () { mo.observe(grid, { childList: true }); }, 500);
+      mo.takeRecords();
     });
     mo.observe(grid, { childList: true });
     // Also group if already populated
@@ -1615,7 +1619,10 @@
 
   function doZoneGrouping() {
     var grid = document.getElementById("sensors-grid");
-    if (!grid || !window.CFG) return;
+    if (!grid) return;
+    // The cards lie in the grid itself until they are grouped: keep it a grid.
+    if (!grid.querySelector(".zone-section")) grid.style.display = "";
+    if (!window.CFG) return;
 
     // Build zone map from platform_config sensors
     var sensors = (CFG.platform && CFG.platform.sensors) || [];
@@ -1636,6 +1643,8 @@
     });
 
     if (!Object.keys(existing).length) return;
+    // Already grouped (the observer also sees the grouping's own rebuild).
+    if (!grid.querySelector(":scope > [data-sid]")) return;
 
     // Rebuild
     grid.innerHTML = "";
