@@ -32,6 +32,7 @@ code path deploy.py (the CLI) runs. Three rules shape what is here:
 import sys
 import threading
 import tkinter as tk
+from tkinter import filedialog
 from pathlib import Path
 from typing import Optional
 
@@ -68,6 +69,7 @@ from deploy_core import (
     STEP_NAMES,
     PRESETS,
     detect_env,
+    run_order,
     _UPLOAD_FILTERS,
     _UPLOAD_FILTER_LABELS,
 )
@@ -679,7 +681,8 @@ class DeployerGUI:
         """
         enabled_steps = set(self.cfg.get("steps", []))
         groups = (("Collector board", range(1, 10)),
-                  ("Node board (its own USB port)", range(10, 13)))
+                  ("Node board (its own USB port)", range(10, 13)),
+                  ("Remote update over WiFi (no cable)", range(13, 15)))
 
         for heading, numbers in groups:
             ctk.CTkLabel(parent, text=heading, font=self.fonts["bodyb"],
@@ -843,6 +846,8 @@ class DeployerGUI:
         self.ip_entry.pack(fill="x", pady=(2, 0))
         self.ip_entry.bind("<FocusOut>",
                            lambda _: self._save_setting("device_ip", self.ip_entry))
+
+        self._build_remote_section(frame)
 
         # ── Serial speeds ───────────────────────────────────────────────────
         # Both are already stated per environment in platformio.ini, so these
@@ -1184,6 +1189,253 @@ class DeployerGUI:
             "<FocusOut>", lambda _: self._save_setting("node_port", self.node_port_entry))
 
         ctk.CTkLabel(parent, text="", font=self.fonts["small"]).pack(pady=(0, 6))
+
+    # ── Remote update (steps 13 and 14) ──────────────────────────────────────
+    def _file_row(self, parent, key: str, placeholder: str):
+        """An entry for a .bin path with a Browse button; empty = last build."""
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=(2, 8))
+        entry = self._sz(ctk.CTkEntry(row, font=self.fonts["body"],
+                                      placeholder_text=placeholder), 38)
+        # Only a real value: inserting "" into a CTkEntry hides its placeholder.
+        if self.cfg.get(key):
+            entry.insert(0, self.cfg[key])
+        entry.pack(side="left", fill="x", expand=True)
+        entry.bind("<FocusOut>", lambda _: self._save_setting(key, entry))
+
+        def browse() -> None:
+            path = filedialog.askopenfilename(
+                title="Choose a firmware image",
+                filetypes=[("Firmware", "*.bin"), ("All files", "*")])
+            if path:
+                entry.delete(0, "end")
+                entry.insert(0, path)
+                self._save_setting(key, entry)
+
+        def clear() -> None:
+            entry.delete(0, "end")
+            self._save_setting(key, entry)
+
+        self._sz(ctk.CTkButton(row, text="Browse…", width=self.px(90),
+                               font=self.fonts["small"], command=browse), 38
+                 ).pack(side="left", padx=(8, 0))
+        self._sz(ctk.CTkButton(row, text="Last build", width=self.px(90),
+                               font=self.fonts["small"], fg_color="gray40",
+                               command=clear), 38).pack(side="left", padx=(8, 0))
+        return entry
+
+    def _login_row(self, parent, user_key: str, pass_key: str):
+        """User (saved) and password (this session only) side by side."""
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=(2, 8))
+        ctk.CTkLabel(row, text="user", font=self.fonts["body"],
+                     width=self.px(46), anchor="w").pack(side="left")
+        user = self._sz(ctk.CTkEntry(row, width=self.px(160),
+                                     font=self.fonts["body"]), 38)
+        if self.cfg.get(user_key):
+            user.insert(0, self.cfg[user_key])
+        user.pack(side="left", padx=(0, 16))
+        user.bind("<FocusOut>", lambda _: self._save_setting(user_key, user))
+        ctk.CTkLabel(row, text="password", font=self.fonts["body"],
+                     width=self.px(80), anchor="w").pack(side="left")
+        pw = self._sz(ctk.CTkEntry(row, width=self.px(160), show="•",
+                                   font=self.fonts["body"],
+                                   placeholder_text="not saved"), 38)
+        if self.cfg.get(pass_key):
+            pw.insert(0, self.cfg[pass_key])
+        pw.pack(side="left")
+        # Into the live config only: save_cfg() drops it, so it never
+        # reaches .flash_tool.json.
+        pw.bind("<FocusOut>", lambda _: self.cfg.__setitem__(pass_key, pw.get()))
+        return user, pw
+
+    def _build_remote_section(self, frame) -> None:
+        """Firmware over WiFi, through the API the devices already serve.
+
+        Step 13 sends the collector's image to the Device IP above; step 14
+        a node's, through the collector (which keeps it on its SD card and
+        hands it to each node when it wakes) or straight to a WiFi node.
+        """
+        box = self._settings_group(
+            frame, "Remote update (steps 13 and 14)",
+            "Firmware over WiFi, no cable. Step 13 uploads the collector's "
+            "image to the Device IP, waits for the restart and confirms it so "
+            "it cannot roll back. Step 14 puts a node image on the collector's "
+            "SD card and starts the update for the nodes picked here; each "
+            "fetches it the next time it wakes. Passwords are never saved.")
+
+        ctk.CTkLabel(box, text="Collector firmware (step 13)",
+                     font=self.fonts["bodyb"], anchor="w").pack(fill="x")
+        self.remote_fw_entry = self._file_row(
+            box, "remote_fw_file", "empty = the last build of the selected env")
+        ctk.CTkLabel(box, text="Collector login (only with basic auth)",
+                     font=self.fonts["bodyb"], anchor="w").pack(fill="x")
+        self.http_user_entry, self.http_pass_entry = self._login_row(
+            box, "http_user", "http_pass")
+
+        ctk.CTkLabel(box, text="Node firmware (step 14)",
+                     font=self.fonts["bodyb"], anchor="w").pack(fill="x", pady=(6, 0))
+        self.node_fw_entry = self._file_row(
+            box, "node_fw_file", "empty = the last build of the node target")
+
+        self._route_labels = {"collector": "Through the collector",
+                              "direct": "Directly to the WiFi node"}
+        self.node_route_var = ctk.StringVar(
+            value=self._route_labels.get(self.cfg.get("node_fw_route") or "collector"))
+        self._sz(ctk.CTkOptionMenu(
+            box, values=list(self._route_labels.values()),
+            variable=self.node_route_var, font=self.fonts["body"],
+            dropdown_font=self.fonts["body"],
+            command=self._on_route_change), 38).pack(fill="x")
+
+        self.route_box = ctk.CTkFrame(box, fg_color="transparent")
+        self.route_box.pack(fill="x", pady=(8, 0))
+
+        # Through the collector: which nodes, and whether to follow them.
+        self.via_box = ctk.CTkFrame(self.route_box, fg_color="transparent")
+        targets = self.cfg.get("node_fw_targets") or "all"
+        self.targets_all_var = ctk.BooleanVar(value=targets == "all")
+        ctk.CTkCheckBox(
+            self.via_box, text="Every node of this kind",
+            variable=self.targets_all_var, font=self.fonts["body"],
+            checkbox_width=self.px(22), checkbox_height=self.px(22),
+            command=self._on_targets_all).pack(anchor="w")
+        # height=1: an empty CTkFrame is 200 px tall until something is in it.
+        self.node_list_box = ctk.CTkFrame(self.via_box, fg_color="transparent",
+                                          height=1)
+        self.node_list_box.pack(fill="x", pady=(4, 0))
+        self.node_target_vars: dict[str, tk.BooleanVar] = {}
+        self._render_node_list(
+            [{"key": k, "name": "", "online": None} for k in
+             (targets if isinstance(targets, list) else [])])
+        self._sz(ctk.CTkButton(
+            self.via_box, text="Load nodes from the collector",
+            font=self.fonts["small"], command=self._load_nodes), 34
+        ).pack(anchor="w", pady=(6, 0))
+        self.watch_var = ctk.BooleanVar(value=bool(self.cfg.get("node_fw_watch")))
+        ctk.CTkCheckBox(
+            self.via_box, text="Follow the rollout until every node is done",
+            variable=self.watch_var, font=self.fonts["body"],
+            checkbox_width=self.px(22), checkbox_height=self.px(22),
+            command=lambda: self._save_setting(
+                "node_fw_watch", None, self.watch_var.get())
+        ).pack(anchor="w", pady=(8, 0))
+
+        # Directly: the node's own address and login.
+        self.direct_box = ctk.CTkFrame(self.route_box, fg_color="transparent")
+        ctk.CTkLabel(self.direct_box, text="WiFi node address",
+                     font=self.fonts["bodyb"], anchor="w").pack(fill="x")
+        self.node_ip_entry = self._sz(ctk.CTkEntry(
+            self.direct_box, font=self.fonts["body"],
+            placeholder_text="e.g. 192.168.1.40"), 38)
+        if self.cfg.get("node_ip"):
+            self.node_ip_entry.insert(0, self.cfg["node_ip"])
+        self.node_ip_entry.pack(fill="x", pady=(2, 8))
+        self.node_ip_entry.bind(
+            "<FocusOut>", lambda _: self._save_setting("node_ip", self.node_ip_entry))
+        ctk.CTkLabel(self.direct_box, text="Node login (from its setup page)",
+                     font=self.fonts["bodyb"], anchor="w").pack(fill="x")
+        self.node_user_entry, self.node_pass_entry = self._login_row(
+            self.direct_box, "node_http_user", "node_http_pass")
+        self._sync_route()
+
+        self._sz(ctk.CTkButton(
+            box, text="Check devices", font=self.fonts["small"],
+            command=self._probe_devices), 34).pack(anchor="w", pady=(10, 0))
+
+    def _on_route_change(self, label: str) -> None:
+        route = {v: k for k, v in self._route_labels.items()}.get(label, "collector")
+        self._save_setting("node_fw_route", None, route)
+        self._sync_route()
+
+    def _sync_route(self) -> None:
+        direct = self.cfg.get("node_fw_route") == "direct"
+        (self.via_box if direct else self.direct_box).pack_forget()
+        (self.direct_box if direct else self.via_box).pack(fill="x")
+
+    def _render_node_list(self, nodes: list[dict]) -> None:
+        """One checkbox per node, keeping the ticks already chosen."""
+        chosen = self.cfg.get("node_fw_targets")
+        chosen = set(chosen) if isinstance(chosen, list) else set()
+        for child in self.node_list_box.winfo_children():
+            child.destroy()
+        self.node_target_vars = {}
+        listed = {n["key"] for n in nodes}
+        # A saved key the collector no longer lists stays visible, so it is
+        # not started silently or dropped silently.
+        nodes = nodes + [{"key": k, "name": "", "online": None}
+                         for k in sorted(chosen - listed)]
+        for n in nodes:
+            var = tk.BooleanVar(value=n["key"] in chosen)
+            self.node_target_vars[n["key"]] = var
+            state = {True: "online", False: "offline"}.get(n["online"], "")
+            text = "   ".join(x for x in (n["key"], n["name"], state) if x)
+            ctk.CTkCheckBox(
+                self.node_list_box, text=text, variable=var,
+                font=self.fonts["body"], checkbox_width=self.px(20),
+                checkbox_height=self.px(20),
+                command=self._save_targets).pack(anchor="w", pady=(2, 0))
+
+    def _save_targets(self) -> None:
+        """A node ticked or unticked: those nodes, or every node when none is."""
+        picked = [k for k, v in self.node_target_vars.items() if v.get()]
+        self.targets_all_var.set(not picked)
+        self._save_setting("node_fw_targets", None, picked or "all")
+
+    def _on_targets_all(self) -> None:
+        """"Every node" ticked clears the single picks; unticked alone it
+        stays ticked, since no pick is the same as every node."""
+        if self.targets_all_var.get():
+            for var in self.node_target_vars.values():
+                var.set(False)
+        elif not any(v.get() for v in self.node_target_vars.values()):
+            self.targets_all_var.set(True)
+        self._save_targets()
+
+    def _sync_remote_fields(self) -> None:
+        """Read the remote-update fields the user may not have left yet."""
+        for key, entry in (("remote_fw_file", self.remote_fw_entry),
+                           ("node_fw_file", self.node_fw_entry),
+                           ("http_user", self.http_user_entry),
+                           ("node_ip", self.node_ip_entry),
+                           ("node_http_user", self.node_user_entry)):
+            self._save_setting(key, entry)
+        self.cfg["http_pass"] = self.http_pass_entry.get()
+        self.cfg["node_http_pass"] = self.node_pass_entry.get()
+
+    def _load_nodes(self) -> None:
+        self._save_setting("device_ip", self.ip_entry)
+        self._sync_remote_fields()
+        manager = DeployManager(dict(self.cfg))
+
+        def work() -> None:
+            try:
+                nodes = manager.node_list()
+            except OSError as exc:
+                # Bound now: `exc` is unset once the except block ends, and
+                # the lambda runs later, on the UI thread.
+                msg = f"The collector does not answer: {exc}"
+                self.root.after(0, lambda: self._notify(msg, "error", seconds=8))
+                return
+            def show() -> None:
+                self._render_node_list(nodes)
+                self._notify(f"{len(nodes)} node(s) of this kind listed."
+                             if nodes else "The collector lists no node of this "
+                             "kind.", "info", seconds=5)
+            self.root.after(0, show)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _probe_devices(self) -> None:
+        if self.running:
+            return
+        self._save_setting("device_ip", self.ip_entry)
+        self._sync_remote_fields()
+        manager = DeployManager(dict(self.cfg))
+        manager.on_step_output = self._log_output
+        self.tab_view.set(TAB_RUN)
+        self._log("\nChecking devices…")
+        threading.Thread(target=manager.probe_devices, daemon=True).start()
 
     def _build_wifi_tab(self) -> None:
         """WiFi provisioning, in a tab rather than a modal dialog.
@@ -1669,7 +1921,7 @@ REQUIREMENTS
         label = getattr(self, "plan_label", None)
         if label is None:
             return
-        steps = sorted(self.cfg.get("steps", []))
+        steps = run_order(self.cfg.get("steps", []))
         if not steps:
             label.configure(
                 text="Nothing selected — pick a job above, or tick steps under "
@@ -1946,6 +2198,7 @@ REQUIREMENTS
         self.cfg["chip"] = chip_for(self.cfg["env"])
         # The checkbox is the live intent; the build step writes it to the ini.
         self.cfg["usb_cdc_on_boot"] = bool(self.usb_cdc_var.get())
+        self._sync_remote_fields()
 
         steps = sorted(self.cfg.get("steps", []))
         if not steps:

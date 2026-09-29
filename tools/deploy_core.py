@@ -34,6 +34,7 @@ from pio_envs import (  # noqa: E402
     ROOT as _PIO_ROOT, chip_for, default_env, defaults_for, env_info,
     env_names, environments, ports_for, usb_pins,
 )
+import remote_ota as ota  # noqa: E402
 
 # ── Project layout ────────────────────────────────────────────────────────────
 # Taken from pio_envs rather than computed again: under PyInstaller the two
@@ -100,7 +101,37 @@ STEP_DETAIL: dict[int, tuple[str, str]] = {
     10: ("Erase node flash",      "pio run -d node… -t erase"),
     11: ("Compile node firmware", "pio run -d node…"),
     12: ("Flash node firmware",   "pio run -d node… -t upload"),
+    13: ("Remote collector OTA",  "POST /do_update to device IP"),
+    14: ("Remote node OTA",       "via the collector, or the WiFi node's /update"),
 }
+
+#: Where a step runs when it is not simply its number. Step 13 goes ahead of
+#: step 8: the web UI and the firmware ship together, and uploading the new
+#: pages first would leave them on the OLD firmware whenever the firmware
+#: upload then failed. Firmware first, pages after.
+_RUN_ORDER: dict[int, float] = {13: 7.5}
+
+
+def _blocked_by(step: int, failed: list[int], cfg: dict[str, Any]) -> Optional[int]:
+    """A failed earlier step this one must not run after, or None.
+
+    Steps 13 and 14 send "the last build" when no file is chosen — after a
+    failed compile that is the PREVIOUS build, and step 13 would flash and
+    confirm it. Step 8 after a failed step 13 would put the new pages on the
+    old firmware, which is what running 13 first is there to prevent.
+    """
+    if step == 13 and 5 in failed and not cfg.get("remote_fw_file"):
+        return 5
+    if step == 14 and 11 in failed and not cfg.get("node_fw_file"):
+        return 11
+    if step == 8 and 13 in failed:
+        return 13
+    return None
+
+
+def run_order(steps) -> list[int]:
+    """The steps in the order run_steps() runs them."""
+    return sorted(steps, key=lambda n: _RUN_ORDER.get(n, n))
 
 #: The catalogue as the CLI prints it: title padded to one column, then detail.
 _STEP_COL = max(len(title) for title, _ in STEP_DETAIL.values())
@@ -198,6 +229,9 @@ PRESETS: dict[str, tuple[str, list[int]]] = {
     # preset rather than joining "All steps" — running both in one pass would
     # flash whichever happens to be plugged in twice.
     "D": ("Node flash",    [11, 12]),
+    # Not "R": lowercase r is Run in the CLI menu, and uppercase R opens the
+    # remote-update settings there.
+    "O": ("Remote update", [1, 5, 13, 8]),
     "A": ("All steps",     list(range(1, 10))),
     "N": ("None",          []),
 }
@@ -213,6 +247,7 @@ PRESET_BLURBS: dict[str, str] = {
     "Q": "The everyday one — compile the firmware and flash it.",
     "H": "Web UI only, over WiFi. No USB cable, no reflash.",
     "D": "Build and flash the satellite node board on its own port.",
+    "O": "Compile, update the collector over WiFi, then its web UI. No USB cable.",
     "A": "Every collector step in order, monitor included.",
     "N": "Untick everything and start from a clean sheet.",
 }
@@ -267,6 +302,27 @@ DEFAULT_CFG: dict[str, Any] = {
     "node_project":         "node_espnow",
     "node_env":             None,   # None = the project's own default
     "node_port":            None,   # None = auto-detect
+
+    # Remote update, steps 13 and 14. An empty file means "the image the
+    # compile step just built"; a path is a .bin from somewhere else, such as
+    # the Build OTA Firmware workflow's artifact.
+    "remote_fw_file":       "",
+    "http_user":            "admin",  # collector basic auth, if it has one
+    "node_fw_file":         "",
+    "node_fw_route":        "collector",   # collector | direct (WiFi node only)
+    "node_fw_targets":      "all",         # "all" or a list of node keys
+    "node_ip":              "",            # direct route: the WiFi node's address
+    "node_http_user":       "",            # direct route: the node's basic auth
+    "node_fw_watch":        False,         # follow the rollout until it ends
+    "node_fw_watch_min":    30,
+}
+
+#: Kept in memory for the run and never written to .flash_tool.json. Filled
+#: from the GUI's fields, the CLI's prompt, or these environment variables
+#: (the only way in for `deploy.py --run`).
+SECRET_KEYS: dict[str, str] = {
+    "http_pass":      "DEPLOY_HTTP_PASS",
+    "node_http_pass": "DEPLOY_NODE_PASS",
 }
 
 
@@ -618,6 +674,8 @@ def save_cfg(cfg: dict[str, Any]) -> None:
             out[key] = None
     out.pop("chip", None)
     out.pop("usb_cdc_on_boot", None)
+    for key in SECRET_KEYS:
+        out.pop(key, None)
 
     # The port gets the same treatment for the same reason. load_cfg() fills
     # in whatever auto-detection found, and writing that back pinned it — so
@@ -1553,6 +1611,409 @@ class DeployManager:
         self._emit_complete(12, rc)
         return rc
 
+    # ── Remote update: firmware over WiFi (steps 13 and 14) ──────────────────
+    #
+    # The HTTP API the devices already serve, and nothing else: /do_update on
+    # the collector, /api/nodes/fw for the nodes it hands images to, and the
+    # WiFi node's own /update. See tools/remote_ota.py and docs/NODE_OTA.md.
+    def _secret(self, key: str) -> str:
+        """A password from this run's config, else its environment variable."""
+        return (self.cfg.get(key) or os.environ.get(SECRET_KEYS[key], "") or "")
+
+    def _collector_http(self) -> "ota.Http":
+        return ota.Http(self.cfg.get("device_ip", "192.168.4.1"),
+                        self.cfg.get("http_user") or "", self._secret("http_pass"),
+                        cancelled=lambda: self._cancelled)
+
+    def _progress(self, label: str) -> Callable[[int, int], None]:
+        """Log an upload in quarters. Whole lines only: the GUI's log is a
+        text widget, where a carriage return overwrites nothing."""
+        shown = {"q": 0}
+
+        def cb(sent: int, total: int) -> None:
+            q = sent * 4 // max(total, 1)
+            if q > shown["q"]:
+                shown["q"] = q
+                self._log(f"{label} {q * 25:>3}%  ({sent:,} / {total:,} B)")
+        return cb
+
+    def _read_image(self, chosen: str, built: Path, what: str) -> Optional[tuple[Path, bytes]]:
+        """The .bin a remote step sends: the chosen file, else the last build."""
+        path = Path(chosen).expanduser() if chosen else built
+        if not path.is_file():
+            if chosen:
+                self._log(f"ERROR: {what} file not found: {path}")
+            else:
+                self._log(f"ERROR: no {what} build at {path}. Compile it first, "
+                          f"or choose a .bin file.")
+            return None
+        data = path.read_bytes()
+        age = time.time() - path.stat().st_mtime
+        when = (f"{int(age // 60)} min ago" if age < 3600 * 24
+                else time.strftime("%Y-%m-%d %H:%M", time.localtime(path.stat().st_mtime)))
+        self._log(f"Image: {path}  ({len(data):,} B, built {when})")
+        return path, data
+
+    def _unreachable(self, step: int, http: "ota.Http", exc: Exception) -> int:
+        self._log(f"ERROR: {http.base}: no answer or connection dropped ({exc})")
+        self._emit_complete(step, 1)
+        return 1
+
+    def s13_remote_collector(self) -> int:
+        self._emit_start(13, STEP_NAMES[13])
+        env = self.cfg.get("env") or ""
+        got = self._read_image(self.cfg.get("remote_fw_file") or "",
+                               ROOT / ".pio" / "build" / env / "firmware.bin",
+                               "collector firmware")
+        if got is None:
+            self._emit_complete(13, 2)
+            return 2
+        _, data = got
+        problem = ota.app_image_problem(data, self.cfg.get("chip"))
+        if problem:
+            self._log(f"ERROR: refused before sending: {problem}.")
+            self._emit_complete(13, 2)
+            return 2
+        sha = ota.sha256_hex(data)
+
+        http = self._collector_http()
+        self._log(f"Collector: {http.base}")
+        try:
+            st, js = http.get("/api/status")
+        except OSError as exc:
+            return self._unreachable(13, http, exc)
+        if st == 401:
+            self._log("ERROR: the collector wants a login (basic auth). Set the "
+                      "web user and password for remote update.")
+            self._emit_complete(13, 1)
+            return 1
+        before = js.get("version", "?") if isinstance(js, dict) else "?"
+        self._log(f"Running now: {before}")
+
+        tok = http.csrf()
+        if not tok:
+            self._log("⚠ No CSRF token; the collector will probably refuse (403).")
+        if self._cancelled:
+            self._emit_complete(13, RC_CANCELLED)
+            return RC_CANCELLED
+
+        self._log("Uploading firmware (the collector checks its SHA-256)…")
+        try:
+            st, js = http.post_file(
+                "/do_update", "firmware", "firmware.bin", data,
+                query={"sha256": sha, **({"csrf": tok} if tok else {})},
+                progress=self._progress("  ↑ firmware"))
+        except ota.Cancelled:
+            self._log("")
+            self._log("■ Stopped mid-upload. The collector drops the partial "
+                      "image and keeps running the old one.")
+            self._emit_complete(13, RC_CANCELLED)
+            return RC_CANCELLED
+        except OSError as exc:
+            return self._unreachable(13, http, exc)
+        if st != 200 or not (isinstance(js, dict) and js.get("success")):
+            why = ota.error_of(js) or f"HTTP {st}"
+            if st == 403:
+                why += " (CSRF token or login refused)"
+            self._log(f"✗ Update refused: {why}")
+            self._emit_complete(13, 1)
+            return 1
+        self._log(f"✓ {ota.error_of(js) or 'Update accepted'}")
+
+        self._log("Waiting for the collector to restart…")
+        js = ota.wait_back(http, "/api/status", down_s=6, up_s=90,
+                           cancelled=lambda: self._cancelled)
+        if self._cancelled:
+            self._emit_complete(13, RC_CANCELLED)
+            return RC_CANCELLED
+        if js is None:
+            self._log("✗ The collector did not come back within 90 s. If the new "
+                      "image does not boot, it rolls back on its own.")
+            self._emit_complete(13, 1)
+            return 1
+        self._log(f"Back up, running: {js.get('version', '?')}")
+
+        # Keep the new image. The rollback watchdog would confirm it by
+        # itself a little later; confirming now means a restart in the
+        # meantime cannot put the old one back.
+        try:
+            st, oj = http.get("/api/ota/status")
+            if st == 200 and isinstance(oj, dict) and oj.get("pending_verify"):
+                http.csrf(refresh=True)       # a new boot, a new token
+                st, cj = http.request("POST", "/api/ota/confirm",
+                                      query={"csrf": http.csrf()} if http.csrf() else None,
+                                      body=b"")
+                if st == 200 and isinstance(cj, dict) and cj.get("ok"):
+                    self._log("✓ New firmware confirmed (no rollback).")
+                else:
+                    self._log(f"⚠ Confirm refused ({ota.error_of(cj) or st}); the "
+                              f"watchdog confirms it on its own if it stays up.")
+            elif st == 200 and isinstance(oj, dict):
+                self._log(f"Partition {oj.get('running_partition', '?')}, nothing "
+                          f"to confirm.")
+        except OSError as exc:
+            self._log(f"⚠ Could not read /api/ota/status: {exc}")
+
+        self._log("✓ Collector updated.")
+        self._emit_complete(13, 0)
+        return 0
+
+    def s14_remote_node(self) -> int:
+        self._emit_start(14, STEP_NAMES[14])
+        proj = node_project(self.cfg)
+        env = self.cfg.get("node_env") or proj.default_env
+        got = self._read_image(self.cfg.get("node_fw_file") or "",
+                               ROOT / proj.directory / ".pio" / "build" / env / "firmware.bin",
+                               "node firmware")
+        if got is None:
+            self._emit_complete(14, 2)
+            return 2
+        path, data = got
+        marker = ota.node_marker(data)
+        if marker is None:
+            self._log("ERROR: this is not a node firmware (no NODEFW1 marker, or "
+                      "two of different kinds).")
+            self._emit_complete(14, 2)
+            return 2
+        kind, ver = marker
+        self._log(f"Node image: {kind} {ver}")
+        if (not self.cfg.get("node_fw_file")) and kind != ota.NODE_KINDS.get(proj.key):
+            self._log(f"ERROR: {proj.label} should build {ota.NODE_KINDS.get(proj.key)}, "
+                      f"but the image says {kind}.")
+            self._emit_complete(14, 2)
+            return 2
+
+        try:
+            if self.cfg.get("node_fw_route") == "direct":
+                rc = self._node_direct(kind, path.name, data)
+            else:
+                rc = self._node_via_collector(kind, path.name, data)
+        except OSError as exc:
+            # Any request the routes do not catch themselves — the device
+            # went away between two calls. The step still has to complete,
+            # or the GUI shows it running for ever.
+            self._log(f"ERROR: connection lost: {exc}")
+            rc = 1
+        self._emit_complete(14, rc)
+        return rc
+
+    def _node_via_collector(self, kind: str, fname: str, data: bytes) -> int:
+        http = self._collector_http()
+        self._log(f"Through the collector: {http.base}")
+        try:
+            st, fw = http.get("/api/nodes/fw")
+        except OSError as exc:
+            self._log(f"ERROR: {http.base} does not answer: {exc}")
+            return 1
+        if st == 401:
+            self._log("ERROR: the collector wants a login (basic auth). Set the "
+                      "web user and password for remote update.")
+            return 1
+        if st == 404 or not isinstance(fw, dict):
+            self._log("ERROR: this collector has no node updates (built without "
+                      "FEATURE_REMOTE_NODES, or older than node OTA).")
+            return 1
+        if not fw.get("sd"):
+            self._log(f"ERROR: {ota.NODE_UPLOAD_ERRORS['no_sd']}.")
+            return 1
+
+        held = (fw.get("images") or {}).get(kind) or {}
+        tok = http.csrf()
+        if held.get("md5") == ota.md5_hex(data):
+            # Uploading it again would reset every target of the kind to
+            # pending (NODE_OTA.md §2.1) — including the ones already done.
+            self._log(f"The collector already holds this image ({held.get('ver')}); "
+                      f"not uploading it again.")
+        else:
+            self._log("Uploading the image to the collector's SD card…")
+            try:
+                st, js = http.post_file(
+                    "/api/nodes/fw/upload", "fw", fname, data,
+                    query={"csrf": tok} if tok else None,
+                    progress=self._progress("  ↑ node image"))
+            except ota.Cancelled:
+                self._log("")
+                self._log("■ Stopped mid-upload; the collector keeps the image it had.")
+                return RC_CANCELLED
+            except OSError as exc:
+                self._log(f"ERROR: {http.base} does not answer: {exc}")
+                return 1
+            if st != 200 or not (isinstance(js, dict) and js.get("ok")):
+                err = ota.error_of(js)
+                self._log(f"✗ Refused: {ota.NODE_UPLOAD_ERRORS.get(err, err or f'HTTP {st}')}")
+                return 1
+            self._log(f"✓ Stored: {js.get('kind')} {js.get('ver')}, {js.get('size')} B")
+
+        if self._cancelled:
+            return RC_CANCELLED
+        keys = ota.parse_targets(self.cfg.get("node_fw_targets"))
+        st, js = http.post_json("/api/nodes/fw",
+                                {"action": "start", "kind": kind, "keys": keys})
+        if st != 200 or not (isinstance(js, dict) and js.get("ok")):
+            err = ota.error_of(js)
+            self._log(f"✗ Could not start the rollout: "
+                      f"{ota.NODE_UPLOAD_ERRORS.get(err, err or f'HTTP {st}')}")
+            return 1
+        who = "every node of this kind" if keys == "all" else ", ".join(keys)
+        self._log(f"✓ Rollout started for {who} ({js.get('targets', '?')} target(s)). "
+                  f"Each node fetches it the next time it wakes.")
+
+        # Which targets are THIS run's: the keys asked for, or for "all" the
+        # kind's targets right after the start (which reset each of them to
+        # pending). Others of the kind are an earlier rollout's business.
+        mine: Optional[set] = set(keys) if keys != "all" else None
+        if mine is None:
+            st, fw = http.get("/api/nodes/fw")
+            if st == 200 and isinstance(fw, dict):
+                mine = {k for k, t in (fw.get("targets") or {}).items()
+                        if isinstance(t, dict) and t.get("kind") == kind}
+        return self._watch_rollout(http, kind, mine)
+
+    def _watch_rollout(self, http: "ota.Http", kind: str,
+                       mine: Optional[set] = None) -> int:
+        watch = bool(self.cfg.get("node_fw_watch"))
+        limit = time.monotonic() + 60 * float(self.cfg.get("node_fw_watch_min") or 30)
+        last: list[str] = []
+        while True:
+            try:
+                st, fw = http.get("/api/nodes/fw")
+            except OSError:
+                st, fw = 0, None
+            targets = fw.get("targets") if st == 200 and isinstance(fw, dict) else None
+            if targets is not None and mine is not None:
+                targets = {k: t for k, t in targets.items() if k in mine}
+            if targets is not None:
+                lines = ota.fmt_targets(targets, kind)
+                if lines != last:
+                    self._log("Rollout:" if lines else "Rollout: no targets.")
+                    for line in lines:
+                        self._log(line)
+                    last = lines
+                states = [t.get("st") for t in targets.values()
+                          if isinstance(t, dict) and t.get("kind") == kind]
+                if watch and not states:
+                    self._log("No node of this kind to follow.")
+                    return 0
+                if watch and all(s in ota.NODE_DONE_STATES for s in states):
+                    failed = states.count("failed")
+                    if failed:
+                        self._log(f"✗ {failed} node(s) failed; retry them from the "
+                                  f"Nodes page or run this step again.")
+                        return 1
+                    self._log("✓ Every node runs the new image.")
+                    return 0
+            if not watch:
+                self._log("Not following the rollout; the Nodes page shows it.")
+                return 0
+            if time.monotonic() > limit:
+                self._log("Stopped following after the time limit; the rollout "
+                          "goes on without this tool.")
+                return 0
+            for _ in range(40):              # 10 s, stoppable
+                if self._cancelled:
+                    return RC_CANCELLED
+                time.sleep(0.25)
+
+    def _node_direct(self, kind: str, fname: str, data: bytes) -> int:
+        if kind != "esp8266":
+            self._log("ERROR: the direct route is for the WiFi node only; an "
+                      "ESP-NOW node gets its image through the collector.")
+            return 2
+        host = (self.cfg.get("node_ip") or "").strip()
+        user = self.cfg.get("node_http_user") or ""
+        pw = self._secret("node_http_pass")
+        if not host:
+            self._log("ERROR: set the WiFi node's address for the direct route.")
+            return 2
+        if not (user and pw):
+            self._log("ERROR: the WiFi node's server takes updates only with its "
+                      "basic-auth user and password (set on its setup page).")
+            return 2
+        http = ota.Http(host, user, pw, cancelled=lambda: self._cancelled)
+        self._log(f"Directly to the node: {http.base}")
+        try:
+            st, js = http.get("/api/status")
+        except OSError as exc:
+            self._log(f"ERROR: {http.base} does not answer: {exc}")
+            return 1
+        if st == 401:
+            self._log("✗ The node refused the user or password.")
+            return 1
+        before = js.get("fw", "?") if isinstance(js, dict) else "?"
+        self._log(f"Running now: {before}")
+        try:
+            st, js = http.post_file("/update", "fw", fname, data,
+                                    progress=self._progress("  ↑ firmware"))
+        except ota.Cancelled:
+            self._log("")
+            self._log("■ Stopped mid-upload; the node keeps its old firmware.")
+            return RC_CANCELLED
+        except OSError as exc:
+            self._log(f"ERROR: {http.base} does not answer: {exc}")
+            return 1
+        # An older node has no /update: it answers 404, or — every unknown
+        # path gets the setup page — 200 with HTML instead of JSON.
+        if st == 404 or (st == 200 and not isinstance(js, dict)):
+            self._log("✗ This node's firmware is older than local updates; flash "
+                      "it over USB once (step 12).")
+            return 1
+        if st != 200 or not (isinstance(js, dict) and js.get("ok")):
+            err = ota.error_of(js)
+            detail = f" ({js.get('detail')})" if isinstance(js, dict) and js.get("detail") else ""
+            self._log(f"✗ Refused: {ota.NODE_UPLOAD_ERRORS.get(err, err or f'HTTP {st}')}{detail}")
+            return 1
+        self._log("✓ Written and verified; the node restarts.")
+        js = ota.wait_back(http, "/api/status", down_s=5, up_s=60,
+                           cancelled=lambda: self._cancelled)
+        if self._cancelled:
+            return RC_CANCELLED
+        if js is None:
+            self._log("⚠ The node did not answer within 60 s. It may have come "
+                      "back on another address; check the collector's Nodes page.")
+            return 0
+        self._log(f"Back up, running: {js.get('fw', '?')}")
+        return 0
+
+    def probe_devices(self) -> None:
+        """Log what the collector (and the direct-route node) run now."""
+        http = self._collector_http()
+        try:
+            st, js = http.get("/api/status", timeout=4)
+            if st == 401:
+                self._log(f"Collector {http.base}: wants a login (basic auth).")
+            elif isinstance(js, dict):
+                line = f"Collector {http.base}: {js.get('version', '?')}"
+                st, oj = http.get("/api/ota/status", timeout=4)
+                if st == 200 and isinstance(oj, dict):
+                    line += f", partition {oj.get('running_partition', '?')}"
+                    if oj.get("pending_verify"):
+                        line += " (not confirmed yet)"
+                self._log(line)
+                st, fw = http.get("/api/nodes/fw", timeout=4)
+                if st == 200 and isinstance(fw, dict):
+                    for kind, im in (fw.get("images") or {}).items():
+                        if im:
+                            self._log(f"  holds node image {kind} {im.get('ver')}")
+                    self._log(f"  SD card: {'yes' if fw.get('sd') else 'NO (node updates need one)'}")
+            else:
+                self._log(f"Collector {http.base}: HTTP {st}")
+        except OSError as exc:
+            self._log(f"Collector {http.base}: no answer ({exc})")
+        if self.cfg.get("node_fw_route") == "direct" and self.cfg.get("node_ip"):
+            node = ota.Http(self.cfg["node_ip"], self.cfg.get("node_http_user") or "",
+                            self._secret("node_http_pass"))
+            try:
+                st, js = node.get("/api/status", timeout=4)
+                what = js.get("fw", "?") if isinstance(js, dict) else f"HTTP {st}"
+                self._log(f"WiFi node {node.base}: {what}")
+            except OSError as exc:
+                self._log(f"WiFi node {node.base}: no answer ({exc})")
+
+    def node_list(self) -> list[dict]:
+        """The collector's nodes of the node project's kind (raises OSError)."""
+        kind = ota.NODE_KINDS.get(node_project(self.cfg).key, "")
+        return ota.list_nodes(self._collector_http(), kind)
+
     def provision_wifi(
         self,
         input_fn: Optional[Callable[[str], str]] = None,
@@ -1792,7 +2253,7 @@ class DeployManager:
         destructive steps. A caller that passes none has no one to ask and
         gets the steps it selected.
         """
-        steps = sorted(steps)
+        steps = run_order(steps)
         if not steps:
             self._log("No steps selected.")
             return False
@@ -1810,6 +2271,8 @@ class DeployManager:
            10: lambda: self.s10_erase_node(confirm_erase_callback),
            11: self.s11_compile_node,
            12: self.s12_flash_node,
+           13: self.s13_remote_collector,
+           14: self.s14_remote_node,
         }
 
         failed: list[int] = []
@@ -1839,14 +2302,22 @@ class DeployManager:
             # arrives while step 5 is compiling should not be answered by
             # starting step 6.
             #
-            # BY INDEX, not by "every number at or above this one": the list is
-            # sorted here, so the two agree today, and the index says what is
-            # actually meant — what was left of THIS list when it stopped.
+            # BY INDEX, not by "every number at or above this one": step 13
+            # runs before step 8, so the numbers no longer say what was left
+            # of THIS list when it stopped. The index does.
             if self._cancelled:
                 remaining = steps[idx:]
                 break
             fn = dispatch.get(s)
             if fn is None:
+                continue
+            blocker = _blocked_by(s, failed, self.cfg)
+            if blocker is not None:
+                self._emit_start(s, STEP_NAMES[s])
+                self._log(f"✗ Not run: step {blocker} failed, and this step "
+                          f"depends on it.")
+                self._emit_complete(s, 1)
+                failed.append(s)
                 continue
             try:
                 rc = fn()

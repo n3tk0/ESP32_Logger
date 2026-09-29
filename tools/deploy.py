@@ -26,6 +26,8 @@ from typing import Any
 from deploy_core import (
     DeployManager,
     NODE_PROJECTS,
+    SECRET_KEYS,
+    run_order,
     generate_espnow_key,
     node_project,
     load_cfg,
@@ -174,7 +176,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     print()
 
     # Actions block
-    enabled_list = ", ".join(str(s) for s in sorted(enabled)) if enabled else _dim("none selected")
+    enabled_list = ", ".join(str(s) for s in run_order(enabled)) if enabled else _dim("none selected")
     print(_bold("  ── Actions " + "─" * 51))
     print(f"  {_cyan('[r]')}  Run  {_dim(f'({enabled_list})')}")
     print(f"  {_cyan('[s]')}  Save as default")
@@ -185,6 +187,7 @@ def _print_menu(cfg: dict[str, Any]) -> None:
     key_state = _green("key set") if len(cfg.get("espnow_lmk") or "") == 16 \
         else (_yellow("no key") if np.wants_key else _dim("no key needed"))
     print(f"  {_cyan('[N]')}  Node target     {np.label}  {key_state}  {_dim('(uppercase N)')}")
+    print(f"  {_cyan('[R]')}  Remote update   {_remote_summary(cfg)}  {_dim('(uppercase R)')}")
     print(f"  {_cyan('[W]')}  WiFi provision  via serial COM port  {_dim('(uppercase W)')}")
     print(f"  {_cyan('[?]')}  What should I pick?  {_dim('presets and steps, explained')}")
     print(f"  {_cyan('[q]')}  Quit")
@@ -224,6 +227,10 @@ def _help_screen() -> None:
         "carries that board's own upload speed, chip and USB CDC flag.",
         "[F] build features are passed as -D flags; no project file is edited.",
         "[N] node steps (10–12) act on a DIFFERENT board, on its own port.",
+        "Steps 13 and 14 update over WiFi, no cable: 13 sends the collector's "
+        "firmware to the Device IP, 14 a node's through the collector (or "
+        "straight to a WiFi node). [R] sets which .bin, the login and the "
+        "nodes. Passwords are never saved.",
         "Everything is saved to .flash_tool.json in the project root.",
         "The same tool with a window: python3 tools/deploy_gui.py",
     ):
@@ -306,6 +313,123 @@ def _node_menu(cfg: dict[str, Any]) -> None:
             # The env belonged to the old project; keeping it would offer an
             # ESP8266 env for an ESP32 build and fail two steps later.
             cfg["node_env"] = None
+
+
+def _remote_summary(cfg: dict[str, Any]) -> str:
+    route = "direct to WiFi node" if cfg.get("node_fw_route") == "direct" \
+        else "nodes via collector"
+    src = "chosen .bin" if cfg.get("remote_fw_file") else "last build"
+    return _dim(f"steps 13, 14 — {src}, {route}")
+
+
+def _secret_state(cfg: dict[str, Any], key: str) -> str:
+    if cfg.get(key):
+        return _green("set for this session")
+    if os.environ.get(SECRET_KEYS[key]):
+        return _green(f"from ${SECRET_KEYS[key]}")
+    return _dim("not set")
+
+
+def _pick_targets(cfg: dict[str, Any]) -> None:
+    """Which nodes step 14 starts: all of the kind, or the ones picked here."""
+    manager = DeployManager(cfg)
+    try:
+        nodes = manager.node_list()
+    except OSError as exc:
+        print(_red(f"  The collector does not answer: {exc}"))
+        nodes = []
+    print()
+    for i, n in enumerate(nodes, 1):
+        state = _green("online") if n["online"] else _dim("offline")
+        print(f"  {_cyan(f'[{i}]')}  {n['key']:<18} {n['name']:<16} {state}")
+    if not nodes:
+        print(_dim("  No nodes of this kind listed; type keys (w:<name>, e:<id>) "
+                   "or leave blank for all."))
+    v = _prompt("Nodes (numbers or keys, comma-separated; blank = all)", "").strip()
+    if not v:
+        cfg["node_fw_targets"] = "all"
+        return
+    keys = []
+    for part in (p.strip() for p in v.split(",")):
+        if part.isdigit() and 1 <= int(part) <= len(nodes):
+            keys.append(nodes[int(part) - 1]["key"])
+        elif part:
+            keys.append(part)
+    cfg["node_fw_targets"] = keys or "all"
+
+
+def _remote_menu(cfg: dict[str, Any]) -> None:
+    """Settings of the two remote-update steps.
+
+    Steps 13 and 14 use the device's own HTTP API, so what they need is the
+    image to send and whatever login the device asks for. The passwords stay
+    in memory only; `deploy.py --run` reads them from the environment.
+    """
+    import getpass
+    while True:
+        direct = cfg.get("node_fw_route") == "direct"
+        targets = cfg.get("node_fw_targets") or "all"
+        tdisp = "all of the kind" if targets == "all" else ", ".join(targets)
+        print()
+        print(_bold("  ── Remote update (steps 13, 14) " + "─" * 30))
+        print(f"  {_cyan('[f]')}  Collector .bin : "
+              f"{_bold(cfg.get('remote_fw_file') or _dim('last build (.pio/build/<env>)'))}")
+        print(f"  {_cyan('[u]')}  Web user       : {_bold(cfg.get('http_user') or _dim('none'))}")
+        print(f"  {_cyan('[a]')}  Web password   : {_secret_state(cfg, 'http_pass')}  "
+              f"{_dim('only if the collector has basic auth')}")
+        print(f"  {_cyan('[n]')}  Node .bin      : "
+              f"{_bold(cfg.get('node_fw_file') or _dim('last node build'))}")
+        print(f"  {_cyan('[o]')}  Node route     : "
+              f"{_bold('directly to the WiFi node' if direct else 'through the collector')}")
+        if direct:
+            print(f"  {_cyan('[i]')}  Node address   : {_bold(cfg.get('node_ip') or _dim('not set'))}")
+            print(f"  {_cyan('[k]')}  Node user      : {_bold(cfg.get('node_http_user') or _dim('not set'))}")
+            print(f"  {_cyan('[l]')}  Node password  : {_secret_state(cfg, 'node_http_pass')}")
+        else:
+            print(f"  {_cyan('[t]')}  Nodes          : {_bold(tdisp)}")
+            watch = _green("yes") if cfg.get("node_fw_watch") else _dim("no")
+            print(f"  {_cyan('[w]')}  Follow rollout : {watch}  "
+                  f"{_dim('wait until every node reports done or failed')}")
+        print(f"  {_cyan('[c]')}  Check devices  {_dim('what they run now')}")
+        print()
+        print(f"  {_cyan('[b]')}  Back")
+        print()
+        try:
+            ans = input(_bold("  Choice: ")).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+        if ans in ("b", "", "q"):
+            return
+        try:
+            if ans == "f":
+                cfg["remote_fw_file"] = _prompt("Collector .bin (blank = last build)",
+                                                cfg.get("remote_fw_file") or "").strip()
+            elif ans == "u":
+                cfg["http_user"] = _prompt("Web user", cfg.get("http_user") or "").strip()
+            elif ans == "a":
+                cfg["http_pass"] = getpass.getpass(_bold("  Web password (not saved): "))
+            elif ans == "n":
+                cfg["node_fw_file"] = _prompt("Node .bin (blank = last node build)",
+                                              cfg.get("node_fw_file") or "").strip()
+            elif ans == "o":
+                cfg["node_fw_route"] = "collector" if direct else "direct"
+            elif ans == "i" and direct:
+                cfg["node_ip"] = _prompt("WiFi node address", cfg.get("node_ip") or "").strip()
+            elif ans == "k" and direct:
+                cfg["node_http_user"] = _prompt("Node user",
+                                                cfg.get("node_http_user") or "").strip()
+            elif ans == "l" and direct:
+                cfg["node_http_pass"] = getpass.getpass(_bold("  Node password (not saved): "))
+            elif ans == "t" and not direct:
+                _pick_targets(cfg)
+            elif ans == "w" and not direct:
+                cfg["node_fw_watch"] = not cfg.get("node_fw_watch")
+            elif ans == "c":
+                print()
+                DeployManager(cfg).probe_devices()
+        except (KeyboardInterrupt, EOFError):
+            print()
 
 
 def _feature_menu(cfg: dict[str, Any]) -> None:
@@ -457,6 +581,11 @@ def run_menu(cfg: dict[str, Any]) -> dict[str, Any]:
 
         elif ch == "?":
             _help_screen()
+
+        elif choice == "R":          # uppercase R — remote update settings
+            # Before the lowercase r below, which would otherwise take it and
+            # run — see [U] for the pattern.
+            _remote_menu(cfg)
 
         elif ch == "r":
             return cfg

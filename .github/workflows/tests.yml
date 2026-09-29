@@ -53,6 +53,8 @@ on:
       - 'tests/kindle/**'
       - 'tests/tools/**'
       - 'tools/app_slot.py'
+      - 'tools/remote_ota.py'
+      - 'tools/deploy_core.py'
       - 'platformio.ini'
       - 'boards/**'
   pull_request:
@@ -98,6 +100,8 @@ on:
       - 'tests/kindle/**'
       - 'tests/tools/**'
       - 'tools/app_slot.py'
+      - 'tools/remote_ota.py'
+      - 'tools/deploy_core.py'
       - 'platformio.ini'
       - 'boards/**'
   workflow_dispatch:
@@ -1230,6 +1234,13 @@ jobs:
         # tools/ota_form.py says what each one turns on. A feature missing from
         # either, or a default that differs from setup.h, is silent otherwise.
         run: python3 tests/tools/drive_ota_form.py
+
+      - name: Check the deploy tools' remote update against fake devices
+        # Steps 13 and 14 update firmware over WiFi through the API the
+        # collector and the WiFi node already serve. This runs them against a
+        # fake of each on localhost and checks what arrived: the image and its
+        # SHA-256, the CSRF token, the login, the rollout request.
+        run: python3 tests/tools/drive_remote_ota.py
 
       - name: Check no module's status outlives its own stack frame
         # ArduinoJson 7 LINKS a const char* instead of copying it, so a string

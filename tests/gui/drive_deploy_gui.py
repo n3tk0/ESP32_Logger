@@ -1067,6 +1067,66 @@ def run(app) -> None:
     flags = (env or {}).get("PLATFORMIO_BUILD_FLAGS", "")
     check("-DFEATURE_ESPNOW_INGEST" not in flags, "and it leaves the build too")
 
+def run_remote(app) -> None:
+    """The remote-update settings: route, node picks, passwords kept off disk.
+
+    What the steps then send is driven against fake devices in
+    tests/tools/drive_remote_ota.py; this is the half a person clicks.
+    """
+    print("Driving the remote-update settings:")
+    import json as _json                                   # noqa: PLC0415
+
+    check(13 in app.step_vars and 14 in app.step_vars,
+          "steps 13 and 14 have checkboxes")
+    app._apply_preset(dc.PRESETS["O"][1])
+    check(sorted(app.cfg["steps"]) == [1, 5, 8, 13],
+          "the Remote update preset ticks 1, 5, 8 and 13")
+    check("13.  Remote collector OTA\n  8." in app.plan_label.cget("text"),
+          "and the plan lists step 13 ahead of step 8, the order it runs in")
+
+    app._on_route_change(app._route_labels["direct"])
+    app.root.update()
+    check(app.cfg["node_fw_route"] == "direct", "the route menu sets the direct route")
+    check(app.direct_box.winfo_manager() == "pack" and not app.via_box.winfo_manager(),
+          "and shows the node's address and login instead of the node list")
+    app._on_route_change(app._route_labels["collector"])
+    app.root.update()
+    check(app.via_box.winfo_manager() == "pack" and not app.direct_box.winfo_manager(),
+          "switching back shows the node list again")
+
+    app.targets_all_var.set(True)
+    app._render_node_list([
+        {"key": "e:3", "name": "garden", "online": True},
+        {"key": "e:4", "name": "shed", "online": False}])
+    app.node_target_vars["e:3"].set(True)
+    app._save_targets()
+    check(app.cfg["node_fw_targets"] == ["e:3"] and not app.targets_all_var.get(),
+          "ticking one node picks it and unticks \"every node\"")
+    app.targets_all_var.set(True)
+    app._on_targets_all()
+    check(app.cfg["node_fw_targets"] == "all" and not app.node_target_vars["e:3"].get(),
+          "ticking \"every node\" while a node is picked clears the pick")
+    app.node_target_vars["e:3"].set(True)
+    app._save_targets()
+    app.node_target_vars["e:3"].set(False)
+    app._save_targets()
+    check(app.cfg["node_fw_targets"] == "all" and app.targets_all_var.get(),
+          "unticking the last node is every node again")
+
+    app.http_pass_entry.insert(0, "hunter2")
+    app.node_pass_entry.insert(0, "nodepw")
+    app._sync_remote_fields()
+    check(app.cfg.get("http_pass") == "hunter2", "the password reaches this session's config")
+    dc.save_cfg(app.cfg)
+    on_disk = _json.loads(dc.CFG_FILE.read_text())
+    check("http_pass" not in on_disk and "node_http_pass" not in on_disk
+          and "hunter2" not in dc.CFG_FILE.read_text(),
+          "and never .flash_tool.json")
+    app.http_pass_entry.delete(0, "end")
+    app.node_pass_entry.delete(0, "end")
+    app._sync_remote_fields()
+    app._apply_preset(dc.PRESETS["Q"][1])
+
 
 def main() -> int:
     cfg_file = dc.CFG_FILE
@@ -1083,6 +1143,7 @@ def main() -> int:
         run_prompts(app)
         run_stop(app)
         run_web_filter(app)
+        run_remote(app)
         print("Driving the deploy GUI's build-feature widgets:")
         run(app)
     finally:

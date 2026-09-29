@@ -50,6 +50,9 @@ a = Analysis(
         # features, and would be found by the first person hunting for a
         # checkbox they knew should be there.
         'features',
+        # Steps 13 and 14 (remote update). Imported by deploy_core at module
+        # scope; named for the same reason as the two above.
+        'remote_ota',
     ],
     hookspath=[],
     hooksconfig={},
