@@ -2107,8 +2107,223 @@ function kindleDefaults() {
   kdMsg("The built-in design is in the form. Press Save to keep it.", "ok");
 }
 
+// ── The reader's own scripts, updated through this collector ───────────────
+//
+// docs/KINDLE_UPDATE.md. One package on the SD card, offered or not, and the
+// readers that have fetched a page lately with the version each one runs.
+// Separate from the appearance above: nothing here is part of Save, and every
+// button acts at once.
+
+var kdPkg = null;          // last GET /api/kindle/pkg, or null
+var kdPkgTimer = null;
+var kdPkgBusy = false;     // an upload is in flight
+
+// The reasons the collector and the readers give, by their words.
+var KD_PKG_ERRS = {
+  no_sd: 1, busy: 1, no_pkg: 1, write_failed: 1, not_package: 1, bad_entry: 1,
+  bad_path: 1, bad_version: 1, missing_files: 1, truncated: 1, too_big: 1,
+  download: 1, size: 1, md5: 1, version: 1, syntax: 1, unpack: 1, write: 1,
+  bad_offer: 1, no_md5sum: 1
+};
+
+function kdPkgWhy(why) {
+  return KD_PKG_ERRS[why] ? kdI18n("pkgErr_" + why) : String(why || "?");
+}
+
+function kdPkgKb(n) {
+  return Math.round((n || 0) / 1024) + " KB";
+}
+
+function kdPkgAgo(s) {
+  s = s || 0;
+  if (s < 90) return kdI18n("pkgAgoS", { n: s });
+  if (s < 5400) return kdI18n("pkgAgoM", { n: Math.round(s / 60) });
+  return kdI18n("pkgAgoH", { n: Math.round(s / 3600) });
+}
+
+function kdPkgActive() {
+  if (!kdPkg || !kdPkg.offer) return false;
+  return (kdPkg.readers || []).some(function (r) {
+    return r.st === "pending" || r.st === "sending";
+  });
+}
+
+function kdPkgLoad() {
+  if (kdPkgTimer) { clearTimeout(kdPkgTimer); kdPkgTimer = null; }
+  return fetchWithTimeout("/api/kindle/pkg", {}, 15000)
+    .then(function (r) {
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function (d) {
+      // A build without it answers 404; anything that is not this object
+      // is treated the same way rather than drawn half.
+      kdPkg = (d && typeof d.sd === "boolean") ? d : null;
+      kdPkgRender();
+      kdPkgSchedule();
+    })
+    .catch(function () { kdPkgSchedule(); });
+}
+
+// While a reader is working towards the package, follow it; otherwise the
+// page is only reread when somebody presses something.
+function kdPkgSchedule() {
+  if (kdPkgTimer) { clearTimeout(kdPkgTimer); kdPkgTimer = null; }
+  if (!kdPkgActive()) return;
+  kdPkgTimer = setTimeout(function () {
+    kdPkgTimer = null;
+    if (currentPage === "settings_kindle") kdPkgLoad();
+  }, 5000);
+}
+
+function kdPkgRender() {
+  var card = document.getElementById("kd-card-pkg");
+  var box = document.getElementById("kd-pkg");
+  if (!card || !box) return;
+  // style.display, not the hidden attribute: .card and .btn set their own
+  // display, which wins over [hidden].
+  if (!kdPkg) { card.style.display = "none"; return; }
+  card.style.display = "";
+  var p = kdPkg.pkg;
+  var html = "";
+  if (!kdPkg.sd) {
+    html += "<p class='hint'>" + kdEsc(kdI18n("pkgNoSd")) + "</p>";
+  } else if (!p) {
+    html += "<p class='hint'>" + kdEsc(kdI18n("pkgNone")) + "</p>";
+  } else {
+    html += "<p class='hint'>" + kdEsc(kdI18n("pkgStored", {
+      ver: p.ver, size: kdPkgKb(p.size)
+    })) + " " + kdEsc(kdI18n(kdPkg.offer ? "pkgOffered" : "pkgNotOffered")) + "</p>";
+  }
+  var rs = kdPkg.readers || [];
+  if (rs.length) {
+    html += "<table class='ftable' id='kd-pkg-readers'><thead><tr>" +
+      "<th>" + kdEsc(kdI18n("pkgReader")) + "</th>" +
+      "<th>" + kdEsc(kdI18n("pkgRuns")) + "</th>" +
+      "<th>" + kdEsc(kdI18n("pkgState")) + "</th>" +
+      "<th>" + kdEsc(kdI18n("pkgSeen")) + "</th></tr></thead><tbody>";
+    rs.forEach(function (r) {
+      var st = kdI18n("pkgSt_" + (r.st || "idle"));
+      if (r.st === "failed") st += " — " + kdPkgWhy(r.err);
+      html += "<tr data-st='" + kdEsc(r.st || "") + "'><td>" + kdEsc(r.ip) + "</td><td>" +
+        kdEsc(r.ver || kdI18n("pkgUnknownVer")) + "</td><td>" + kdEsc(st) + "</td><td>" +
+        kdEsc(kdPkgAgo(r.seen)) + "</td></tr>";
+    });
+    html += "</tbody></table>";
+  } else {
+    html += "<p class='hint'>" + kdEsc(kdI18n("pkgNoReaders")) + "</p>";
+  }
+  box.innerHTML = html;
+
+  var badge = document.getElementById("kd-pkg-badge");
+  if (badge) {
+    badge.textContent = p ? p.ver : "";
+    badge.className = "badge " + (kdPkg.offer ? "ok" : "dim");
+  }
+  var set = function (id, show, on) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = show ? "" : "none";
+    el.disabled = !on || kdPkgBusy;
+  };
+  set("kd-pkg-upload", true, kdPkg.sd);
+  set("kd-pkg-offer", !!p && !kdPkg.offer, kdPkg.sd);
+  set("kd-pkg-stop", !!p && kdPkg.offer, kdPkg.sd);
+  set("kd-pkg-delete", !!p, kdPkg.sd);
+}
+
+function kindlePkgAction(action) {
+  if (action === "delete" && !confirm(kdI18n("pkgDeleteConfirm"))) return;
+  var body = "action=" + encodeURIComponent(action);
+  return postWithCsrf("/api/kindle/pkg", {
+    body: body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" }
+  })
+    .then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (d) {
+        if (r.status >= 400 || !d || d.ok === false)
+          throw new Error(kdPkgWhy((d && d.error) || "HTTP " + r.status));
+        return d;
+      });
+    })
+    .then(function () {
+      kdMsg(kdI18n(action === "offer" ? "pkgOfferedMsg" :
+                   action === "stop" ? "pkgStoppedMsg" : "pkgDeletedMsg"), "ok");
+      return kdPkgLoad();
+    })
+    .catch(function (e) {
+      kdMsg(kdI18n("pkgFailed", { why: (e && e.message) || "net" }), "err");
+    });
+}
+
+function kindlePkgChoose() {
+  var f = document.getElementById("kd-pkg-file");
+  if (f && !kdPkgBusy) f.click();
+}
+
+function kindlePkgPick() {
+  var el = (this && this.nodeType === 1) ? this : document.getElementById("kd-pkg-file");
+  if (!el || !el.files || !el.files[0]) return;
+  var file = el.files[0];
+  el.value = "";   // the same file again must fire change again
+  kdPkgSend(file, null, false);
+}
+
+// An XHR rather than fetch, for the upload's progress. The same shape as the
+// node firmware upload (nodes.js ndFwSend).
+function kdPkgSend(file, token, isRetry) {
+  if (!token && !isRetry) {
+    return getCsrfToken().then(function (t) { kdPkgSend(file, t || "", true); });
+  }
+  kdPkgBusy = true;
+  kdPkgRender();
+  var bar = document.getElementById("kd-pkg-progress");
+  var fill = bar && bar.querySelector(".ota-bar > span");
+  var pct = bar && bar.querySelector(".ota-pct");
+  if (bar) bar.style.display = "";
+  var done = function () {
+    kdPkgBusy = false;
+    if (bar) bar.style.display = "none";
+    kdPkgRender();
+  };
+  var fd = new FormData();
+  fd.append("pkg", file, file.name);
+  var xhr = new XMLHttpRequest();
+  xhr.upload.onprogress = function (e) {
+    if (!e.lengthComputable) return;
+    var n = Math.round(e.loaded * 100 / e.total);
+    if (fill) fill.style.width = n + "%";
+    if (pct) pct.textContent = n + "%";
+  };
+  xhr.onerror = function () {
+    done();
+    kdMsg(kdI18n("pkgFailed", { why: "net" }), "err");
+  };
+  xhr.onload = function () {
+    if (xhr.status === 403 && token !== "" && !kdPkgSend._retried) {
+      window.__csrfToken = null;
+      kdPkgSend._retried = true;
+      return getCsrfToken().then(function (t) { kdPkgSend(file, t || "", true); });
+    }
+    kdPkgSend._retried = false;
+    var d = null;
+    try { d = JSON.parse(xhr.responseText); } catch (e) { /* not JSON */ }
+    done();
+    if (xhr.status === 200 && d && d.ok) {
+      kdMsg(kdI18n("pkgUploaded", { ver: d.ver || "", size: kdPkgKb(d.size) }), "ok");
+    } else {
+      kdMsg(kdI18n("pkgFailed", { why: kdPkgWhy((d && d.error) || "HTTP " + xhr.status) }), "err");
+    }
+    kdPkgLoad();
+  };
+  xhr.open("POST", "/api/kindle/pkg/upload" + (token ? "?csrf=" + encodeURIComponent(token) : ""));
+  xhr.send(fd);
+}
+
 function kindleInit() {
   kdTabInit();
+  kdPkgLoad();
   fetchWithTimeout("/api/sensors", {}, 10000)
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
@@ -2150,6 +2365,7 @@ document.addEventListener("i18n:change", function () {
   kdLayoutRender();
   kdCsyncRender();
   kdDirtyRefresh();
+  kdPkgRender();
 });
 
 registerHandlers({
@@ -2166,5 +2382,8 @@ registerHandlers({
   kindleSlotEdit: kindleSlotEdit,
   kindleSlotFlag: kindleSlotFlag,
   kindleSlotClear: kindleSlotClear,
-  kindleGroupEdit: kindleGroupEdit
+  kindleGroupEdit: kindleGroupEdit,
+  kindlePkgAction: kindlePkgAction,
+  kindlePkgChoose: kindlePkgChoose,
+  kindlePkgPick: kindlePkgPick
 });

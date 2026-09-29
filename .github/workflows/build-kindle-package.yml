@@ -16,6 +16,9 @@
 #   Update_esp32dash_<version>_install.bin  drop into /mnt/us/mrpackages and
 #                                           press one button in KUAL (MRPI)
 #   esp32dash-kindle-<version>.zip          unpack at the USB root instead
+#   esp32dash-kindle-<version>.tar          upload on the collector's E-ink
+#                                           dashboard page; the readers update
+#                                           themselves (docs/KINDLE_UPDATE.md)
 #
 # Triggers: pushes and PRs touching the Kindle tree or the packaging, manual
 # dispatch, and releases (where both files are attached).
@@ -146,6 +149,7 @@ jobs:
           path: |
             build/kindle/Update_esp32dash_*_install.bin
             build/kindle/esp32dash-kindle-*.zip
+            build/kindle/esp32dash-kindle-*.tar
           if-no-files-found: error
 
       - name: Attach to release
@@ -155,3 +159,4 @@ jobs:
           files: |
             build/kindle/Update_esp32dash_*_install.bin
             build/kindle/esp32dash-kindle-*.zip
+            build/kindle/esp32dash-kindle-*.tar

@@ -99,6 +99,11 @@ case "$url" in
             echo done
         fi
         exit 0 ;;
+    # The package a reader updates itself from, when a test has one.
+    *"$WGET_OK_HOST"*/kindle/pkg.tar)
+        echo "$url" >> "${WGET_LOG:-/dev/null}"
+        if [ -n "${PKG_FILE:-}" ] && [ -n "$out" ]; then cp "$PKG_FILE" "$out"; exit 0; fi
+        ;;
     # ?h= is the chart's height on the collector's layout.
     *"$WGET_OK_HOST"*/kindle/graph.bmp|*"$WGET_OK_HOST"*/kindle/graph.bmp\?h=*)
         echo "$url" >> "${WGET_LOG:-/dev/null}"
@@ -1276,7 +1281,9 @@ check "$?" "the fixture still carries the file-page GRID_ROWS older scripts read
   grep -q "/kindle/graph.bmp?h=$GR_H\$" "$WORK/wget.log" || exit 1
   LAYOUT=standalone
   fetch_data >/dev/null 2>&1
-  grep -q "/kindle/data?shape=standalone&col=1$" "$WORK/wget.log" || exit 2
+  # And which version of the scripts asks: the repository's kindle/ has no
+  # VERSION file, which is a folder copied from a checkout — "none".
+  grep -q "/kindle/data?shape=standalone&col=1&pkg=none$" "$WORK/wget.log" || exit 2
   exit 0 )
 check "$?" "the chart is fetched at the layout's height, the data for the chosen page"
 LAYOUT=auto; unset PAGE_MODE; RES_W=600; RES_H=800
@@ -2242,10 +2249,12 @@ check "$?" "and a bar with five buttons shrinks its type to fit them"
   exit 0 )
 check "$?" "the minute comes off the clock, a tap does not spend one, and Exit asks"
 
-# The trap gives back everything the run took, in the order that works.
-( body=$(sed -n '/^cleanup() {/,/^}/p' "$KDIR/update_dash.sh")
+# The trap gives back everything the run took, in the order that works —
+# through handback(), which an update's restart runs too.
+( body=$(sed -n '/^handback() {/,/^}/p' "$KDIR/update_dash.sh")
   printf '%s' "$body" | grep -q 'touch_disarm'     || exit 1
   printf '%s' "$body" | grep -q 'canvas_give_back' || exit 2
+  sed -n '/^cleanup() {/,/^}/p' "$KDIR/update_dash.sh" | grep -q '^    handback$' || exit 3
   exit 0 )
 check "$?" "and Stop disarms the screen and hands the chrome back"
 
@@ -2563,6 +2572,214 @@ check "$?" "and a run of failures is counted, so one hiccup is not a verdict"
   grep -q "incomplete payload" "$WORK/t3.err" || exit 4
   exit 0 )
 check "$?" "the incomplete-payload line is said once, not once a tick"
+
+# ── Updating itself from the collector ───────────────────────────────────────
+#
+# docs/KINDLE_UPDATE.md. The package is the one the build makes, from this
+# tree, installed over a copy of this tree standing in for the reader's own
+# folder. What is asserted is what matters on a wall: a good package lands
+# whole and restarts into itself, and every bad one leaves the folder exactly
+# as it was — the reader's settings included — and says why.
+PKGW="$WORK/pkgtest"
+mkdir -p "$PKGW"
+if sh "$ROOT/tools/mk_kindle_package.sh" --stage-only --out "$PKGW/build" \
+        --version t1.2 > /dev/null 2>&1; then
+    PKG_GOOD="$PKGW/build/esp32dash-kindle-t1.2.tar"
+else
+    PKG_GOOD=""
+fi
+check "$([ -s "$PKG_GOOD" ] && echo 0 || echo 1)" "the build makes the tar the collector hands on"
+
+# A reader's folder: this tree, an older VERSION, and the reader's own files.
+pkg_reader() {
+    rm -rf "$PKGW/ext"
+    mkdir -p "$PKGW/ext"
+    cp -R "$KDIR" "$PKGW/ext/esp32dash"
+    echo "t1.1" > "$PKGW/ext/esp32dash/VERSION"
+    echo 'HOST="http://10.9.9.42"' > "$PKGW/ext/esp32dash/dash.conf"
+    echo "10.9.9.42" > "$PKGW/ext/esp32dash/collectors"
+    echo "old log" > "$PKGW/ext/esp32dash/kual.log"
+    # A file the package does not carry: left where it is.
+    echo "mine" > "$PKGW/ext/esp32dash/notes.txt"
+    # A stale script, so a copy that did not happen is visible.
+    echo "# stale" >> "$PKGW/ext/esp32dash/start.sh"
+}
+
+# Offer $1 as version $2 and run the check the way load_data() does.
+pkg_try() {
+    PKG_FILE="$1"; export PKG_FILE
+    PKG_VER="$2"
+    PKG_SIZE=$(wc -c < "$1" | tr -dc '0-9')
+    PKG_MD5=${3:-$(md5sum "$1" | cut -d' ' -f1)}
+    DASH_DIR="$PKGW/ext/esp32dash"
+    WGET_OK_HOST=10.9.9.42; HOST=10.9.9.42; export WGET_OK_HOST
+    PKG_MAIN=1
+    pkg_version
+    RESTARTED=0
+    pkg_restart() { RESTARTED=1; }
+    pkg_check 2>>"$PKGW/err.log"
+}
+
+if [ -n "$PKG_GOOD" ]; then
+    ( pkg_reader
+      pkg_try "$PKG_GOOD" t1.2
+      [ "$RESTARTED" = "1" ] || exit 1
+      E="$PKGW/ext/esp32dash"
+      [ "$(cat "$E/VERSION")" = "t1.2" ] || exit 2
+      cmp -s "$E/update_dash.sh" "$KDIR/update_dash.sh" || exit 3
+      cmp -s "$E/start.sh" "$KDIR/start.sh" || exit 4
+      cmp -s "$E/layout/600x800.conf" "$KDIR/layout/600x800.conf" || exit 5
+      # The reader's own files, untouched.
+      grep -q '10.9.9.42' "$E/dash.conf" || exit 6
+      [ "$(cat "$E/collectors")" = "10.9.9.42" ] || exit 7
+      [ "$(cat "$E/notes.txt")" = "mine" ] || exit 8
+      # Nothing left half-way.
+      [ -z "$(find "$E" -name '*.new')" ] || exit 9
+      [ -e "$TMP/pkg" ] && exit 10
+      [ -e "$TMP/pkg.tar" ] && exit 11
+      # And said where it outlives a reboot.
+      grep -q 'updated from t1.1 to t1.2 by the collector' "$E/kual.log" || exit 12
+      exit 0 )
+    check "$?" "a good package is installed whole, the reader's own files kept, then it restarts"
+
+    # The restart hands the device back as Stop does, then becomes the new
+    # copy in the same process — so stop.sh's pidfile still names it.
+    ( body=$(sed -n '/^pkg_restart() {/,/^}/p' "$KDIR/update_dash.sh")
+      printf '%s' "$body" | grep -q '^    handback$' || exit 1
+      printf '%s' "$body" | grep -q 'exec sh "$DASH_DIR/update_dash.sh"' || exit 2
+      exit 0 )
+    check "$?" "  and restarts by handing the device back and exec'ing the new copy"
+
+    # A different MD5 than the file's: nothing changes, it says why, and the
+    # same offer is not tried again this run.
+    ( pkg_reader
+      : > "$WORK/wget.log"; WGET_LOG="$WORK/wget.log"; export WGET_LOG
+      pkg_try "$PKG_GOOD" t1.2 0123456789abcdef0123456789abcdef
+      [ "$RESTARTED" = "0" ] || exit 1
+      [ "$PKG_ERR" = "md5" ] || exit 2
+      [ "$(cat "$PKGW/ext/esp32dash/VERSION")" = "t1.1" ] || exit 3
+      grep -q '# stale' "$PKGW/ext/esp32dash/start.sh" || exit 4
+      grep -q 'refused: md5' "$PKGW/ext/esp32dash/kual.log" || exit 5
+      n=$(grep -c 'pkg.tar' "$WORK/wget.log")
+      pkg_check 2>/dev/null
+      [ "$(grep -c 'pkg.tar' "$WORK/wget.log")" = "$n" ] || exit 6
+      # ...and the refusal rides along on the next fetch.
+      DASH_DIR="$KDIR"; DASH_VER=""
+      fetch_data >/dev/null 2>&1
+      grep -q '/kindle/data?col=1&pkg=none&pkgerr=md5&pkgfor=0123456789abcdef0123456789abcdef$' \
+          "$WORK/wget.log" || exit 7
+      exit 0 )
+    check "$?" "a package whose MD5 is not the offer's changes nothing, is reported, and is not retried"
+
+    # Offered as one version, VERSION says another.
+    ( pkg_reader
+      pkg_try "$PKG_GOOD" t9.9
+      [ "$RESTARTED" = "0" ] && [ "$PKG_ERR" = "version" ] || exit 1
+      [ "$(cat "$PKGW/ext/esp32dash/VERSION")" = "t1.1" ] || exit 2
+      exit 0 )
+    check "$?" "a package that is not the version offered changes nothing"
+
+    # A LINK IN THE ARCHIVE is a write through that link when root unpacks
+    # it. Refused from the listing, before anything is unpacked.
+    ( pkg_reader
+      rm -rf "$PKGW/evil"; mkdir -p "$PKGW/evil"
+      cp -R "$PKGW/build/tree/esp32dash" "$PKGW/evil/"
+      ln -s /tmp "$PKGW/evil/esp32dash/escape"
+      tar --format=ustar -cf "$PKGW/evil.tar" -C "$PKGW/evil" esp32dash
+      pkg_try "$PKGW/evil.tar" t1.2
+      [ "$RESTARTED" = "0" ] && [ "$PKG_ERR" = "bad_entry" ] || exit 1
+      [ -e "$TMP/pkg" ] && exit 2
+      [ "$(cat "$PKGW/ext/esp32dash/VERSION")" = "t1.1" ] || exit 3
+      exit 0 )
+    check "$?" "a package with a symlink in it is refused before it is unpacked"
+
+    # One that would replace the reader's settings.
+    ( pkg_reader
+      rm -rf "$PKGW/own"; mkdir -p "$PKGW/own"
+      cp -R "$PKGW/build/tree/esp32dash" "$PKGW/own/"
+      echo 'HOST="http://6.6.6.6"' > "$PKGW/own/esp32dash/dash.conf"
+      tar --format=ustar -cf "$PKGW/own.tar" -C "$PKGW/own" esp32dash
+      pkg_try "$PKGW/own.tar" t1.2
+      [ "$RESTARTED" = "0" ] && [ "$PKG_ERR" = "bad_path" ] || exit 1
+      grep -q '10.9.9.42' "$PKGW/ext/esp32dash/dash.conf" || exit 2
+      exit 0 )
+    check "$?" "a package carrying dash.conf is refused, the reader's settings kept"
+
+    # In any case: on FAT, DASH.CONF is dash.conf.
+    ( pkg_reader
+      rm -rf "$PKGW/own2"; mkdir -p "$PKGW/own2"
+      cp -R "$PKGW/build/tree/esp32dash" "$PKGW/own2/"
+      echo 'HOST="http://6.6.6.6"' > "$PKGW/own2/esp32dash/DASH.CONF"
+      tar --format=ustar -cf "$PKGW/own2.tar" -C "$PKGW/own2" esp32dash
+      pkg_try "$PKGW/own2.tar" t1.2
+      [ "$RESTARTED" = "0" ] && [ "$PKG_ERR" = "bad_path" ] || exit 1
+      [ -e "$PKGW/ext/esp32dash/DASH.CONF" ] && exit 2
+      exit 0 )
+    check "$?" "  and so is DASH.CONF, which FAT takes for the same file"
+
+    # A script that does not parse is one the reader would restart into and
+    # never come back from.
+    ( pkg_reader
+      rm -rf "$PKGW/syn"; mkdir -p "$PKGW/syn"
+      cp -R "$PKGW/build/tree/esp32dash" "$PKGW/syn/"
+      echo 'if then fi (' >> "$PKGW/syn/esp32dash/update_dash.sh"
+      tar --format=ustar -cf "$PKGW/syn.tar" -C "$PKGW/syn" esp32dash
+      pkg_try "$PKGW/syn.tar" t1.2
+      [ "$RESTARTED" = "0" ] && [ "$PKG_ERR" = "syntax" ] || exit 1
+      cmp -s "$PKGW/ext/esp32dash/update_dash.sh" "$KDIR/update_dash.sh" || exit 2
+      exit 0 )
+    check "$?" "a package whose script does not parse is refused"
+
+    # Cut short in transit: the size is the offer's, the file's is not.
+    ( pkg_reader
+      head -c 4096 "$PKG_GOOD" > "$PKGW/short.tar"
+      PKG_FILE="$PKGW/short.tar"; export PKG_FILE
+      PKG_VER=t1.2; PKG_SIZE=$(wc -c < "$PKG_GOOD" | tr -dc '0-9')
+      PKG_MD5=$(md5sum "$PKG_GOOD" | cut -d' ' -f1)
+      DASH_DIR="$PKGW/ext/esp32dash"; WGET_OK_HOST=10.9.9.42; HOST=10.9.9.42
+      export WGET_OK_HOST; PKG_MAIN=1; pkg_version
+      RESTARTED=0; pkg_restart() { RESTARTED=1; }
+      pkg_check 2>/dev/null
+      [ "$RESTARTED" = "0" ] && [ "$PKG_ERR" = "size" ] || exit 1
+      exit 0 )
+    check "$?" "a package cut short in transit is refused"
+fi
+
+# Nothing is done without an offer, for the version already running, or from
+# anything but the dashboard's own process — settings.sh sources this file.
+( pkg_reader
+  PKG_FILE=/nonexistent; export PKG_FILE
+  DASH_DIR="$PKGW/ext/esp32dash"; pkg_version
+  : > "$WORK/wget.log"; WGET_LOG="$WORK/wget.log"; export WGET_LOG
+  RESTARTED=0; pkg_restart() { RESTARTED=1; }
+  PKG_MAIN=1; unset PKG_VER; pkg_check
+  PKG_MAIN=1; PKG_VER=t1.1; PKG_MD5=0123456789abcdef0123456789abcdef; PKG_SIZE=1; pkg_check
+  PKG_MAIN=0; PKG_VER=t1.2; pkg_check
+  grep -q 'pkg.tar' "$WORK/wget.log" && exit 1
+  [ "$RESTARTED" = "0" ] || exit 2
+  exit 0 )
+check "$?" "no offer, the same version, or settings.sh's process: nothing is downloaded"
+
+# The keys are taken from a payload, and forgotten with it; a cached page can
+# never start an update.
+( printf 'PKG_VER="t1.2"\nPKG_MD5="0123456789abcdef0123456789abcdef"\nPKG_SIZE=12\nEND=1\n' > "$WORK/pk.txt"
+  load_kv "$WORK/pk.txt" PAYLOAD
+  [ "$PKG_VER" = "t1.2" ] && [ "$PKG_SIZE" = "12" ] || exit 1
+  zones_forget
+  [ -z "${PKG_VER:-}" ] && [ -z "${PKG_MD5:-}" ] || exit 2
+  body=$(sed -n '/^cache_load() {/,/^}/p' "$KDIR/update_dash.sh")
+  printf '%s' "$body" | grep -q 'PKG_FRESH=1' && exit 3
+  exit 0 )
+check "$?" "the offer is read from the payload, forgotten with it, and never from the cache"
+
+# '+' is a space in a query string, so the version goes out as %2B.
+( d="$WORK/verq"; mkdir -p "$d"; printf '2026.9+local\r\n' > "$d/VERSION"
+  DASH_DIR="$d"; pkg_version
+  [ "$DASH_VER" = "2026.9+local" ] && [ "$DASH_VER_Q" = "2026.9%2Blocal" ] || exit 1
+  printf 'v1;reboot\n' > "$d/VERSION"; pkg_version
+  [ "$DASH_VER" = "none" ] || exit 2
+  exit 0 )
+check "$?" "the version is read plainly, spelt safely for the query, and refused when odd"
 
 # ── A place that stops being sent stops being drawn ──────────────────────────
 #

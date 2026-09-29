@@ -32,6 +32,7 @@ finds.
 | | |
 |---|---|
 | [KINDLE_DASHBOARD.md](KINDLE_DASHBOARD.md) | The JavaScript-free e-ink dashboard at `GET /kindle` |
+| [KINDLE_UPDATE.md](KINDLE_UPDATE.md) | Updating the Kindle scripts through the collector, like the node firmware |
 | [../tools/kindle_preview/README.md](../tools/kindle_preview/README.md) | Rendering that dashboard on a desktop to iterate on the layout |
 | [../src/modules/README_USB_CDC.md](../src/modules/README_USB_CDC.md) | The USB CDC module: board detection, first-run setup, NVS storage |
 | [../src/sensors/SENSORMANAGER_INTEGRATION.md](../src/sensors/SENSORMANAGER_INTEGRATION.md) | Adding a sensor plugin to `SensorManager` |

@@ -34,6 +34,7 @@
 #include "KindleConfigJson.h"         // … field by field, the same table as the settings file
 #include "FormArgs.h"                 // formArg / queryArg / formParam
 #include "KindleSlotStore.h"           // GET/POST /api/kindle/slots
+#include "KindlePkg.h"                 // /api/kindle/pkg*, docs/KINDLE_UPDATE.md
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -2004,6 +2005,14 @@ void registerApiRoutes(AsyncWebServer& server) {
               handleNodesFwBody);
 #endif
 #ifdef FEATURE_KINDLE_DASHBOARD
+    // Kindle dashboard updates, docs/KINDLE_UPDATE.md §2. The upload FIRST,
+    // for the same reason as /api/nodes/fw/upload: a plain path also matches
+    // "<path>/…" in this library.
+    kindlePkgBegin();
+    server.on("/api/kindle/pkg/upload", HTTP_POST, handleKindlePkgUploadDone,
+              handleKindlePkgUpload);
+    server.on("/api/kindle/pkg",        HTTP_GET,  handleKindlePkgGet);
+    server.on("/api/kindle/pkg",        HTTP_POST, handleKindlePkgPost);
     server.on("/api/kindle/config",     HTTP_GET,  handleKindleConfigGet);
     server.on("/api/kindle/config",     HTTP_POST, handleKindleConfigPost);
     server.on("/api/kindle/slots",      HTTP_GET,  handleKindleSlotsGet);

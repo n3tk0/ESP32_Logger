@@ -887,6 +887,68 @@ with sync_playwright() as p:
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(got.get("clock_sync") == 0, "and Never goes out as 0 (%r)" % got.get("clock_sync"))
 
+    # ── The reader's own scripts, updated through the collector ─────────────
+    # docs/KINDLE_UPDATE.md. Its own card on the Reader tab, outside Save:
+    # every button acts at once. Proven against the mock's answers, which are
+    # the firmware's words for each case.
+    import io, tarfile, tempfile
+    tab(pg, "reader")
+    check(pg.is_visible("#kd-card-pkg"), "the update card is shown when the build has it")
+    check("No package stored" in pg.inner_text("#kd-pkg"), "  and says nothing is stored yet")
+    check(pg.locator("#kd-pkg-readers tbody tr").count() == 2,
+          "  and lists the readers that have fetched a page")
+    check(not pg.is_visible("#kd-pkg-offer"), "  and there is nothing to offer")
+
+    tmpd = tempfile.mkdtemp()
+    bad = os.path.join(tmpd, "esp32dash-kindle-t2.0.zip")
+    with open(bad, "wb") as f:
+        f.write(b"PK\x03\x04" + b"\0" * 2000)
+    pg.set_input_files("#kd-pkg-file", bad)
+    pg.wait_for_timeout(1000)
+    check("not a Kindle dashboard package" in pg.inner_text("#kd-msg"),
+          "the .zip is refused in words that say which file to use")
+
+    good = os.path.join(tmpd, "esp32dash-kindle-t2.0.tar")
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+        for name, data in (("esp32dash/VERSION", b"t2.0\n"),
+                           ("esp32dash/update_dash.sh", b"#!/bin/sh\n")):
+            ti = tarfile.TarInfo(name)
+            ti.size = len(data)
+            tf.addfile(ti, io.BytesIO(data))
+    with open(good, "wb") as f:
+        f.write(buf.getvalue())
+    pg.set_input_files("#kd-pkg-file", good)
+    pg.wait_for_timeout(1200)
+    check("Stored t2.0" in pg.inner_text("#kd-msg"), "a package is stored and named by its version")
+    check("Stored: t2.0" in pg.inner_text("#kd-pkg") and "Not offered" in pg.inner_text("#kd-pkg"),
+          "  and stored unoffered")
+    check(pg.is_visible("#kd-pkg-offer") and not pg.is_visible("#kd-pkg-stop"),
+          "  so Offer is the button on show")
+
+    pg.click("#kd-pkg-offer")
+    pg.wait_for_timeout(1000)
+    mk = pg.evaluate("fetch('/__mock/kpkg').then(function(r){return r.json()})")
+    check(mk.get("offer") is True and mk["posts"][-1:] == ["offer"],
+          "Offer posts action=offer (%r)" % mk.get("posts"))
+    rows = pg.inner_text("#kd-pkg-readers")
+    check("offered" in rows, "  the older reader reads as offered")
+    check("install by hand" in rows, "  and one too old to update itself says so")
+    check(pg.is_visible("#kd-pkg-stop") and not pg.is_visible("#kd-pkg-offer"),
+          "  and Stop offering replaces Offer")
+
+    pg.click("#kd-pkg-stop")
+    pg.wait_for_timeout(1000)
+    mk = pg.evaluate("fetch('/__mock/kpkg').then(function(r){return r.json()})")
+    check(mk.get("offer") is False, "Stop offering takes the offer back")
+
+    pg.click("#kd-pkg-delete")
+    pg.wait_for_timeout(1000)
+    mk = pg.evaluate("fetch('/__mock/kpkg').then(function(r){return r.json()})")
+    # (Delete asks first; the dialog handler set above accepts it.)
+    check(mk.get("pkg") is None, "Delete removes the package, after asking")
+    check("No package stored" in pg.inner_text("#kd-pkg"), "  and the card says so")
+
     shot = os.environ.get("SCREENSHOT")
     if shot:
         pg.screenshot(path=shot, full_page=True)

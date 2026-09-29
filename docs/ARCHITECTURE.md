@@ -545,6 +545,7 @@ The **Auth** column in the index uses:
 | GET | `/kindle` | read | Server-rendered e-ink dashboard (`FEATURE_KINDLE_DASHBOARD`) |
 | GET | `/kindle/probe` | read | Reports the reader's viewport, DPR and user agent, to pick `KINDLE_PAGE_W` |
 | GET | `/kindle/clear` | read | Full-screen black/white frames to clear e-ink ghosting, then back to `/kindle` |
+| GET | `/kindle/pkg.tar` | open | The Kindle dashboard package on offer, for a reader updating itself, with `x-MD5` (`docs/KINDLE_UPDATE.md` §3) |
 | GET | `/kindle/forecast` | read | Queue a forecast fetch now (one a minute at most), then back to `/kindle`; `?t=1` answers `ok`, `wait <s>`, `off` or `offline` (no station link, nothing queued); `?t=1&w=1` only polls, `pending` or `done` (`MODULE_FORECAST_ENABLED`) |
 
 `/api/ingest` is the one mutating route that does **not** go through
@@ -782,6 +783,9 @@ synchronised node.
 | POST | `/api/kindle/config` | CSRF | Face, weight, clock style, formats, which blocks are drawn (the clock too), the page's shape, its rotation (the FBInk panel's and the browser page's apart), and how often the FBInk reader sets its clock |
 | GET | `/api/kindle/slots` | read | What is in each of the eleven places, plus the layout's own vocabulary |
 | POST | `/api/kindle/slots` | CSRF | Replace the whole layout (JSON body) |
+| GET | `/api/kindle/pkg` | read | The Kindle dashboard package on the SD card, whether it is offered, and every reader seen with its version and update status (`docs/KINDLE_UPDATE.md` §2) |
+| POST | `/api/kindle/pkg` | CSRF | `action=offer` / `stop` offering the package to the readers, or `delete` it (form) |
+| POST | `/api/kindle/pkg/upload` | CSRF | Upload a Kindle dashboard package (multipart, field `pkg`: `esp32dash-kindle-<version>.tar`); checked, then stored unoffered |
 
 **The layout is fixed; what goes in it is not.** The page used to be six
 hardwired readings — the outdoor sensor's temperature, humidity and pressure and

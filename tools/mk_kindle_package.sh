@@ -2,13 +2,17 @@
 # ============================================================================
 # mk_kindle_package.sh — build the Kindle dashboard's installable artifacts
 #
-# Produces two things from the same staged tree:
+# Produces three things from the same staged tree:
 #
 #   Update_esp32dash_<version>_install.bin   drop into /mnt/us/mrpackages,
 #                                            then KUAL -> Helper -> Install MR
 #                                            Packages. One file, one button.
 #   esp32dash-kindle-<version>.zip           unpack at the USB root instead,
 #                                            for a reader without MRPI.
+#   esp32dash-kindle-<version>.tar           upload on the collector's E-ink
+#                                            dashboard page; every reader
+#                                            updates itself from it
+#                                            (docs/KINDLE_UPDATE.md).
 #
 # WHY A PACKAGE AND NOT "COPY THE FOLDER"
 # ---------------------------------------
@@ -114,6 +118,19 @@ tar --sort=name --owner=0 --group=0 --numeric-owner \
     -czf "$STAGE/esp32dash.tar.gz" -C "$TREE" esp32dash
 
 cp "$ROOT/kindle/package/install-esp32dash.sh" "$STAGE/"
+
+# ── The tar, for the collector to hand on ───────────────────────────────────
+# Upload this on the collector's E-ink dashboard page and every reader it
+# serves updates itself on its next fetch (docs/KINDLE_UPDATE.md). The same
+# tree as the tarball above, but plain ustar and uncompressed: the collector
+# reads every header on the way past (src/web/KindlePkgTar.h) and has no heap
+# to inflate with. Directories, regular files, short names — nothing a strict
+# reader of the format could take differently.
+PKGTAR="$OUT/esp32dash-kindle-$VERSION.tar"
+tar --format=ustar --sort=name --owner=0 --group=0 --numeric-owner \
+    --mtime='1970-01-01 00:00:00 UTC' \
+    -cf "$PKGTAR" -C "$TREE" esp32dash
+echo "wrote $PKGTAR"
 
 # ── The zip, for a reader without MRPI ──────────────────────────────────────
 # Rooted at extensions/ so it unpacks straight onto the USB volume. A zip
