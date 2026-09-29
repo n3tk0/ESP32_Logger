@@ -2484,6 +2484,13 @@ pkg_install() {
                 pkg_fail bad_path; return 1 ;;
         esac
     done < "$TMP/pkg.list"
+    # And again WITHOUT REGARD TO CASE: /mnt/us is FAT, where DASH.CONF is
+    # this reader's dash.conf.
+    if tr 'A-Z' 'a-z' < "$TMP/pkg.list" |
+            grep -qE ' esp32dash/(dash\.conf|collectors|kual\.log|last\.txt)$'; then
+        pkg_fail bad_path
+        return 1
+    fi
 
     mkdir -p "$d" && tar -xf "$tar" -C "$d" 2>/dev/null || { pkg_fail unpack; return 1; }
     rm -f "$tar"

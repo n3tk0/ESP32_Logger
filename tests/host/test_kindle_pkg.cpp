@@ -179,6 +179,8 @@ static void test_paths_refused() {
         "esp32dash/collectors",
         "esp32dash/kual.log",
         "esp32dash/last.txt",
+        "esp32dash/DASH.CONF",    // FAT: the same file as dash.conf
+        "esp32dash/Kual.Log",
         "esp32dash/x/",           // a regular file named like a directory
     };
     for (const char* p : bad) {

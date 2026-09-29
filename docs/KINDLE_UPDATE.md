@@ -21,7 +21,8 @@ part of this file; when they disagree, this document wins.
    it, before it touches its own folder (§4). The reader's checks are the ones
    that make the install safe — it runs as root, on a file that came over HTTP.
 5. **The reader's own files are never replaced.** `dash.conf`, `collectors`,
-   `kual.log` and `last.txt` are refused in a package on both ends.
+   `kual.log` and `last.txt` are refused in a package on both ends, in any
+   case — the reader's folder is on FAT, where `DASH.CONF` is `dash.conf`.
 6. **A refusal changes nothing.** Every failed check leaves the reader's folder
    exactly as it was, and the running dashboard keeps running.
 7. **Older scripts are left alone.** A reader whose script predates this sends

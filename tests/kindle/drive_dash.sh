@@ -2705,6 +2705,18 @@ if [ -n "$PKG_GOOD" ]; then
       exit 0 )
     check "$?" "a package carrying dash.conf is refused, the reader's settings kept"
 
+    # In any case: on FAT, DASH.CONF is dash.conf.
+    ( pkg_reader
+      rm -rf "$PKGW/own2"; mkdir -p "$PKGW/own2"
+      cp -R "$PKGW/build/tree/esp32dash" "$PKGW/own2/"
+      echo 'HOST="http://6.6.6.6"' > "$PKGW/own2/esp32dash/DASH.CONF"
+      tar --format=ustar -cf "$PKGW/own2.tar" -C "$PKGW/own2" esp32dash
+      pkg_try "$PKGW/own2.tar" t1.2
+      [ "$RESTARTED" = "0" ] && [ "$PKG_ERR" = "bad_path" ] || exit 1
+      [ -e "$PKGW/ext/esp32dash/DASH.CONF" ] && exit 2
+      exit 0 )
+    check "$?" "  and so is DASH.CONF, which FAT takes for the same file"
+
     # A script that does not parse is one the reader would restart into and
     # never come back from.
     ( pkg_reader

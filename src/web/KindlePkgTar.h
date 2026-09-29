@@ -36,6 +36,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>   // strcasecmp
 
 namespace kpkg {
 
@@ -195,8 +196,10 @@ inline void header(TarScan& s) {
         if (strcmp(path, ROOT) != 0 && !pathOk(path)) { fail(s, "bad_path"); return; }
     } else if (type == '0' || type == '\0') {
         if (!pathOk(path) || path[pn - 1] == '/') { fail(s, "bad_path"); return; }
+        // WITHOUT REGARD TO CASE: the reader's folder is on FAT, where
+        // esp32dash/DASH.CONF is the same file as its dash.conf.
         for (const char* own : READER_OWN)
-            if (strcmp(path, own) == 0) { fail(s, "bad_path"); return; }
+            if (strcasecmp(path, own) == 0) { fail(s, "bad_path"); return; }
         for (int i = 0; i < REQUIRED_N; i++)
             if (strcmp(path, REQUIRED[i]) == 0) s.have |= 1u << i;
     } else {
