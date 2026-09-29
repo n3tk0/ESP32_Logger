@@ -1,7 +1,9 @@
 #include "DataLogModule.h"
+#include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../core/Globals.h"
 #include "../core/Config.h"
 #include <stdlib.h>
+#include <string.h>
 
 namespace {
 
@@ -18,43 +20,6 @@ int enumOr(JsonVariantConst v, int def) {
     return (s && *s >= '0' && *s <= '9') ? atoi(s) : def;
 }
 
-// PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
-const char DATALOG_SCHEMA[] PROGMEM =
-    "{\"fields\":["
-      "{\"id\":\"prefix\",\"type\":\"string\",\"max\":32,\"label\":\"Filename prefix\",\"group\":\"File & rotation\"},"
-      "{\"id\":\"folder\",\"type\":\"string\",\"max\":32,\"label\":\"Folder\",\"group\":\"File & rotation\"},"
-      "{\"id\":\"rotation\",\"type\":\"enum\",\"label\":\"Rotation\",\"group\":\"File & rotation\","
-        "\"options\":[{\"v\":0,\"l\":\"None\"},{\"v\":1,\"l\":\"Daily\"},"
-                     "{\"v\":2,\"l\":\"Weekly\"},{\"v\":3,\"l\":\"Monthly\"},"
-                     "{\"v\":4,\"l\":\"By size\"}]},"
-      "{\"id\":\"maxSizeKB\",\"type\":\"int\",\"min\":0,\"max\":1048576,\"label\":\"Max size\",\"unit\":\"KB\",\"group\":\"File & rotation\","
-        "\"showIf\":{\"rotation\":4}},"
-      "{\"id\":\"maxEntries\",\"type\":\"int\",\"min\":10,\"max\":65535,\"label\":\"Max entries\",\"unit\":\"rows\",\"group\":\"File & rotation\","
-        "\"help\":\"Oldest rows are trimmed once the file exceeds this many entries.\"},"
-      "{\"id\":\"timestampFilename\",\"type\":\"bool\",\"label\":\"Timestamp in filename\",\"group\":\"File & rotation\"},"
-      "{\"id\":\"includeDeviceId\",\"type\":\"bool\",\"label\":\"Include device ID\",\"group\":\"File & rotation\"},"
-      "{\"id\":\"includeBootCount\",\"type\":\"bool\",\"label\":\"Include boot count\",\"group\":\"File & rotation\"},"
-      "{\"id\":\"includeExtraPresses\",\"type\":\"bool\",\"label\":\"Log extra presses\",\"group\":\"File & rotation\"},"
-      "{\"id\":\"dateFormat\",\"type\":\"enum\",\"label\":\"Date format\",\"group\":\"Column format\","
-        "\"options\":[{\"v\":0,\"l\":\"Off\"},{\"v\":1,\"l\":\"DD/MM/YYYY\"},"
-                     "{\"v\":2,\"l\":\"MM/DD/YYYY\"},{\"v\":3,\"l\":\"YYYY-MM-DD\"},"
-                     "{\"v\":4,\"l\":\"DD.MM.YYYY\"}]},"
-      "{\"id\":\"timeFormat\",\"type\":\"enum\",\"label\":\"Time format\",\"group\":\"Column format\","
-        "\"options\":[{\"v\":0,\"l\":\"HH:MM:SS\"},{\"v\":1,\"l\":\"HH:MM\"},{\"v\":2,\"l\":\"12h\"}]},"
-      "{\"id\":\"endFormat\",\"type\":\"enum\",\"label\":\"End column\",\"group\":\"Column format\","
-        "\"options\":[{\"v\":0,\"l\":\"End time\"},{\"v\":1,\"l\":\"Duration\"},{\"v\":2,\"l\":\"Off\"}]},"
-      "{\"id\":\"volumeFormat\",\"type\":\"enum\",\"label\":\"Volume format\",\"group\":\"Column format\","
-        "\"options\":[{\"v\":0,\"l\":\"L (comma)\"},{\"v\":1,\"l\":\"L (dot)\"},"
-                     "{\"v\":2,\"l\":\"Number only\"},{\"v\":3,\"l\":\"Off\"}]},"
-      "{\"id\":\"manualPressThresholdMs\",\"type\":\"int\",\"min\":0,\"max\":60000,\"unit\":\"ms\",\"group\":\"Water logging\","
-        "\"label\":\"Manual-press hold\"},"
-      "{\"id\":\"postCorrectionEnabled\",\"type\":\"bool\",\"label\":\"Post-correction\",\"group\":\"Water logging\"},"
-      "{\"id\":\"pfToFfThreshold\",\"type\":\"float\",\"min\":0,\"max\":1000,\"unit\":\"L\",\"group\":\"Water logging\","
-        "\"label\":\"PF→FF threshold\",\"showIf\":\"postCorrectionEnabled\"},"
-      "{\"id\":\"ffToPfThreshold\",\"type\":\"float\",\"min\":0,\"max\":1000,\"unit\":\"L\",\"group\":\"Water logging\","
-        "\"label\":\"FF→PF threshold\",\"showIf\":\"postCorrectionEnabled\"}"
-    "]}";
-
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -66,6 +31,16 @@ const char DATALOG_SCHEMA[] PROGMEM =
 // boundary — load() trusts that prefix/folder/currentFile have already
 // been sanitized (no slashes in prefix, sanitizePath()'d folder /
 // currentFile).
+bool datalogPrefixOk(const char* s, size_t n) {
+    if (!s || n == 0 || n > 32) return false;
+    for (size_t i = 0; i < n; i++) {
+        const unsigned char c = (unsigned char)s[i];
+        if (c == '/' || c == '\\' || c < 0x20 || c == 0x7f) return false;   // NUL included
+    }
+    return !(n == 1 && s[0] == '.') && !(n == 2 && s[0] == '.' && s[1] == '.');
+}
+
+// ---------------------------------------------------------------------------
 bool DataLogModule::load(JsonObjectConst cfg) {
     DatalogConfig& d = config.datalog;
     copyStr(d.prefix,       sizeof(d.prefix),       cfg["prefix"]      | (const char*)nullptr);
@@ -99,9 +74,13 @@ bool DataLogModule::load(JsonObjectConst cfg) {
         d.manualPressThresholdMs = (v < 0) ? 0 : (v > 60000 ? 60000 : (uint16_t)v);
     }
     d.postCorrectionEnabled = cfg["postCorrectionEnabled"]  | d.postCorrectionEnabled;
-    d.pfToFfThreshold       = cfg["pfToFfThreshold"] | d.pfToFfThreshold;
+    // By value, here and in save(): DeviceConfig is packed, these fields sit
+    // at odd offsets, and ArduinoJson takes its operands by reference — a
+    // reference to a misaligned float, which the compiler then loads as if it
+    // were aligned (UBSan reports it in tests/host/test_settings_json.cpp).
+    d.pfToFfThreshold       = cfg["pfToFfThreshold"] | (float)d.pfToFfThreshold;
     if (!(d.pfToFfThreshold >= 0.1f && d.pfToFfThreshold <= 1000.0f)) d.pfToFfThreshold = 4.5f;
-    d.ffToPfThreshold       = cfg["ffToPfThreshold"] | d.ffToPfThreshold;
+    d.ffToPfThreshold       = cfg["ffToPfThreshold"] | (float)d.ffToPfThreshold;
     if (!(d.ffToPfThreshold >= 0.1f && d.ffToPfThreshold <= 1000.0f)) d.ffToPfThreshold = 3.7f;
     return true;
 }
@@ -112,8 +91,8 @@ bool DataLogModule::save(JsonObject cfg) const {
     cfg["prefix"]                 = d.prefix;
     cfg["folder"]                 = d.folder;
     cfg["rotation"]               = (int)d.rotation;
-    cfg["maxSizeKB"]              = d.maxSizeKB;
-    cfg["maxEntries"]             = d.maxEntries;
+    cfg["maxSizeKB"]              = (uint32_t)d.maxSizeKB;   // by value: see load()
+    cfg["maxEntries"]             = (uint16_t)d.maxEntries;
     cfg["timestampFilename"]      = d.timestampFilename;
     cfg["includeDeviceId"]        = d.includeDeviceId;
     cfg["includeBootCount"]       = d.includeBootCount;
@@ -122,16 +101,16 @@ bool DataLogModule::save(JsonObject cfg) const {
     cfg["timeFormat"]             = (int)d.timeFormat;
     cfg["endFormat"]              = (int)d.endFormat;
     cfg["volumeFormat"]           = (int)d.volumeFormat;
-    cfg["manualPressThresholdMs"] = d.manualPressThresholdMs;
+    cfg["manualPressThresholdMs"] = (uint16_t)d.manualPressThresholdMs;
     cfg["postCorrectionEnabled"]  = d.postCorrectionEnabled;
-    cfg["pfToFfThreshold"]        = d.pfToFfThreshold;
-    cfg["ffToPfThreshold"]        = d.ffToPfThreshold;
+    cfg["pfToFfThreshold"]        = (float)d.pfToFfThreshold;
+    cfg["ffToPfThreshold"]        = (float)d.ffToPfThreshold;
     return true;
 }
 
 // ---------------------------------------------------------------------------
-const char* DataLogModule::schema() const {
-    return DATALOG_SCHEMA;
+ModuleSchema DataLogModule::schema() const {
+    return {MODULE_SCHEMA_DATALOG_GZ, sizeof(MODULE_SCHEMA_DATALOG_GZ)};
 }
 
 // ---------------------------------------------------------------------------

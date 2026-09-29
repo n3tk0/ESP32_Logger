@@ -1,19 +1,6 @@
 #include "UsbCdcConfigModule.h"
+#include "ModuleSchemas.h"      // this module's form, gzipped
 #include "UsbCdcModule.h"   // global `usbCdc`
-
-namespace {
-
-// PROGMEM schema — a single on/off toggle. The form only renders on boards
-// that support USB CDC (schema() returns nullptr otherwise → status-only).
-const char USBCDC_SCHEMA[] PROGMEM =
-    "{\"fields\":["
-      "{\"id\":\"onBoot\",\"type\":\"bool\",\"label\":\"USB CDC on boot\",\"group\":\"Serial\","
-        "\"help\":\"On = USB serial available (USB GPIO pins reserved). Off = those pins are "
-        "freed for sensors/IO. Saved to NVS now; takes effect after the next firmware "
-        "recompile/flash.\"}"
-    "]}";
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 bool UsbCdcConfigModule::load(JsonObjectConst cfg) {
@@ -34,8 +21,12 @@ bool UsbCdcConfigModule::save(JsonObject cfg) const {
 }
 
 // ---------------------------------------------------------------------------
-const char* UsbCdcConfigModule::schema() const {
-    return usbCdc.isUsbCdcSupported() ? USBCDC_SCHEMA : nullptr;
+// A single on/off toggle (src/modules/schemas/usbcdc.json). The form only
+// renders on boards that support USB CDC; elsewhere there is no schema and
+// the module is status-only.
+ModuleSchema UsbCdcConfigModule::schema() const {
+    if (!usbCdc.isUsbCdcSupported()) return {nullptr, 0};
+    return {MODULE_SCHEMA_USBCDC_GZ, sizeof(MODULE_SCHEMA_USBCDC_GZ)};
 }
 
 // ---------------------------------------------------------------------------

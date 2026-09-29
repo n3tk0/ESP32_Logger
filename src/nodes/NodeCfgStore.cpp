@@ -16,6 +16,7 @@
 #ifdef FEATURE_ESPNOW_INGEST
 #include "../espnow/EspNowIngest.h"     // the table label follows the config
 #endif
+#include "../utils/JsonIO.h"
 
 using namespace nodecfg;
 
@@ -100,7 +101,7 @@ static bool readJson(const char* path, JsonDocument& doc) {
     if (fsMutex && !g.isLocked()) return false;
     File f = LittleFS.open(path, "r");
     if (!f) return false;
-    const DeserializationError err = deserializeJson(doc, f);
+    const DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
     return !err;
 }
@@ -577,7 +578,7 @@ size_t nodeCfgRadioDoc(uint8_t id, char* buf, size_t cap, uint16_t& rev) {
         JsonVariantConst d = w->doc["desired"];
         const size_t need = measureJson(d);
         if (need <= EN_CFG_MAX_TOTAL && need < cap) {
-            n = serializeJson(d, buf, cap);
+            n = jsonToBuf(d, buf, cap);
             rev = e->s.rev;
         } else {
             Serial.printf("[nodecfg] config for node %u is %u bytes — too big for the radio\n",

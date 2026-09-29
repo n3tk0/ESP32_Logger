@@ -487,6 +487,12 @@ struct DeviceConfig {
     KindleConfig   kindle;     // appended in v14 — keep at the end
 };
 
+// The live configuration (defined in ESP_Logger.ino). Declared here as well as
+// in Globals.h so code that only needs the settings — the modules' load/save,
+// the settings file — can include this header without the web server, the RTC
+// driver and the rest of Globals.h.
+extern DeviceConfig config;
+
 struct LogEntry {
     uint32_t wakeTimestamp;
     uint32_t sleepTimestamp;

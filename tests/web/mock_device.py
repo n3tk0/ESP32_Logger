@@ -16,7 +16,7 @@ like /export_settings) 404 by design; the driver ignores those.
 
     python3 tests/web/mock_device.py 8765
 """
-import json, threading, http.server, socketserver, urllib.parse, os, sys, time
+import gzip, json, threading, http.server, socketserver, urllib.parse, os, sys, time
 
 import pathlib
 ROOT = str(pathlib.Path(__file__).resolve().parent.parent.parent / "www")
@@ -78,14 +78,13 @@ MODULES = [
                 "refresh": "/kindle/forecast"}},
 ]
 
-# GET /api/modules/:id → config + schema. The schema is a STRING of
-# {"fields":[…]} because that is what the firmware sends: each module returns
-# a PROGMEM JSON literal from schema() and ModuleRegistry::toDetailJson
-# assigns it straight through, so the page does JSON.parse on it. Copied in
-# shape from TIME_SCHEMA (src/modules/TimeModule.cpp), including the showIf
-# key, which is the one field rule the form evaluates rather than renders.
+# GET /api/modules/:id/schema → the form, as the firmware sends it: the JSON
+# gzipped, with Content-Encoding: gzip (src/modules/ModuleSchemas.h), so the
+# page is seen to read what the browser inflated. Copied in shape from
+# src/modules/schemas/time.json, including the showIf key, which is the one
+# field rule the form evaluates rather than renders.
 MODULE_SCHEMA = {
-    "time": json.dumps({"fields": [
+    "time": {"fields": [
         {"id": "ntpServer", "type": "string", "max": 64, "label": "NTP server",
          "group": "NTP", "help": "Hostname queried at boot."},
         {"id": "timezone", "type": "int", "min": -12, "max": 14,
@@ -95,12 +94,12 @@ MODULE_SCHEMA = {
                      {"v": 2, "l": "Off"}, {"v": 3, "l": "Manual (always on)"}]},
         {"id": "dstOffsetHours", "type": "int", "min": 1, "max": 2,
          "label": "DST offset", "unit": "h", "showIf": {"dstRule": 3}},
-    ]}),
-    "forecast": json.dumps({"fields": [
+    ]},
+    "forecast": {"fields": [
         {"id": "lat", "type": "float", "label": "Latitude"},
         {"id": "lon", "type": "float", "label": "Longitude"},
-    ]}),
-    "wifi": json.dumps({"fields": [
+    ]},
+    "wifi": {"fields": [
         # An enum with numeric values, as most firmware enums are: the form
         # must post 1, not "1" (see _enumValue in settings.js).
         # Its value comes from `default` rather than MODULE_CONFIG, which
@@ -111,8 +110,13 @@ MODULE_SCHEMA = {
         {"id": "useStatic", "type": "bool", "label": "Use a static IP"},
         {"id": "ip", "type": "ipv4", "label": "IP address",
          "showIf": {"useStatic": True}},
-    ]}),
+    ]},
 }
+
+# Answered the way firmware before the gzipped schemas did: the schema inside
+# the detail, as a JSON *string*. www/ on LittleFS and the firmware are
+# updated separately, so the page reads both.
+LEGACY_INLINE_SCHEMA = {"forecast"}
 
 # `polls`: how many status reads after "ok" still say pending, so the page is
 # seen to wait for the fetch rather than for a fixed time. `offline`: answer
@@ -797,6 +801,15 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _gzip_json(self, obj):
+        b = gzip.compress(json.dumps(obj).encode(), mtime=0)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Encoding", "gzip")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
     def _text(self, body, code=200):
         b = body.encode()
         self.send_response(code)
@@ -891,23 +904,24 @@ class H(http.server.SimpleHTTPRequestHandler):
             if FORECAST["left"] == 0:
                 st["pending"] = False
                 st["fetchedAt"] = int(time.time())
+        if path.startswith("/api/modules/") and path.endswith("/schema"):
+            mid = path[len("/api/modules/"):-len("/schema")]
+            if mid not in MODULE_SCHEMA or mid in LEGACY_INLINE_SCHEMA:
+                return self._json({"ok": False, "error": "no form"}, 404)
+            return self._gzip_json(MODULE_SCHEMA[mid])
         if path.startswith("/api/modules/"):
             mid = path[len("/api/modules/"):]
             m = next((x for x in MODULES if x["id"] == mid), None)
             if m is None:
                 return self._json({"ok": False, "error": "unknown module"}, 404)
-            # A detail response is the index entry plus its form. `schema` is
-            # a JSON *string* holding {"fields":[{"id":…}]}, not an object:
-            # ModuleRegistry::toDetailJson assigns the module's PROGMEM
-            # literal straight through, and settings.js does JSON.parse on it.
-            # Handing back a parsed array here would make every detail pane
-            # render "Bad schema JSON." while the driver still saw a populated
-            # pane — the form, showIf, collect and save paths would all go
-            # untested. Shaped after TIME_SCHEMA in src/modules/TimeModule.cpp.
+            # A detail response is the index entry plus its config; the form
+            # is /schema above, except for a module answered as older firmware
+            # did, whose schema is a JSON *string* here that the page parses.
             return self._json(dict(
                 m,
                 config=MODULE_CONFIG.get(mid, {}),
-                **({"schema": MODULE_SCHEMA[mid]} if mid in MODULE_SCHEMA else {})))
+                **({"schema": json.dumps(MODULE_SCHEMA[mid])}
+                   if mid in LEGACY_INLINE_SCHEMA else {})))
         # Everything else the SPA polls on boot — answered emptily so the page
         # under test is not competing with a wall of failed requests.
         if path.startswith("/api/") or path in ("/status", "/wifi_scan_result"):

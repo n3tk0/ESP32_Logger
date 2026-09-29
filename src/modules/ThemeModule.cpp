@@ -1,4 +1,5 @@
 #include "ThemeModule.h"
+#include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../core/Globals.h"
 #include "../core/Config.h"
 #include "../utils/Utils.h"
@@ -21,29 +22,6 @@ static bool _isHexColor(const char* s) {
     }
     return true;
 }
-
-// PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
-const char THEME_SCHEMA[] PROGMEM =
-    "{\"fields\":["
-      "{\"id\":\"mode\",\"type\":\"enum\",\"label\":\"Mode\",\"group\":\"Appearance\","
-        "\"options\":[{\"v\":0,\"l\":\"Light\"},{\"v\":1,\"l\":\"Dark\"},{\"v\":2,\"l\":\"Auto\"}]},"
-      "{\"id\":\"showIcons\",\"type\":\"bool\",\"label\":\"Show icons\",\"group\":\"Appearance\"},"
-      "{\"id\":\"primaryColor\",\"type\":\"color\",\"label\":\"Primary\",\"group\":\"Colors\"},"
-      "{\"id\":\"secondaryColor\",\"type\":\"color\",\"label\":\"Secondary\",\"group\":\"Colors\"},"
-      "{\"id\":\"lightBgColor\",\"type\":\"color\",\"label\":\"Light BG\",\"group\":\"Colors\"},"
-      "{\"id\":\"lightTextColor\",\"type\":\"color\",\"label\":\"Light text\",\"group\":\"Colors\"},"
-      "{\"id\":\"darkBgColor\",\"type\":\"color\",\"label\":\"Dark BG\",\"group\":\"Colors\"},"
-      "{\"id\":\"darkTextColor\",\"type\":\"color\",\"label\":\"Dark text\",\"group\":\"Colors\"},"
-      "{\"id\":\"chartSource\",\"type\":\"enum\",\"label\":\"Chart source\",\"group\":\"Charts\","
-        "\"help\":\"Local serves uPlot from flash (works offline); CDN loads it from the internet.\","
-        "\"options\":[{\"v\":0,\"l\":\"Local\"},{\"v\":1,\"l\":\"CDN\"}]},"
-      "{\"id\":\"chartLocalPath\",\"type\":\"string\",\"max\":64,\"label\":\"Chart JS path\",\"group\":\"Charts\","
-        "\"showIf\":{\"chartSource\":0}},"
-      "{\"id\":\"chartLabelFormat\",\"type\":\"enum\",\"label\":\"Chart labels\",\"group\":\"Charts\","
-        "\"options\":[{\"v\":0,\"l\":\"Date/time\"},{\"v\":1,\"l\":\"Boot #\"},{\"v\":2,\"l\":\"Both\"}]},"
-      "{\"id\":\"logoSource\",\"type\":\"string\",\"max\":128,\"label\":\"Logo\",\"group\":\"Branding\"},"
-      "{\"id\":\"faviconPath\",\"type\":\"string\",\"max\":32,\"label\":\"Favicon\",\"group\":\"Branding\"}"
-    "]}";
 
 } // namespace
 
@@ -118,8 +96,8 @@ bool ThemeModule::save(JsonObject cfg) const {
 }
 
 // ---------------------------------------------------------------------------
-const char* ThemeModule::schema() const {
-    return THEME_SCHEMA;
+ModuleSchema ThemeModule::schema() const {
+    return {MODULE_SCHEMA_THEME_GZ, sizeof(MODULE_SCHEMA_THEME_GZ)};
 }
 
 // ---------------------------------------------------------------------------

@@ -258,43 +258,54 @@ struct KdMetricStyle {
     const char* unit;
 };
 
-static const KdMetricStyle KD_METRIC_STYLE[] = {
-    // metric             EN        BG         dec display unit
-    { "temperature",     "TEMP",   "ТЕМП",    1, "°" },
-    { "humidity",        "HUM",    "ВЛАГА",   0, "%" },
-    { "humidity_amb",    "HUM",    "ВЛАГА",   0, "%" },
-    { "dew_point",       "DEW",    "РОСА",    1, "°" },
-    { "pressure",        "PRESS",  "НАЛЯГ",   0, nullptr },  // re-united elsewhere
-    { "aqi",             "AQI",    "AQI",     0, "" },
-    { "co2",             "CO₂",    "CO₂",     0, "ppm" },
-    { "eco2",            "eCO₂",   "eCO₂",    0, "ppm" },
-    { "tvoc",            "TVOC",   "TVOC",    0, "ppb" },
-    { "pm1",             "PM1",    "PM1",     0, "µg/m³" },
-    { "pm25",            "PM2.5",  "PM2.5",   0, "µg/m³" },
-    { "pm4",             "PM4",    "PM4",     0, "µg/m³" },
-    { "pm10",            "PM10",   "PM10",    0, "µg/m³" },
-    { "lux",             "LIGHT",  "СВЕТЛ",   0, "lx" },
-    { "uva",             "UVA",    "UVA",     1, nullptr },
-    { "uvb",             "UVB",    "UVB",     1, nullptr },
-    { "rain",            "RAIN",   "ДЪЖД",    1, "mm" },
-    { "rain_rate",       "RAIN/h", "ДЪЖД/ч",  1, "mm/h" },
-    { "rain_total",      "RAIN Σ", "ДЪЖД Σ",  1, "mm" },
-    { "wind",            "WIND",   "ВЯТЪР",   1, nullptr },
-    { "wind_speed",      "WIND",   "ВЯТЪР",   1, nullptr },
-    { "wind_direction",  "DIR",    "ПОСОКА",  0, "°" },
-    { "soil_moisture",   "SOIL",   "ПОЧВА",   0, "%" },
-    { "flow_rate",       "FLOW",   "ДЕБИТ",   1, nullptr },
-    { "battery_voltage", "BATT",   "БАТЕРИЯ", 2, "V" },
-    { "battery_percent", "BATT",   "БАТЕРИЯ", 0, "%" },
-    { "battery_days",    "DAYS",   "ДНИ",     0, "d" },
-};
-static const int KD_METRIC_STYLE_COUNT =
-    (int)(sizeof(KD_METRIC_STYLE) / sizeof(KD_METRIC_STYLE[0]));
+/// The table, and its length in `count`.
+///
+/// A FUNCTION, NOT A `static` ARRAY. This header is included by more than one
+/// .cpp, and a `static const` array at namespace scope is a separate copy in
+/// every one of them (540 bytes each). The static local of an inline function
+/// with external linkage is one object for the whole program, so the rows are
+/// stored once however many files include this.
+inline const KdMetricStyle* kdMetricStyles(int& count) {
+    static const KdMetricStyle rows[] = {
+        // metric             EN        BG         dec display unit
+        { "temperature",     "TEMP",   "ТЕМП",    1, "°" },
+        { "humidity",        "HUM",    "ВЛАГА",   0, "%" },
+        { "humidity_amb",    "HUM",    "ВЛАГА",   0, "%" },
+        { "dew_point",       "DEW",    "РОСА",    1, "°" },
+        { "pressure",        "PRESS",  "НАЛЯГ",   0, nullptr },  // re-united elsewhere
+        { "aqi",             "AQI",    "AQI",     0, "" },
+        { "co2",             "CO₂",    "CO₂",     0, "ppm" },
+        { "eco2",            "eCO₂",   "eCO₂",    0, "ppm" },
+        { "tvoc",            "TVOC",   "TVOC",    0, "ppb" },
+        { "pm1",             "PM1",    "PM1",     0, "µg/m³" },
+        { "pm25",            "PM2.5",  "PM2.5",   0, "µg/m³" },
+        { "pm4",             "PM4",    "PM4",     0, "µg/m³" },
+        { "pm10",            "PM10",   "PM10",    0, "µg/m³" },
+        { "lux",             "LIGHT",  "СВЕТЛ",   0, "lx" },
+        { "uva",             "UVA",    "UVA",     1, nullptr },
+        { "uvb",             "UVB",    "UVB",     1, nullptr },
+        { "rain",            "RAIN",   "ДЪЖД",    1, "mm" },
+        { "rain_rate",       "RAIN/h", "ДЪЖД/ч",  1, "mm/h" },
+        { "rain_total",      "RAIN Σ", "ДЪЖД Σ",  1, "mm" },
+        { "wind",            "WIND",   "ВЯТЪР",   1, nullptr },
+        { "wind_speed",      "WIND",   "ВЯТЪР",   1, nullptr },
+        { "wind_direction",  "DIR",    "ПОСОКА",  0, "°" },
+        { "soil_moisture",   "SOIL",   "ПОЧВА",   0, "%" },
+        { "flow_rate",       "FLOW",   "ДЕБИТ",   1, nullptr },
+        { "battery_voltage", "BATT",   "БАТЕРИЯ", 2, "V" },
+        { "battery_percent", "BATT",   "БАТЕРИЯ", 0, "%" },
+        { "battery_days",    "DAYS",   "ДНИ",     0, "d" },
+    };
+    count = (int)(sizeof(rows) / sizeof(rows[0]));
+    return rows;
+}
 
 static inline const KdMetricStyle* kdMetricStyle(const char* metric) {
     if (!metric || !*metric) return nullptr;
-    for (int i = 0; i < KD_METRIC_STYLE_COUNT; i++)
-        if (strcmp(KD_METRIC_STYLE[i].metric, metric) == 0) return &KD_METRIC_STYLE[i];
+    int n;
+    const KdMetricStyle* t = kdMetricStyles(n);
+    for (int i = 0; i < n; i++)
+        if (strcmp(t[i].metric, metric) == 0) return &t[i];
     return nullptr;
 }
 

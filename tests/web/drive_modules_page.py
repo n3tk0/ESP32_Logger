@@ -82,17 +82,22 @@ class Proxy(BaseHTTPRequestHandler):
             return self._send(body)
         try:
             with urllib.request.urlopen(BASE + self.path) as r:
+                # Content-Encoding too: the module schemas arrive gzipped, and
+                # urllib hands back the compressed bytes as they came.
                 return self._send(r.read(), ctype=r.headers.get("Content-Type",
-                                                                "text/html"))
+                                                                "text/html"),
+                                  enc=r.headers.get("Content-Encoding"))
         except urllib.error.HTTPError as e:
             return self._send(e.read() or b"", code=e.code)
 
     def _send(self, raw, code=200, ctype="application/json",
-              deliver=None, close=False):
+              deliver=None, close=False, enc=None):
         """`raw` sets Content-Length; `deliver` is what actually goes on the
         wire. They differ only for the cut-short fixture."""
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        if enc:
+            self.send_header("Content-Encoding", enc)
         self.send_header("Content-Length", str(len(raw)))
         if close:
             self.send_header("Connection", "close")
@@ -161,7 +166,8 @@ with sync_playwright() as p:
           "the first module starts selected")
     host = pg.locator("#mod-host")
     check("schema" not in host.inner_text().lower(),
-          "and its schema parses (%r)" % host.inner_text()[:70])
+          "and its schema, fetched gzipped from /schema, parses (%r)"
+          % host.inner_text()[:70])
     check(host.locator('[name="ssid"]').count() == 1,
           "and the form has the field the schema declares")
     check(host.locator('[name="ssid"]').input_value() == "MonkeyNet",
@@ -217,6 +223,10 @@ with sync_playwright() as p:
     pg.wait_for_timeout(800)
     btn = pg.locator("#fc-refresh")
     check(btn.count() == 1, "the forecast module shows a refresh button")
+    # The mock answers forecast as firmware before the gzipped schemas did,
+    # with the schema inline as a string: a newer page on an older device.
+    check(host.locator('[name="lat"]').count() == 1,
+          "a schema sent inline, as older firmware does, still draws its form")
     panel = host.inner_text()
     check("Open-Meteo" in panel and "1 h ago" in panel,
           "and the provider and the age of the last fetch (%r)"

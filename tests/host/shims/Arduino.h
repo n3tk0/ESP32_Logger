@@ -160,3 +160,24 @@ inline uint32_t& hostMillisRef() { static uint32_t m = 0; return m; }
 inline uint32_t  millis()                 { return hostMillisRef(); }
 inline void      hostSetMillis(uint32_t v) { hostMillisRef() = v; }
 inline void      hostAdvanceMillis(uint32_t d) { hostMillisRef() += d; }
+
+// ----------------------------------------------------------------------------
+// GPIO and the ESP32 attributes, inert. Globals.h declares the RTC driver
+// (DS1302_Mini.h, which drives pins in its inline methods) and RTC-memory
+// variables; a test that includes a module .cpp needs those declarations to
+// compile, and no host test drives a pin.
+// ----------------------------------------------------------------------------
+#ifndef HIGH
+#define HIGH   1
+#define LOW    0
+#define INPUT  0
+#define OUTPUT 1
+#endif
+inline void pinMode(uint8_t, uint8_t)       {}
+inline void digitalWrite(uint8_t, uint8_t)  {}
+inline int  digitalRead(uint8_t)            { return 0; }
+inline void delayMicroseconds(unsigned int) {}
+#ifndef RTC_DATA_ATTR
+#define RTC_DATA_ATTR
+#endif
+#include <pgmspace.h>

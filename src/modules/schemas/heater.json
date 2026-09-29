@@ -1,0 +1,16 @@
+{"fields": [
+  {"id": "pin", "type": "int", "min": -1, "max": 48, "label": "MOSFET gate GPIO", "group": "Output", "help": "-1 disables the output. Must not be a strapping pin: a boot-time pull-up there would energise the heater on every reset. Fit a 10k gate pull-down regardless."},
+  {"id": "invert", "type": "bool", "label": "Active-low drive", "group": "Output", "help": "On for gate drivers or level shifters that invert. Leave off for a plain logic-level N-MOSFET."},
+  {"id": "pwmFreqHz", "type": "int", "min": 50, "max": 2000, "label": "PWM frequency", "unit": "Hz", "group": "Output", "help": "200 Hz suits a resistive/PTC load. Higher only raises switching losses."},
+  {"id": "maxDutyPct", "type": "int", "min": 1, "max": 100, "label": "Max duty", "unit": "%", "group": "Output", "help": "Caps the output. Use it to fit the heater inside the power budget of the supply."},
+  {"id": "softStartMs", "type": "int", "min": 0, "max": 30000, "label": "Soft start", "unit": "ms", "group": "Output", "help": "Ramp time from 0 to target duty. A cold PTC draws several times its steady-state current; without a ramp that inrush trips small mains modules."},
+  {"id": "tempSensor", "type": "string", "max": 16, "label": "Enclosure probe id", "group": "Control inputs", "help": "Sensor id measuring the heated enclosure, e.g. the DS18B20 on the heater. Required."},
+  {"id": "tempMetric", "type": "string", "max": 15, "label": "Enclosure metric", "group": "Control inputs", "help": "Usually temperature. For the second probe on a shared 1-Wire bus use temperature_1."},
+  {"id": "dewSensor", "type": "string", "max": 16, "label": "Dew-point source id", "group": "Control inputs", "help": "Optional. Sensor id publishing dew_point, e.g. the BME680. Empty disables condensation protection."},
+  {"id": "dewMetric", "type": "string", "max": 15, "label": "Dew-point metric", "group": "Control inputs"},
+  {"id": "setpointC", "type": "float", "min": -20, "max": 60, "step": 0.5, "label": "Frost setpoint", "unit": "°C", "group": "Control", "help": "Minimum enclosure temperature. 5 °C keeps an SPS30 well inside its -10 °C floor without drying the sample air enough to bias PM readings."},
+  {"id": "dewMarginC", "type": "float", "min": 0, "max": 20, "step": 0.5, "label": "Dew-point margin", "unit": "K", "group": "Control", "help": "Hold the enclosure at least this far above the dew point."},
+  {"id": "hysteresisC", "type": "float", "min": 0.2, "max": 10, "step": 0.1, "label": "Hysteresis", "unit": "K", "group": "Control", "help": "Total width of the switching band around the target."},
+  {"id": "maxTempC", "type": "float", "min": 0, "max": 80, "step": 1, "label": "Over-temperature cutoff", "unit": "°C", "group": "Safety", "help": "Latches the output off above this. Keep it below the sensor's maximum rating and below the thermal fuse."},
+  {"id": "staleTimeoutS", "type": "int", "min": 10, "max": 3600, "label": "Probe timeout", "unit": "s", "group": "Safety", "help": "Force the heater off when the enclosure probe has been silent this long."}
+]}

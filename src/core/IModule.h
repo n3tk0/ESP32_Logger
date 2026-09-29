@@ -13,12 +13,18 @@
 //   • a human-readable name — shown in the tab strip
 //   • load()/save()         — round-trip JsonObject ↔ in-memory state
 //   • start()/stop()        — optional hot-start lifecycle (else flag restart)
-//   • schema()              — PROGMEM JSON that drives Form.bind() in the UI
+//   • schema()              — gzipped JSON that drives the form in the UI
 //
 // Phase 1 only ships the interface + ModuleRegistry with no modules wrapped.
 // Existing setupXxx() functions keep working unchanged.  Subsequent phases
 // wrap managers one by one; see Audit_report_17042026.md §5.8.
 // ============================================================================
+// A module's form schema: a gzip stream in flash (see schema() below).
+struct ModuleSchema {
+    const uint8_t* gz;    // nullptr: the module has no form
+    size_t         len;
+};
+
 class IModule {
 public:
     virtual ~IModule() = default;
@@ -85,27 +91,23 @@ public:
 
     // True if this module exposes a form to the UI.  When false the tab
     // is still listed but shows only an enable/disable switch.
-    virtual bool hasUI() const          { return schema() != nullptr; }
+    virtual bool hasUI() const          { return schema().gz != nullptr; }
 
-    // JSON schema string (PROGMEM) that drives Form.bind().
-    // Return nullptr to indicate "no form — toggle only".
+    // The form's field list, gzipped, as GET /api/modules/:id/schema sends it
+    // (Content-Encoding: gzip — the browser inflates it, the firmware never
+    // does). Return {nullptr, 0} for "no form — toggle only".
     //
-    // Schema shape (see audit §5.4):
+    // A module does not write these bytes. Its schema is a JSON file,
+    // src/modules/schemas/<id>.json, which scripts/gen_module_schemas.py
+    // checks and compresses into src/modules/ModuleSchemas.h; schema() returns
+    // that array. Shape (see audit §5.4):
     //   { "fields":[
     //       {"id":"ntpServer","type":"string","max":64,"label":"NTP"},
     //       {"id":"timezone","type":"int","min":-12,"max":14},
     //       {"id":"useStaticIP","type":"bool"},
     //       {"id":"staticIP","type":"ipv4","showIf":"useStaticIP"}
     //   ]}
-    virtual const char* schema() const  { return nullptr; }
-
-    // Called at registration time (ModuleRegistry::add) to catch malformed
-    // PROGMEM schemas at boot rather than at first UI render.
-    static bool validateSchema(const char* s) {
-        if (!s) return true;
-        JsonDocument doc;
-        return deserializeJson(doc, s, strlen(s)) == DeserializationError::Ok;
-    }
+    virtual ModuleSchema schema() const { return {nullptr, 0}; }
 
 protected:
     bool _enabled = true;

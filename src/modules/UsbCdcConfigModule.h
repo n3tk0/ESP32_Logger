@@ -23,7 +23,7 @@ public:
 
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg)      const override;
-    const char* schema() const override;
+    ModuleSchema schema() const override;
 
     static UsbCdcConfigModule& instance() { static UsbCdcConfigModule m; return m; }
 };

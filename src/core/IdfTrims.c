@@ -1,4 +1,4 @@
-// IdfTrims.c — two pieces of the prebuilt ESP-IDF that the 4 MB C3 image pays
+// IdfTrims.c — three pieces of the prebuilt ESP-IDF that the 4 MB C3 image pays
 // for and gets nothing back from. Each is opt-in per env in platformio.ini,
 // so the S3 targets (which have the room, and a core dump partition) keep the
 // stock behaviour, and so does an Arduino IDE build, which sets neither flag.
@@ -14,6 +14,8 @@
 // Measured on xiao_esp32c3 with every optional feature on (firmware.bin):
 //   LOGGER_TERSE_TLS_ERRORS   -15,584 bytes
 //   LOGGER_NO_COREDUMP        -11,888 bytes
+//   LOGGER_TERSE_ESP_ERRORS    -7,312 bytes (all of esp_err_to_name.c, not only
+//                                           the name table)
 
 #include <stddef.h>
 #include <stdio.h>
@@ -53,5 +55,40 @@ void mbedtls_strerror(int ret, char *buf, size_t buflen)
 // LOGGER_NO_COREDUMP from those envs, or the partition will stay empty.
 void esp_core_dump_init(void) {}
 void esp_core_dump_to_flash(void *info) { (void)info; }
+
+#endif
+
+#if defined(LOGGER_TERSE_ESP_ERRORS) && LOGGER_TERSE_ESP_ERRORS
+
+// esp_err_t codes as a number instead of their macro name. The real pair
+// (esp_common/src/esp_err_to_name.c) carries a table of every ESP_ERR_* name,
+// 1.7 KB of entries and the names they point to, ~7.3 KB in all, for log
+// lines: the firmware's own callers are two serial lines in
+// OtaManager.cpp, and the IDF's are ESP_ERROR_CHECK's abort message and log
+// lines compiled out at the default CORE_DEBUG_LEVEL. Both functions are
+// defined because both live in that one archive member: a reference to
+// either would link it, and with it a second definition of the other.
+//
+// "ESP_ERR 0x3001" is looked up in esp_err.h or the component's own header
+// (0x3000 + n is ESP_ERR_WIFI_BASE, 0x1500 + n ESP_ERR_OTA_BASE, ...).
+#include "esp_err.h"
+
+const char *esp_err_to_name_r(esp_err_t code, char *buf, size_t buflen)
+{
+    if (buf == NULL || buflen == 0) return buf;
+    if (code == ESP_OK)        snprintf(buf, buflen, "ESP_OK");
+    else if (code == ESP_FAIL) snprintf(buf, buflen, "ESP_FAIL");
+    else                       snprintf(buf, buflen, "ESP_ERR 0x%x", (unsigned)code);
+    return buf;
+}
+
+// The real one returns a pointer into its table, which is why nobody frees
+// it. This returns one static buffer: two tasks formatting an error at the
+// same instant can garble each other's log text, and nothing else.
+const char *esp_err_to_name(esp_err_t code)
+{
+    static char buf[20];
+    return esp_err_to_name_r(code, buf, sizeof(buf));
+}
 
 #endif

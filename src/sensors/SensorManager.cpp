@@ -5,6 +5,7 @@
 #include "../core/BoardProfiles.h"     // g_pinAllowUnsafe (per-sensor pin override)
 #include "ReadingCache.h"              // latest-value table (cross-sensor lookups)
 #include "I2CBus.h"                    // per-bus arbitration + reset on reload
+#include "../utils/JsonIO.h"
 
 SensorManager sensorManager;
 
@@ -129,7 +130,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     }
 
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, f);
+    DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
 
     if (err) {

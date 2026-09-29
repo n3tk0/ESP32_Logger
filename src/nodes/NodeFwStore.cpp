@@ -13,6 +13,7 @@
 #include "../pipeline/DataPipeline.h" // fsMutex
 #include "../utils/AtomicWrite.h"
 #include "../utils/MutexGuard.h"
+#include "../utils/JsonIO.h"
 
 using nodefw::Kind;
 
@@ -79,7 +80,7 @@ static bool readJson(const char* path, JsonDocument& doc) {
     if (fsMutex && !g.isLocked()) return false;
     File f = sdFs()->open(path, "r");
     if (!f) return false;
-    const bool ok = !deserializeJson(doc, f);
+    const bool ok = !deserializeJsonFile(doc, f);
     f.close();
     return ok;
 }

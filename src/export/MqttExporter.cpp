@@ -2,6 +2,7 @@
 #include <new>                        // new (std::nothrow) — this part aborts otherwise
 #include "../core/Globals.h"  // config.deviceId
 #include "../sensors/SensorManager.h"  // publishHaDiscovery()
+#include "../utils/JsonIO.h"
 
 MqttExporter::~MqttExporter() {
     if (_client.connected()) _client.disconnect();
@@ -213,8 +214,10 @@ bool MqttExporter::_publishDiscoveryOne(const char* sensorId, const char* sensor
     dev["manufacturer"]   = "DIY";
 
     char payload[512];
-    size_t len = serializeJson(doc, payload, sizeof(payload));
-    if (len >= sizeof(payload)) return false;  // payload too large
+    // Measured first: a document that does not fit is cut short, not refused,
+    // and a truncated discovery config must not be published as retained.
+    if (measureJson(doc) >= sizeof(payload)) return false;  // payload too large
+    jsonToBuf(doc, payload, sizeof(payload));
 
     return _client.publish(topic, payload, /*retain=*/true);
 }

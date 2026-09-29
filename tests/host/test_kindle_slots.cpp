@@ -368,6 +368,8 @@ static void test_long_names_are_truncated_not_overflowed() {
 // renders as nothing, and a decimal count above three overruns the buffers
 // kdSlotDecimals() is trusted to have bounded.
 static void test_the_metric_table_is_sane() {
+    int KD_METRIC_STYLE_COUNT;
+    const KdMetricStyle* KD_METRIC_STYLE = kdMetricStyles(KD_METRIC_STYLE_COUNT);
     for (int i = 0; i < KD_METRIC_STYLE_COUNT; i++) {
         const KdMetricStyle& m = KD_METRIC_STYLE[i];
         CHECK(m.metric && m.metric[0]);
@@ -572,6 +574,8 @@ static void test_the_unit_can_be_the_callers_own_pointer() {
 
     // Whatever comes back, it fits the buffer the firmware copies it into.
     // A table unit longer than KdResolved::unit would be truncated silently.
+    int KD_METRIC_STYLE_COUNT;
+    const KdMetricStyle* KD_METRIC_STYLE = kdMetricStyles(KD_METRIC_STYLE_COUNT);
     for (int i = 0; i < KD_METRIC_STYLE_COUNT; i++) {
         const char* u = KD_METRIC_STYLE[i].unit;
         if (u) CHECK(strlen(u) < 12);

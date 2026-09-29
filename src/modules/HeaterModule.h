@@ -77,7 +77,7 @@ public:
     void tick(uint32_t nowMs) override;
 
     void statusJson(JsonObject out) const override;
-    const char* schema() const override;
+    ModuleSchema schema() const override;
 
     // Current output duty in percent (0..100) — for diagnostics/tests.
     uint8_t dutyPct() const { return _dutyPct; }

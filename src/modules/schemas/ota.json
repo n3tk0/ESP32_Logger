@@ -1,0 +1,4 @@
+{"fields": [
+  {"id": "requireManualConfirm", "type": "bool", "label": "Require manual confirm", "group": "Rollback", "help": "When on, a freshly flashed image is never auto-confirmed — confirm it from this page (or POST /api/ota/confirm). It rolls back on the next crash until then."},
+  {"id": "autoConfirmSec", "type": "int", "min": 10, "max": 3600, "unit": "s", "group": "Rollback", "label": "Auto-confirm window", "help": "Seconds the new firmware must run before it is marked valid.", "showIf": {"requireManualConfirm": false}}
+]}

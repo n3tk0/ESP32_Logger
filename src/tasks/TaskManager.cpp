@@ -15,6 +15,7 @@
 #include <time.h>                       // time() — pipelineNowEpoch()
 #include "../utils/MutexGuard.h"        // rtcMutex around the DS1302 exchange
 #include "../core/SdCompat.h"   // sdFs() — SD.h only when FEATURE_SD_STORAGE
+#include "../utils/JsonIO.h"
 
 // ---------------------------------------------------------------------------
 // See the contract in TaskManager.h — the ordering is the whole point.
@@ -145,7 +146,7 @@ void TaskManager::refreshStorageFromPlatform(fs::FS& fs) {
     File cfgFile = fs.open("/platform_config.json", FILE_READ);
     if (cfgFile) {
         JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, cfgFile);
+        DeserializationError err = deserializeJsonFile(doc, cfgFile);
         cfgFile.close();
         if (!err) {
             JsonArrayConst sensors = doc["sensors"].as<JsonArrayConst>();
@@ -247,7 +248,7 @@ bool TaskManager::init(fs::FS& fs) {
         File cfgFile2 = fs.open("/platform_config.json", FILE_READ);
         if (cfgFile2) {
             JsonDocument doc2;
-            if (deserializeJson(doc2, cfgFile2) == DeserializationError::Ok) {
+            if (deserializeJsonFile(doc2, cfgFile2) == DeserializationError::Ok) {
                 const char* stMode = doc2["storage"]["mode"] | "primary";
                 if (strcmp(stMode, "mirror") == 0 && sdAvailable && littleFsAvailable) {
                     // Primary is SD → mirror is LittleFS, or vice versa

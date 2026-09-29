@@ -29,7 +29,7 @@ public:
     // explicitly reboot via POST /restart to apply the new config.
     bool start() override { return false; }
 
-    const char* schema() const override;
+    ModuleSchema schema() const override;
 
     static WiFiModule& instance() { static WiFiModule m; return m; }
 };

@@ -19,7 +19,8 @@ how MONTH_LABEL and YEAR came to be sent for nothing.
 WHAT IS CHECKED
 ---------------
 Every LITERAL key the firmware emits — kdShellVar(s, "KEY", …),
-kdShellVarUpper(), and "KEY=" inside a print/printf — must be accepted by
+kdShellVarUpper(), kdShellInt(), kdShellUint(), and "KEY=" inside a
+print/printf — must be accepted by
 payload_key_ok(), or be one of the few the script's own cache writes.
 
 Keys the firmware builds at runtime (snprintf(key, …, "Z_%s_VALUE", zone) and
@@ -57,7 +58,7 @@ NOT_VIA_ALLOWLIST = {'END'}
 
 def emitted_literal_keys(src: str) -> set:
     keys = set()
-    for m in re.finditer(r'kdShellVar(?:Upper)?\s*\(\s*s\s*,\s*"([A-Za-z0-9_]+)"', src):
+    for m in re.finditer(r'kdShell(?:Var(?:Upper)?|Int|Uint)\s*\(\s*s\s*,\s*"([A-Za-z0-9_]+)"', src):
         keys.add(m.group(1))
     # "KEY=" inside a print/printf string, but not a %d-family template
     for m in re.finditer(r'"([A-Z][A-Z0-9_]{1,24})=', src):

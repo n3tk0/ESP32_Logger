@@ -1,27 +1,10 @@
 #include "TimeModule.h"
+#include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../core/Globals.h"
 #include "../core/Config.h"
 #include "../managers/RtcManager.h"   // applyTimeZone
 #include "../utils/PosixTz.h"
 #include <stdlib.h>                  // atoi
-
-namespace {
-
-// PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
-const char TIME_SCHEMA[] PROGMEM =
-    "{\"fields\":["
-      "{\"id\":\"ntpServer\",\"type\":\"string\",\"max\":64,\"label\":\"NTP server\",\"group\":\"NTP\","
-        "\"help\":\"Hostname queried at boot and on a manual sync (e.g. pool.ntp.org).\"},"
-      "{\"id\":\"timezone\",\"type\":\"int\",\"min\":-12,\"max\":14,\"label\":\"Timezone\",\"unit\":\"h\","
-        "\"help\":\"Hours from UTC. Timestamps are stored in UTC and displayed in this zone.\"},"
-      "{\"id\":\"dstRule\",\"type\":\"enum\",\"label\":\"Daylight saving\","
-        "\"options\":[{\"v\":0,\"l\":\"Automatic (EU)\"},{\"v\":1,\"l\":\"Automatic (US)\"},"
-                     "{\"v\":2,\"l\":\"Off\"},{\"v\":3,\"l\":\"Manual (always on)\"}]},"
-      "{\"id\":\"dstOffsetHours\",\"type\":\"int\",\"min\":1,\"max\":2,\"label\":\"DST offset\",\"unit\":\"h\","
-        "\"help\":\"Hours added all year under the manual rule.\",\"showIf\":{\"dstRule\":3}}"
-    "]}";
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 bool TimeModule::load(JsonObjectConst cfg) {
@@ -62,8 +45,8 @@ bool TimeModule::start() {
 }
 
 // ---------------------------------------------------------------------------
-const char* TimeModule::schema() const {
-    return TIME_SCHEMA;
+ModuleSchema TimeModule::schema() const {
+    return {MODULE_SCHEMA_TIME_GZ, sizeof(MODULE_SCHEMA_TIME_GZ)};
 }
 
 // ---------------------------------------------------------------------------
