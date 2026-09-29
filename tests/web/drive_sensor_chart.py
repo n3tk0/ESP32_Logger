@@ -24,7 +24,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from playwright.sync_api import sync_playwright
 
@@ -44,6 +44,14 @@ def check(cond, what):
 
 NOW = int(time.time())
 INTERVAL = 60
+# The device keeps UTC+2 all year; the browser is in New York. Rows are the
+# device's wall time, so reading them in the browser's zone puts them 6-7 h
+# off and a 1h range finds nothing.
+DEV_TZ = timezone(timedelta(hours=2))
+
+
+def dev(ts):
+    return datetime.fromtimestamp(ts, DEV_TZ)
 
 SENSORS = {"sensors": [
     {"id": "env_indoor", "type": "bme280", "name": "Indoor", "status": "ok",
@@ -57,23 +65,27 @@ SENSORS = {"sensors": [
 
 CFG = {
     "hardware": {"storageType": 0},
+    "network": {"timezone": 2, "dstRule": 2},
     "logger": {"csvLoggingEnabled": True, "aggregationIntervalSec": INTERVAL},
     "datalog": {"dateFormat": 1, "timeFormat": 0, "endFormat": 0,
+                "currentFile": "/logs/dev_datalog.txt",
+                # Two columns with the same label: only their position tells
+                # them apart.
                 "sensorCols": {"auto": True, "cols": [
-                    {"s": "env_indoor", "m": "temperature", "l": "T_in"},
+                    {"s": "env_indoor", "m": "temperature", "l": "Temp"},
                     {"s": "env_indoor", "m": "humidity", "l": "env_indoor_humidity"},
-                    {"s": "outdoor", "m": "temperature", "l": "outdoor_temperature"}]}},
+                    {"s": "outdoor", "m": "temperature", "l": "Temp"}]}},
     "platform": {"mode": "continuous", "sensors": [
         {"id": "env_indoor", "zone": "indoor"},
         {"id": "outdoor", "zone": "outdoor"}]},
 }
 
-HEADER = "Date|Start|End|Trigger|T_in|env_indoor_humidity|outdoor_temperature"
+HEADER = "Date|Start|End|Trigger|Temp|env_indoor_humidity|Temp"
 
 
 def row(ts, t):
-    lt = datetime.fromtimestamp(ts)
-    end = datetime.fromtimestamp(ts + INTERVAL)
+    lt = dev(ts)
+    end = dev(ts + INTERVAL)
     return "%s|%s|%s|TIMER|%s|55|%s" % (
         lt.strftime("%d/%m/%Y"), lt.strftime("%H:%M:%S"), end.strftime("%H:%M:%S"),
         ("%.2f" % t).rstrip("0").rstrip("."), "10.5")
@@ -86,7 +98,7 @@ def log(frm, to, t):
         lines.append(row(ts, t))
         ts += INTERVAL
     # A water event in the same file: no sensor values, not a TIMER row.
-    lt = datetime.fromtimestamp(to - 3000)
+    lt = dev(to - 3000)
     lines.append("%s|%s|45s|FF_BTN" % (lt.strftime("%d/%m/%Y"), lt.strftime("%H:%M:%S")))
     return "\n".join(lines) + "\n"
 
@@ -95,9 +107,9 @@ def log(frm, to, t):
 # Last month's archive would be 30.00 everywhere — read, it shows up.
 ACTIVE = log(NOW - 20 * 3600, NOW - 600, 21.0)
 ARCH = log(NOW - 30 * 3600, NOW - 20 * 3600, 20.0)
-lm = datetime.fromtimestamp(NOW - 40 * 86400)
+lm = dev(NOW - 40 * 86400)
 OLD = log(NOW - 41 * 86400, NOW - 40 * 86400, 30.0)
-yday = datetime.fromtimestamp(NOW - 20 * 3600).strftime("%Y-%m-%d")
+yday = dev(NOW - 20 * 3600).strftime("%Y-%m-%d")
 FILES = {
     "/logs/dev_datalog.txt": ACTIVE,
     "/logs/dev_datalog_%s.txt" % yday: ARCH,
@@ -105,6 +117,10 @@ FILES = {
     "/logs/other.txt": "unrelated\n",
 }
 downloads = []
+listings = []
+# Yesterday's archive answers 503 the first time (the FS was busy): that
+# must not be remembered as an empty file.
+FAIL_ONCE = {"/logs/dev_datalog_%s.txt" % yday}
 
 # The ring: the last two minutes of readings, the newest at 22.
 RING = [{"ts": NOW - 120 + 10 * i, "v": 22, "metric": "temperature", "unit": "C"}
@@ -113,7 +129,9 @@ RING = [{"ts": NOW - 120 + 10 * i, "v": 22, "metric": "temperature", "unit": "C"
 with sync_playwright() as p:
     exe = os.environ.get("CHROMIUM_PATH")
     b = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
-    pg = b.new_page(viewport={"width": 1400, "height": 1000})
+    ctx = b.new_context(viewport={"width": 1400, "height": 1000},
+                        timezone_id="America/New_York")
+    pg = ctx.new_page()
     pg.on("console", lambda m: console.append((m.type, m.text)))
     pg.on("pageerror", lambda e: console.append(("pageerror", str(e))))
 
@@ -122,16 +140,19 @@ with sync_playwright() as p:
 
     pg.route("**/export_settings", lambda r: fulfil_json(r, CFG))
     pg.route("**/api/sensors", lambda r: fulfil_json(r, SENSORS))
-    pg.route("**/api/filelist*", lambda r: fulfil_json(r, {
+    pg.route("**/api/filelist*", lambda r: (listings.append(r.request.url), fulfil_json(r, {
         "currentFile": "/logs/dev_datalog.txt",
         "files": [{"name": k.rsplit("/", 1)[1], "path": k, "isDir": False,
-                   "size": len(v)} for k, v in FILES.items()]}))
+                   "size": len(v)} for k, v in FILES.items()]})))
 
     def download(route):
         from urllib.parse import urlparse, parse_qs
         f = parse_qs(urlparse(route.request.url).query).get("file", [""])[0]
         downloads.append(f)
-        if f in FILES:
+        if f in FAIL_ONCE:
+            FAIL_ONCE.discard(f)
+            route.fulfill(status=503, body="busy")
+        elif f in FILES:
             route.fulfill(status=200, content_type="application/octet-stream", body=FILES[f])
         else:
             route.fulfill(status=404, body="not found")
@@ -199,9 +220,30 @@ with sync_playwright() as p:
     check(not any("%s.txt" % lm.strftime("%Y-%m") in d for d in downloads),
           "and not even downloaded")
     check("/logs/other.txt" not in downloads, "an unrelated log is not read")
+    arch = "/logs/dev_datalog_%s.txt" % yday
+    check(downloads.count(arch) >= 2,
+          f"a failed download is tried again, not kept as empty ({downloads.count(arch)}x)")
+    check(downloads.count("/logs/dev_datalog.txt") == 1,
+          f"the active file is downloaded once across the loads "
+          f"({downloads.count('/logs/dev_datalog.txt')}x)")
+    check(listings and all("dir=%2Flogs" in u and "recursive" not in u for u in listings),
+          f"only the log's folder is listed ({listings[:1]})")
     check(pg.locator("#sensorChart .u-over").count() == 1, "the chart is drawn")
 
-    print("\nA column under its default label (sensor_metric):")
+    print("\nThe last hour, in the device's zone, not the browser's:")
+    pg.select_option("#sc-range", "3600")
+    pg.select_option("#sc-agg", "5m")
+    pg.wait_for_timeout(1500)
+    pts = pg.locator("#sc-pts").inner_text()
+    check(pts.isdigit() and int(pts) >= 11,
+          f"the log's rows of the last hour are in range ({pts})")
+    check(pg.locator("#sc-min").inner_text().startswith("21"),
+          "and they are the log's 21.0, next to the ring's 22")
+    pg.select_option("#sc-range", "86400")
+    pg.select_option("#sc-agg", "1h")
+    pg.wait_for_timeout(1500)
+
+    print("\nA second column with the same label, told apart by position:")
     pg.select_option("#sc-sensor", "outdoor")
     pg.wait_for_timeout(500)
     pg.select_option("#sc-metric", "temperature")
