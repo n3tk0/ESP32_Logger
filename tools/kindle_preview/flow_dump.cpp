@@ -40,7 +40,7 @@ static int parseList(const char* v, uint16_t* out, int max) {
 }
 
 /// "pressure:1008:hPa:1;dew_point:3.1:°" -> each place's advance.
-static int parsePlaces(const char* v, uint16_t* out, int max) {
+static int parsePlaces(const char* v, uint16_t* out, int max, bool firstUnsigned = false) {
     int n = 0;
     std::string all(v);
     size_t at = 0;
@@ -57,8 +57,12 @@ static int parsePlaces(const char* v, uint16_t* out, int max) {
                 f[i] = one.substr(p, c - p);
                 p = c + 1;
             }
-            out[n++] = (uint16_t)kdFlowWorstAdvance(f[0].c_str(), f[1].c_str(),
-                                                   f[2].c_str(), f[3] == "1");
+            // The indoor row's first field without the assumed sign, as
+            // KindleDashboard.cpp's kdFlowFor() measures it.
+            out[n] = (uint16_t)kdFlowWorstAdvance(f[0].c_str(), f[1].c_str(),
+                                                 f[2].c_str(), f[3] == "1",
+                                                 !(firstUnsigned && n == 0));
+            n++;
         }
         at = end + 1;
     }
@@ -99,7 +103,7 @@ int main(int argc, char** argv) {
         else if (k == "grid")  in.nGrid    = (uint8_t)parseList(v, in.gridAdv, 6);
         else if (k == "in")    in.nIn      = (uint8_t)parseList(v, in.inAdv, 3);
         else if (k == "gridp") in.nGrid    = (uint8_t)parsePlaces(v, in.gridAdv, 6);
-        else if (k == "inp")   in.nIn      = (uint8_t)parsePlaces(v, in.inAdv, 3);
+        else if (k == "inp")   in.nIn      = (uint8_t)parsePlaces(v, in.inAdv, 3, true);
         else if (k == "outp")  in.outPct   = (uint8_t)atoi(v);
         else if (k == "inp%")  in.inPct    = (uint8_t)atoi(v);
         else if (k == "hero")  in.heroAdv  = (uint16_t)atoi(v);

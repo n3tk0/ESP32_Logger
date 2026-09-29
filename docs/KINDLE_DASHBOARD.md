@@ -663,7 +663,17 @@ The indoor row, upright:
   the upper one's. Only a panel script that asks for it with `?col=1` gets
   this layout: an older script would draw the column's two readings side by
   side in its width, so it gets the one line. When three readings are too
-  wide for the column, they stay on one line too.
+  wide for the column, they stay on one line too. The two in the column are
+  at six tenths of the first, or down to half of it when that is what lets
+  the first one grow: held at six tenths, their column decided how large the
+  first could be, and it stopped well short of the room it stands in.
+
+The first indoor reading is sized closer to what it prints, like the
+headline: a temperature there keeps room for two digits but not for a minus
+sign a room does not reach, which every other temperature on the page is
+given. A reading that is below zero still counts its own. Together the two
+took the ordinary page's three-reading row from 62 to 72 px (111 to 129 on a
+1072 × 1448 panel), and two readings from 61 to 67.
 
 On the landscape page the indoor row is too short for two readings one above
 the other, and all three stay on one line.

@@ -184,8 +184,14 @@ static inline unsigned kdFlowFieldAdvance(const char* text, const char* unit, bo
 /// tendency arrow at 0.5 with its 0.15 em of padding.
 ///
 /// `text` is what the place prints now, already at its decimals.
+///
+/// `assumeSign` false drops the minus a temperature is otherwise given room for
+/// whatever it reads: for the indoor row's first field, which is sized as the
+/// headline is — by what it prints, the two digits kept but not a sign a room
+/// does not reach. A reading that IS below zero still counts its own.
 static inline unsigned kdFlowWorstAdvance(const char* metric, const char* text,
-                                          const char* unit, bool arrow) {
+                                          const char* unit, bool arrow,
+                                          bool assumeSign = true) {
     char worst[24];
     size_t at = 0;
     const char* p = text ? text : "";
@@ -197,7 +203,7 @@ static inline unsigned kdFlowWorstAdvance(const char* metric, const char* text,
     int need = kdFlowMinDigits(metric, unit);
     if (intDigits > need) need = intDigits;
     if (need < 1) need = 1;
-    if (neg || kdFlowSigned(metric)) worst[at++] = '-';
+    if (neg || (assumeSign && kdFlowSigned(metric))) worst[at++] = '-';
     for (int i = 0; i < need && at < sizeof(worst) - 1; i++) worst[at++] = '0';
     // Whatever follows the integer part — the decimals — as it is printed.
     for (; *q && at < sizeof(worst) - 1; q++) worst[at++] = *q;
@@ -517,18 +523,28 @@ static inline void kdFlowIndoor(const KdFlowIn& in, int bot, KdFlow& f) {
     const int colTop = f.inLabY + f.labSz + 6;
     const int a2 = kdfMax(in.inAdv[1] ? in.inAdv[1] : 1000,
                           in.inAdv[2] ? in.inAdv[2] : 1000);
-    int c1 = 0;
+    //
+    // THE TWO BESIDE IT GIVE WAY FIRST. They were held at six tenths of the
+    // first, so the first could only grow as far as their column let it, and
+    // stopped well short of the room it stands in — the headline across the
+    // rule fills its line, and this did not. They may now go down to half of
+    // it, and do only when that is what lets the first one grow.
+    int c1 = 0, cs = 0;
     if (m == 3 && !f.land && in.inColOk) {
         for (int t = kdfMin(cap, areaH); t >= 20 && !c1; t--) {
-            const int s  = t * 6 / 10;
-            const int wR = kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
-            const int stackH = 2 * (f.labSz + 4 + s) + 6;
-            if (t * a1 / 1000 + KDF_CELL_PAD + wR <= W && stackH <= bot - colTop) c1 = t;
+            for (int s = t * 6 / 10; s >= t / 2 && !c1; s--) {
+                const int wR = kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
+                const int stackH = 2 * (f.labSz + 4 + s) + 6;
+                if (t * a1 / 1000 + KDF_CELL_PAD + wR <= W && stackH <= bot - colTop) {
+                    c1 = t;
+                    cs = s;
+                }
+            }
         }
     }
     if (c1) {
         const int s1 = kdfMax(20, c1 * pct / 100);
-        const int s  = s1 * 6 / 10;
+        const int s  = cs * s1 / c1;
         const int wR = kdfMax(s * a2 / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
         const int stackH = 2 * (f.labSz + 4 + s) + 6;
         f.inCol    = true;
