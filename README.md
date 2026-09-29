@@ -277,12 +277,18 @@ pickers from offering the GPIOs that never leave the module.
 
 **No toolchain? Build it in GitHub instead.**
 
-**Actions → [Build OTA Firmware](../../actions/workflows/build-ota-firmware.yml) → Run workflow.** Pick a board, say which
-features you want — `default`, `all`, or a list like `bme280 kindle remote_nodes`
-or `all -sds011` — and the run hands back one `firmware.bin` with its SHA-256
+**Actions → [Build OTA Firmware](../../actions/workflows/build-ota-firmware.yml) → Run workflow.** Pick a board, choose
+the sensors from the dropdowns and tick the features you want (the form starts at
+what `src/setup.h` ships), and the run hands back one `firmware.bin` with its SHA-256
 and the `curl` line to push it to a device that is already running. It is the
-same feature machinery the deploy tool uses (`tools/features.py`), so a build
+same feature machinery the deploy tool uses (`tools/features.py`, with the form
+itself in `tools/ota_form.py`), so a build
 from the button and a build from a desk are the same build.
+
+For an ESP-NOW build, set the pairing key as a repository secret named
+`ESPNOW_LMK` (Settings → Secrets and variables → Actions); without it the
+firmware's own default key is used. It is a secret rather than a form field so
+the key does not show on the run page.
 
 That artifact is the **application image only**, which is what OTA takes. A
 first flash still needs a cable, and a build that changes `www/` still needs

@@ -238,11 +238,10 @@ def build_flags_for(macros, extra: dict[str, str] | None = None) -> str:
 # Turning what somebody typed into a set of macros
 # ---------------------------------------------------------------------------
 #
-# The GUI offers thirty checkboxes. A GitHub Actions form offers a text box —
-# there is a hard limit of ten inputs on a workflow_dispatch, and thirty
-# booleans would be most of a screen on a phone even if there were room. So the
-# same choice arrives here as a line of text, and this is what makes that line
-# mean the same thing the checkboxes do.
+# The GUI offers thirty checkboxes, and so, nearly, does the GitHub Actions form
+# (tools/ota_form.py). For scripts and the command line the same choice arrives
+# here as a line of text, and this is what makes that line mean the same thing
+# the checkboxes do.
 #
 # It accepts what a person would actually type. "SENSOR_BME280_ENABLED" is the
 # name in setup.h and always works; "bme280" is what the sensor is called.

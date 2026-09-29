@@ -3,8 +3,8 @@
 # WHY THIS IS NOT build-firmware.yml
 # ----------------------------------
 # That workflow builds every board on every push, with the features setup.h
-# ships, to prove the tree compiles. This one is a button: pick a board, say
-# which features you want, get back the single file the device's own updater
+# ships, to prove the tree compiles. This one is a button: pick a board, tick
+# the features you want, get back the single file the device's own updater
 # takes — the same choices the deploy tool offers, without needing the deploy
 # tool, a toolchain, or a cable.
 #
@@ -44,16 +44,129 @@ on:
           - esp32s3
           - xiao_esp32s3
           - esp32s3_n16r8
-      features:
-        description: '"default" (what setup.h ships), "all", or a list — "bme280 kindle remote_nodes", "all -sds011"'
-        type: string
-        required: true
-        default: default
-      espnow_lmk:
-        description: 'ESP-NOW link key (used only when the ESP-NOW feature is selected)'
-        type: string
-        required: false
-        default: ''
+      # One control per feature: the sensors rarely fitted together share a
+      # dropdown, everything else is a checkbox. What each one turns on is in
+      # tools/ota_form.py, and tests/tools/drive_ota_form.py fails when this
+      # list and that one disagree. Defaults = what src/setup.h ships.
+      # GitHub allows 25 inputs; this form uses all 25.
+      temp_humidity:
+        description: 'Temperature / humidity / pressure sensor'
+        type: choice
+        default: 'BME280'
+        options:
+          - 'none'
+          - 'BME280'
+          - 'BME688'
+      ds18b20:
+        description: 'DS18B20 temperature probe (1-Wire)'
+        type: boolean
+        default: false
+      particulate:
+        description: 'Particulate matter (PM) sensor'
+        type: choice
+        default: 'SDS011'
+        options:
+          - 'none'
+          - 'SDS011'
+          - 'PMS5003'
+          - 'SPS30'
+      air_quality:
+        description: 'Air quality (VOC) sensor'
+        type: choice
+        default: 'none'
+        options:
+          - 'none'
+          - 'ENS160'
+          - 'SGP30'
+      co2:
+        description: 'CO2 sensor SCD40/SCD41'
+        type: boolean
+        default: false
+      light:
+        description: 'Light (lux) sensor'
+        type: choice
+        default: 'none'
+        options:
+          - 'none'
+          - 'BH1750'
+          - 'VEML7700'
+      uv:
+        description: 'UV sensor VEML6075'
+        type: boolean
+        default: false
+      water_flow:
+        description: 'Water flow meter YF-S201 / YF-S403'
+        type: boolean
+        default: false
+      rain:
+        description: 'Tipping-bucket rain gauge'
+        type: boolean
+        default: false
+      wind:
+        description: 'Anemometer + wind vane'
+        type: boolean
+        default: false
+      soil:
+        description: 'Capacitive soil moisture'
+        type: boolean
+        default: false
+      distance:
+        description: 'HC-SR04 ultrasonic distance'
+        type: boolean
+        default: false
+      ac_mains:
+        description: 'AC mains metering'
+        type: choice
+        default: 'none'
+        options:
+          - 'none'
+          - 'voltage (ZMPT101B)'
+          - 'current (ZMCT103C)'
+          - 'voltage + current'
+      heater:
+        description: 'Enclosure heater'
+        type: boolean
+        default: false
+      forecast:
+        description: 'Weather forecast (HTTPS)'
+        type: boolean
+        default: false
+      nodes:
+        description: 'Receive readings from nodes'
+        type: choice
+        default: 'none'
+        options:
+          - 'none'
+          - 'HTTP'
+          - 'HTTP + ESP-NOW'
+      kindle:
+        description: 'Kindle e-ink dashboard'
+        type: boolean
+        default: false
+      sd_card:
+        description: 'SD card storage'
+        type: boolean
+        default: true
+      mqtt:
+        description: 'Export: MQTT'
+        type: boolean
+        default: true
+      http_post:
+        description: 'Export: generic HTTP POST'
+        type: boolean
+        default: true
+      sensor_community:
+        description: 'Export: sensor.community'
+        type: boolean
+        default: true
+      opensensemap:
+        description: 'Export: openSenseMap'
+        type: boolean
+        default: true
+      webhook:
+        description: 'Export: webhook (Discord/Slack/IFTTT)'
+        type: boolean
+        default: true
       label:
         description: 'Extra word for the file name, e.g. balcony (optional)'
         type: string
@@ -67,12 +180,14 @@ on:
     paths:
       - '.github/workflows/build-ota-firmware.yml'
       - 'tools/features.py'
+      - 'tools/ota_form.py'
       - 'tools/app_slot.py'
       - 'tests/tools/**'
   pull_request:
     paths:
       - '.github/workflows/build-ota-firmware.yml'
       - 'tools/features.py'
+      - 'tools/ota_form.py'
       - 'tools/app_slot.py'
       - 'tests/tools/**'
 
@@ -82,15 +197,19 @@ jobs:
     runs-on: ubuntu-latest
 
     # EVERY INPUT ARRIVES AS AN ENVIRONMENT VARIABLE, and none is interpolated
-    # into a shell line. `${{ inputs.features }}` written inside a `run:` is
+    # into a shell line. `${{ inputs.label }}` written inside a `run:` is
     # pasted in as text before the shell ever sees it, so a value containing a
     # quote or a backtick would be running as part of the script rather than
     # being read by it. The `||` defaults are for the push/pull_request runs,
     # where there are no inputs at all.
     env:
       IN_BOARD: ${{ inputs.board || 'xiao_esp32c3' }}
-      IN_FEATURES: ${{ inputs.features || 'default' }}
-      IN_LMK: ${{ inputs.espnow_lmk }}
+      # The whole form as JSON; empty ({}) on push/pull_request, where
+      # ota_form.py falls back to the form defaults.
+      IN_FORM: ${{ toJSON(inputs) }}
+      # A repository secret, not a form field: a value typed into the form is
+      # shown to everyone who opens the run. Unset = the firmware's own key.
+      IN_LMK: ${{ secrets.ESPNOW_LMK }}
       IN_LABEL: ${{ inputs.label }}
 
     steps:
@@ -100,23 +219,23 @@ jobs:
         with:
           python-version: '3.11'
 
-      # The text box is thirty checkboxes on one line, so what it means has to
-      # be pinned down somewhere a test can reach. It is, in tools/features.py.
-      - name: Check the feature resolver
-        run: python3 tests/tools/drive_feature_resolve.py
+      # What each checkbox and dropdown turns on is pinned down in
+      # tools/ota_form.py, and this proves the form above still matches it.
+      - name: Check the form matches setup.h
+        run: python3 tests/tools/drive_ota_form.py
 
       - name: Work out what was asked for
         id: choices
         run: |
           set -e
-          # Resolved BEFORE the toolchain is installed: a typo should cost ten
-          # seconds and a message naming the features that were probably meant,
-          # not four minutes and a compiler error about a macro nobody wrote.
-          if ! python3 tools/features.py --resolve "$IN_FEATURES" > macros.txt; then
-            echo "::error::Could not read the feature list — see the message above."
+          # Resolved BEFORE the toolchain is installed: a selection with nothing
+          # to read (no sensor, no nodes) should cost ten seconds and a sentence,
+          # not four minutes and the #error in setup.h.
+          if ! python3 tools/ota_form.py --resolve "$IN_FORM" > macros.txt; then
+            echo "::error::Could not build that selection — see the message above."
             exit 1
           fi
-          FLAGS=$(python3 tools/features.py --build-flags "$IN_FEATURES" \
+          FLAGS=$(python3 tools/ota_form.py --build-flags "$IN_FORM" \
                     --espnow-lmk "$IN_LMK")
 
           echo "board=$IN_BOARD" >> "$GITHUB_OUTPUT"
