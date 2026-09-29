@@ -73,14 +73,20 @@ CFG = {
                 # them apart.
                 "sensorCols": {"auto": True, "cols": [
                     {"s": "env_indoor", "m": "temperature", "l": "Temp"},
-                    {"s": "env_indoor", "m": "humidity", "l": "env_indoor_humidity"},
+                    # Logged as the highest of each interval: the chart
+                    # groups its buckets the same way.
+                    {"s": "env_indoor", "m": "humidity", "l": "env_indoor_humidity",
+                     "a": "max"},
                     {"s": "outdoor", "m": "temperature", "l": "Temp"}]}},
     "platform": {"mode": "continuous", "sensors": [
         {"id": "env_indoor", "zone": "indoor"},
         {"id": "outdoor", "zone": "outdoor"}]},
 }
 
-HEADER = "Date|Start|End|Trigger|Temp|env_indoor_humidity|Temp"
+HEADER = "Date|Start|End|Trigger|Temp|env_indoor_humidity[max]|Temp"
+# Yesterday's file, from before the humidity column was switched to max:
+# its header carries no mode, so its humidity rows are averages.
+HEADER_AVG = "Date|Start|End|Trigger|Temp|env_indoor_humidity|Temp"
 
 
 def row(ts, t):
@@ -91,8 +97,8 @@ def row(ts, t):
         ("%.2f" % t).rstrip("0").rstrip("."), "10.5")
 
 
-def log(frm, to, t):
-    lines = [HEADER]
+def log(frm, to, t, header=HEADER):
+    lines = [header]
     ts = frm - frm % INTERVAL
     while ts < to:
         lines.append(row(ts, t))
@@ -106,7 +112,7 @@ def log(frm, to, t):
 # Active file: the last 20 hours. Yesterday's archive: the 10 hours before.
 # Last month's archive would be 30.00 everywhere — read, it shows up.
 ACTIVE = log(NOW - 20 * 3600, NOW - 600, 21.0)
-ARCH = log(NOW - 30 * 3600, NOW - 20 * 3600, 20.0)
+ARCH = log(NOW - 30 * 3600, NOW - 20 * 3600, 20.0, HEADER_AVG)
 lm = dev(NOW - 40 * 86400)
 OLD = log(NOW - 41 * 86400, NOW - 40 * 86400, 30.0)
 yday = dev(NOW - 20 * 3600).strftime("%Y-%m-%d")
@@ -198,6 +204,9 @@ with sync_playwright() as p:
               f"({l1['maxW']:.0f} px of {l1['gridW']:.0f})")
 
     print("\nThe sensor chart:")
+    # How a bucket is combined is the data log column's own choice
+    # (Settings → Data log), not a control of the chart's.
+    check(pg.locator("#sc-mode").count() == 0, "the chart has no aggregation menu of its own")
     pg.select_option("#sc-sensor", "env_indoor")
     pg.wait_for_timeout(500)
     pg.select_option("#sc-metric", "temperature")
@@ -242,6 +251,46 @@ with sync_playwright() as p:
     pg.select_option("#sc-range", "86400")
     pg.select_option("#sc-agg", "1h")
     pg.wait_for_timeout(1500)
+
+    msg = pg.locator("#sc-msg").inner_text()
+    check("average" in msg, f"an averaged column says so ({msg!r})")
+
+    print("\nA column logged as the highest of each interval:")
+    pg.select_option("#sc-metric", "humidity")
+    pg.wait_for_timeout(1500)
+    msg = pg.locator("#sc-msg").inner_text()
+    check("highest" in msg, f"the chart combines it the same way ({msg!r})")
+    # Every bucket the log fills is 55 whatever the mode, so which way a
+    # bucket is combined is checked on one that holds two values — not on the
+    # chart's last hour, which holds the log's rows and the ring's readings
+    # only when the page is loaded late enough in the hour (it was not, once,
+    # in CI).
+    got = pg.evaluate("""() => ["max", "min", "avg", "last", "sum"].map(m =>
+        _scAggregate([{ts: 0, v: 55}, {ts: 10, v: 22}], 3600, m).pts.map(p => p.v))""")
+    check(got == [[55], [22], [38.5], [22], [77]],
+          f"a bucket is combined by the column's mode ({got})")
+    cur = pg.locator("#sc-max").inner_text()
+    check(cur.startswith("55"), f"and the column's highs are what is drawn ({cur})")
+    # Yesterday's file says its humidity rows were averages: they are not
+    # drawn as if they were highs, and the chart says so.
+    pts = pg.locator("#sc-pts").inner_text()
+    check(pts.isdigit() and int(pts) <= 21,
+          f"only the rows logged as highs are drawn ({pts} points; the archive's 10 h are not)")
+    check("another aggregation" in msg, f"and the chart says why ({msg!r})")
+    pg.select_option("#sc-metric", "temperature")
+    pg.wait_for_timeout(1500)
+
+    print("\nA sum column: the log's totals alone; any other mode joins the ring:")
+    # The ring's single readings are not totals of an interval: a sum column
+    # is drawn from its rows.
+    j = pg.evaluate("""() => _scJoin(
+        [{ts: 1030, v: 3.0}, {ts: 1090, v: 1.0}],
+        [{ts: 1110, v: 0.2}, {ts: 1125, v: 0.2}], "sum")""")
+    check([x["v"] for x in j] == [3.0, 1.0], f"a sum column is its rows ({j})")
+    j = pg.evaluate("""() => _scJoin(
+        [{ts: 1030, v: 20}], [{ts: 1000, v: 21}, {ts: 1100, v: 22}], "max")""")
+    check([x["v"] for x in j] == [21, 22],
+          f"any other mode: the ring's readings from where the ring starts ({j})")
 
     print("\nA second column with the same label, told apart by position:")
     pg.select_option("#sc-sensor", "outdoor")

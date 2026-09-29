@@ -15,7 +15,7 @@ namespace {
 // pipelineNowEpoch() in TaskManager.h for why every task asks the same clock.
 inline uint32_t nowEpochSafe() { return pipelineNowEpoch(); }
 
-constexpr size_t HDR_BYTES  = 768;    // > the widest header (Datalog.cpp)
+constexpr size_t HDR_BYTES  = DL_HEADER_MAX;   // > the widest header
 constexpr size_t ROW_BYTES  = 512;    // base fields + DL_MAX_COLS values
 constexpr size_t PEND_BYTES = 2048;   // DL_BATCH_ROWS rows of ~250 B; longer rows flush sooner
 
@@ -74,13 +74,19 @@ struct Batch {
         len = 0; rows = 0; buf[0] = '\0';
     }
 
-    void add(const DatalogRow& r, const float* vals, int nVals) {
+    // `wantRev` (0 = any): the columns' revision the values were combined
+    // under. A header built from another — the columns or a mode changed
+    // since — would label the values as what they are not; the row is
+    // dropped, as the window it came from is.
+    void add(const DatalogRow& r, const float* vals, int nVals, uint32_t wantRev = 0) {
         if (!buf) return;
-        if (datalogHeader(tmpHdr, HDR_BYTES) < 0) {
+        uint32_t rev = 0;
+        if (datalogHeader(tmpHdr, HDR_BYTES, &rev) < 0) {
             Serial.println("[StorageTask] row dropped - header did not fit");
             g_queueDrops++;
             return;
         }
+        if (wantRev && rev != wantRev) return;
         const uint32_t t = r.end ? r.end : r.start;
         // A batch goes to one file: a new header or a new rotation period
         // writes what is pending first.
@@ -102,8 +108,8 @@ struct Batch {
     }
 };
 
-// The averages of the window just closed, as a TIMER row.
-void addSensorRow(Batch& b, const float* vals, uint32_t start, uint32_t end) {
+// The window just closed, each column by its own DatalogAgg, as a TIMER row.
+void addSensorRow(Batch& b, const float* vals, uint32_t start, uint32_t end, uint32_t rev) {
     if (!datalogSensorRows()) return;   // the header carries no sensor columns
     DatalogRow r = {};
     r.start  = start;
@@ -112,7 +118,7 @@ void addSensorRow(Batch& b, const float* vals, uint32_t start, uint32_t end) {
     r.volume = NAN;
     r.ff = r.pf = -1;
     strlcpy(r.trigger, DL_TRIGGER_TIMER, sizeof(r.trigger));
-    b.add(r, vals, datalogColsCopy(nullptr, DL_MAX_COLS));
+    b.add(r, vals, datalogColsCopy(nullptr, DL_MAX_COLS), rev);
 }
 
 }  // namespace
@@ -176,11 +182,6 @@ void storageTaskFunc(void* param) {
             if (want != writing) agg.reset();
             writing = want;
         }
-        // The column list was replaced: the window's sums belong to columns
-        // that may now be numbered differently.
-        const uint32_t rev = datalogColsRev();
-        if (rev != colsRev) { agg.reset(); colsRev = rev; }
-
         // Drain available readings. R14 / AUDIT 11.6: at most 32 per outer
         // iteration so the heartbeat above is refreshed every 3.2 s even
         // under a sustained burst.
@@ -205,10 +206,23 @@ void storageTaskFunc(void* param) {
             }
         }
 
+        // Each column's mode, with the revision it belongs to, read once
+        // after the queue is drained. A changed revision — a column
+        // renumbered or its mode changed while the readings went in — means
+        // the window's sums belong to another list: it is dropped, and the
+        // next one starts under the new list. Otherwise the window closes,
+        // when it is due, each column by its own mode.
         uint32_t start = 0;
         const bool flushReq = datalogFlushRequested();
-        if (writing && agg.take(epoch, flushReq, vals, &start))
-            addSensorRow(batch, vals, start, epoch);
+        uint8_t  modes[LiveAggregator::MAX_COLUMNS];
+        uint32_t rev = 0;
+        const int nModes = datalogColsAggs(modes, LiveAggregator::MAX_COLUMNS, &rev);
+        if (rev != colsRev) {
+            agg.reset();
+            colsRev = rev;
+        } else if (writing && agg.take(epoch, flushReq, vals, &start, modes, nModes)) {
+            addSensorRow(batch, vals, start, epoch, colsRev);
+        }
         if (flushReq) {
             batch.flush();
             datalogFlushDone();
@@ -218,8 +232,13 @@ void storageTaskFunc(void* param) {
     // Exit (deep sleep, shutdown): the window in progress and the batch.
     uint32_t start = 0;
     const uint32_t epoch = nowEpochSafe();
-    if (writing && agg.take(epoch, true, vals, &start))
-        addSensorRow(batch, vals, start, epoch);
+    if (writing) {
+        uint8_t  modes[LiveAggregator::MAX_COLUMNS];
+        uint32_t rev = 0;
+        const int nModes = datalogColsAggs(modes, LiveAggregator::MAX_COLUMNS, &rev);
+        if (rev == colsRev && agg.take(epoch, true, vals, &start, modes, nModes))
+            addSensorRow(batch, vals, start, epoch, colsRev);
+    }
     batch.flush();
     datalogFlushDone();
 

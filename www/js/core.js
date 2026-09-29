@@ -152,6 +152,17 @@ var changelogLoaded = false;
 // A small set of built-ins (hideParent, navPage, settingsSaveForm) handles
 // the patterns previously done as inline JS.
 // ============================================================================
+// How a data log sensor column's readings in one interval become its value
+// ("a" in datalog.sensorCols) — DatalogAgg in src/storage/DatalogFormat.h,
+// in the same order. One list for the Data log page, which sets it, and the
+// Sensors page's chart, which groups its buckets by it. "avg" is what a
+// column without "a" means.
+var DATALOG_AGGS = ["avg", "min", "max", "last", "sum"];
+function datalogAggLabel(a) {
+  if (DATALOG_AGGS.indexOf(a) < 0) a = "avg";
+  return window.I18n ? I18n.t("settingsPages.dlAgg_" + a) : a;
+}
+
 // Handlers registry — whitelist of functions callable via data-click / data-change /
 // data-input / data-submit / data-error / data-backdrop-fn.  Using a dedicated map
 // (instead of window[name]) closes a CSP-adjacent risk: if HTML injection ever lands

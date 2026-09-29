@@ -98,7 +98,14 @@ sees the newest ~300 readings (~2.5 min) no matter how deep the ring is.
 The Sensors page's chart therefore takes its history from the data log
 instead (the TIMER rows, one per aggregation interval, read in the browser
 from the active file and the rotated files that cover the range) and puts
-the ring's readings after it. The Dashboard sparklines still read the ring only.
+the ring's readings after it. Each column of the data log says how its
+interval's readings are combined — average, lowest, highest, last or sum,
+chosen per column on **Settings → Data log** — and the chart groups its
+buckets the same way. A column that is not averaged carries its mode in the
+file's header (`Gust[max]`), so changing it starts a new file, and the chart
+leaves out rows written with another mode rather than drawing them as if they
+were the same kind of number. A sum column is drawn from the log's rows alone.
+The Dashboard sparklines still read the ring only.
 
 PSRAM is volatile — a reboot loses it. It extends live retention, it does not
 replace CSV logging to flash.

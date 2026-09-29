@@ -63,15 +63,18 @@ uint8_t onCount() {
 
 void setCol(DatalogCol& c, const char* s, const char* m, const char* l) {
     c.on = onCount() < DL_MAX_COLS;     // before c counts: s_n is not bumped yet
+    c.agg = DL_AGG_AVG;
     strlcpy(c.sensor, s ? s : "", sizeof(c.sensor));
     strlcpy(c.metric, m ? m : "", sizeof(c.metric));
     if (l && *l) strlcpy(c.label, l, sizeof(c.label));
     else snprintf(c.label, sizeof(c.label), "%s_%s", c.sensor, c.metric);
 }
 
-// Which metric is logged in which column; labels are not part of it. The
-// revision moves only when this does, so saving the page with the same
-// columns does not throw the window in progress away.
+// Which metric is logged in which column, and how it is combined; labels are
+// not part of it. The revision moves only when this does, so saving the page
+// with the same columns does not throw the window in progress away — and a
+// changed mode does, since the window's row goes to a file whose header says
+// the new mode (see datalogHeader()).
 uint32_t numbering() {
     uint32_t h = 2166136261u;
     for (uint8_t i = 0; i < s_n; i++) {
@@ -79,6 +82,7 @@ uint32_t numbering() {
         for (const char* p = s_cols[i].sensor; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
         h = (h ^ '|') * 16777619u;
         for (const char* p = s_cols[i].metric; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+        h = (h ^ (0x100u | s_cols[i].agg)) * 16777619u;
         h = (h ^ '\n') * 16777619u;
     }
     return h;
@@ -98,6 +102,7 @@ bool parseCols(JsonVariantConst v) {
         DatalogCol& c = s_cols[s_n];
         setCol(c, s, m, o["l"] | "");
         c.on = c.on && !(o["off"] | false);
+        c.agg = datalogAggFromName(o["a"] | "");
         s_n++;
     }
     if (numbering() != before) s_rev++;
@@ -113,6 +118,8 @@ void colsJson(JsonObject out) {
         o["m"] = s_cols[i].metric;
         o["l"] = s_cols[i].label;
         if (!s_cols[i].on) o["off"] = true;
+        // Only when it is not the average, which a column without it means.
+        if (s_cols[i].agg != DL_AGG_AVG) o["a"] = datalogAggName(s_cols[i].agg);
     }
 }
 
@@ -267,6 +274,15 @@ uint32_t datalogColsRev() {
     return s_rev;
 }
 
+int datalogColsAggs(uint8_t* out, int max, uint32_t* rev) {
+    ColsLock g;
+    int n = 0;
+    for (uint8_t i = 0; i < s_n && n < max; i++)
+        if (s_cols[i].on) out[n++] = s_cols[i].agg;
+    if (rev) *rev = s_rev;
+    return n;
+}
+
 int datalogColsLearn(const char* sensor, const char* metric) {
     if (!sensor || !metric) return -1;
     ColsLock g;
@@ -340,14 +356,16 @@ bool datalogSensorRows() {
     return config.logger.csvLoggingEnabled && g_platformMode != PLATFORM_LEGACY;
 }
 
-int datalogHeader(char* buf, size_t cap) {
+int datalogHeader(char* buf, size_t cap, uint32_t* rev) {
     const DatalogLayout l = datalogLayout();
     ColsLock g;                         // the labels are read in place
+    if (rev) *rev = s_rev;
     const char* labels[DL_MAX_COLS];
+    uint8_t     aggs[DL_MAX_COLS];
     int n = 0;
     for (uint8_t i = 0; datalogSensorRows() && i < s_n && n < DL_MAX_COLS; i++)
-        if (s_cols[i].on) labels[n++] = s_cols[i].label;
-    return dlFormatHeader(buf, cap, l, labels, n);
+        if (s_cols[i].on) { aggs[n] = s_cols[i].agg; labels[n++] = s_cols[i].label; }
+    return dlFormatHeader(buf, cap, l, labels, n, aggs);
 }
 
 bool datalogSamePeriod(uint32_t a, uint32_t b) {
@@ -381,10 +399,9 @@ int datalogAppend(fs::FS& fs, const char* header, const char* lines,
         if (f) {
             size = f.size();
             const time_t lastWrite = f.getLastWrite();
-            // Longer than any header: DL_MAX_COLS labels of 23 characters
-            // and the base fields come to about 640. On the heap: the legacy
+            // Longer than any header (DL_HEADER_MAX). On the heap: the legacy
             // flush also runs on the web server's task.
-            constexpr size_t FIRST = 768;
+            constexpr size_t FIRST = DL_HEADER_MAX;
             std::unique_ptr<char[]> first(new (std::nothrow) char[FIRST]);
             if (!first) { f.close(); return -1; }
             size_t k = f.readBytesUntil('\n', first.get(), FIRST - 1);

@@ -20,7 +20,7 @@ void flushLogBufferToFS() {
     if (logBufferCount == 0 || !fsAvailable || !activeFS) return;
 
     // On the heap: this runs on the loop task's stack.
-    constexpr size_t HDR_MAX = 768;
+    constexpr size_t HDR_MAX = DL_HEADER_MAX;
     std::unique_ptr<char[]> header(new (std::nothrow) char[HDR_MAX]);
     if (!header || datalogHeader(header.get(), HDR_MAX) < 0) return;
     const DatalogLayout layout = datalogLayout();

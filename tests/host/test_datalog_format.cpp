@@ -85,6 +85,52 @@ static void test_header_and_index() {
     CHECK_EQ(dlFormatHeader(b, 10, legacyLayout(), labels, 2), -1);
 }
 
+// A column that is not averaged carries its mode after its label, so a file
+// says how its own rows were combined; an averaged one is its label alone,
+// as every column was before modes existed.
+static void test_header_modes() {
+    char b[512];
+    const char* labels[] = { "T", "Gust", "Rain", "Count", "Low" };
+    const uint8_t aggs[] = { DL_AGG_AVG, DL_AGG_MAX, DL_AGG_SUM, DL_AGG_LAST, DL_AGG_MIN };
+    DatalogLayout l = legacyLayout();
+    l.dateFormat = 0; l.endFormat = 2; l.boot = false; l.volume = false; l.ff = false; l.pf = false;
+    CHECK(dlFormatHeader(b, sizeof(b), l, labels, 5, aggs) > 0);
+    CHECK_STREQ(b, "Start|Trigger|T|Gust[max]|Rain[sum]|Count[last]|Low[min]");
+    // No modes, or every one averaged: the header a file had before.
+    char c[512];
+    dlFormatHeader(c, sizeof(c), l, labels, 5);
+    CHECK_STREQ(c, "Start|Trigger|T|Gust|Rain|Count|Low");
+    const uint8_t avg[] = { 0, 0, 0, 0, 0 };
+    dlFormatHeader(b, sizeof(b), l, labels, 5, avg);
+    CHECK_STREQ(b, c);
+    // A mode this build does not know is written as the average's.
+    const uint8_t odd[] = { 200 };
+    dlFormatHeader(b, sizeof(b), l, labels, 1, odd);
+    CHECK_STREQ(b, "Start|Trigger|T");
+    // A label of its own ending like a mode does not read as one: the
+    // brackets are the mode's alone.
+    const char* tricky[] = { "Temp[max]" };
+    const uint8_t plain[] = { DL_AGG_AVG };
+    dlFormatHeader(b, sizeof(b), l, tricky, 1, plain);
+    CHECK_STREQ(b, "Start|Trigger|Temp_max_");
+    const uint8_t low[] = { DL_AGG_MIN };
+    dlFormatHeader(b, sizeof(b), l, tricky, 1, low);
+    CHECK_STREQ(b, "Start|Trigger|Temp_max_[min]");
+    // Refused, not truncated, when the mode does not fit.
+    CHECK_EQ(dlFormatHeader(b, 23, l, labels + 1, 1, aggs + 1), -1);
+    CHECK(dlFormatHeader(b, 24, l, labels + 1, 1, aggs + 1) > 0);
+    // The widest header fits the buffers it is built into: DL_MAX_COLS labels
+    // of 23 characters, each with the longest mode, after every base field.
+    char big[1024];
+    char lab[24];
+    memset(lab, 'x', 23); lab[23] = '\0';
+    const char* many[24];
+    uint8_t lasts[24];
+    for (int i = 0; i < 24; i++) { many[i] = lab; lasts[i] = DL_AGG_LAST; }
+    const int n = dlFormatHeader(big, sizeof(big), legacyLayout(), many, 24, lasts);
+    CHECK(n > 0 && n < 1024);
+}
+
 // ---------------------------------------------------------------------------
 static void test_sensor_columns() {
     char b[256];
@@ -139,6 +185,7 @@ int main() {
     tzset();
     RUN(test_original_row);
     RUN(test_header_and_index);
+    RUN(test_header_modes);
     RUN(test_sensor_columns);
     RUN(test_values);
     RUN(test_header_detection);

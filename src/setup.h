@@ -368,12 +368,14 @@
 #  define SLOW_SENSOR_TICK_MS    500
 #endif
 #ifndef STACK_STORAGE_TASK
-#  define STACK_STORAGE_TASK     8192   // LiveAggregator (~0.3 KB) + the
-                                        // datalogAppend() path: the file's
-                                        // first line (768 B), the trim's
+#  define STACK_STORAGE_TASK     8192   // LiveAggregator (~0.6 KB: sum,
+                                        // count, min, max, last per column),
+                                        // the columns' modes (24 B), and the
+                                        // datalogAppend() path: the trim's
                                         // copy buffer, atomicWrite and the
-                                        // FS driver. Row and header buffers
-                                        // are on the heap (StorageTask.cpp).
+                                        // FS driver. The file's first line
+                                        // (DL_HEADER_MAX), the row and header
+                                        // buffers are on the heap.
 #endif
 #ifndef STACK_EXPORT_TASK
 #  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation

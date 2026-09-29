@@ -1417,14 +1417,14 @@ function dlColsBuild(saved, sensors) {
   var list = [], seen = {};
   (saved.cols || []).forEach(function (c) {
     seen[c.s + "\u0001" + c.m] = 1;
-    list.push({ s: c.s, m: c.m, l: c.l || "", on: !c.off });
+    list.push({ s: c.s, m: c.m, l: c.l || "", on: !c.off, a: DATALOG_AGGS.indexOf(c.a) >= 0 ? c.a : "avg" });
   });
   (sensors || []).forEach(function (sn) {
     if (!sn || !sn.enabled) return;
     (sn.metrics || []).forEach(function (m) {
       if (seen[sn.id + "\u0001" + m]) return;
       seen[sn.id + "\u0001" + m] = 1;
-      list.push({ s: sn.id, m: m, l: "", on: saved.auto !== false });
+      list.push({ s: sn.id, m: m, l: "", on: saved.auto !== false, a: "avg" });
     });
   });
   _dlCols = list;
@@ -1466,10 +1466,27 @@ function dlColsRender() {
     inp.value = c.l;
     inp.placeholder = c.s + "_" + c.m;
     inp.setAttribute("aria-label", t("settingsPages.dlColLabel"));
-    inp.addEventListener("input", function () { c.l = inp.value.replace(/[|\r\n]/g, "_"); dlColsChanged(); });
+    // '[' and ']' as the firmware writes them: a column's mode follows its
+    // label in the header as "[max]" (dlFormatHeader).
+    inp.addEventListener("input", function () { c.l = inp.value.replace(/[|\r\n\[\]]/g, "_"); dlColsChanged(); });
     td2.appendChild(inp);
+    var td3 = document.createElement("td");
+    var sel = document.createElement("select");
+    sel.className = "input";
+    sel.setAttribute("aria-label", t("settingsPages.dlColAgg"));
+    sel.title = t("settingsPages.dlColAggHint");
+    DATALOG_AGGS.forEach(function (a) {
+      var o = document.createElement("option");
+      o.value = a;
+      o.textContent = datalogAggLabel(a);
+      sel.appendChild(o);
+    });
+    sel.value = c.a || "avg";
+    sel.addEventListener("change", function () { c.a = sel.value; dlColsChanged(); });
+    td3.appendChild(sel);
     tr.appendChild(td1);
     tr.appendChild(td2);
+    tr.appendChild(td3);
     tbl.appendChild(tr);
   });
   el.appendChild(tbl);
@@ -1494,6 +1511,7 @@ function dlColsChanged() {
     cols: _dlCols.map(function (c) {
       var o = { s: c.s, m: c.m, l: c.l };
       if (!c.on) o.off = true;
+      if (c.a && c.a !== "avg") o.a = c.a;
       return o;
     }),
   });
@@ -1548,7 +1566,9 @@ function dlUpdatePreview() {
   if (hasFF) { head.push("FF"); ev.push("FF0"); tm.push(""); }
   if (hasPF) { head.push("PF"); ev.push("PF1"); tm.push(""); }
   cols.forEach(function (c, i) {
-    head.push(c.l || c.s + "_" + c.m);
+    // With its mode when it is not averaged, as dlFormatHeader() writes it.
+    head.push((c.l || c.s + "_" + c.m).replace(/[\[\]]/g, "_") +
+              (c.a && c.a !== "avg" ? "[" + c.a + "]" : ""));
     tm.push(String(Math.round((20 + i * 1.7) * 10) / 10));
   });
   var lines = [head.join("|")];
