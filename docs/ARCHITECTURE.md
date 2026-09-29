@@ -480,10 +480,7 @@ New functionality configured via `/platform_config.json` (JSON, human-editable).
     }
   },
   "storage": {
-    "log_dir": "/logs",
-    "rotate_daily": true,
-    "max_file_size_kb": 512,
-    "cloud_only": false
+    "mode": "primary"
   }
 }
 ```
@@ -858,8 +855,7 @@ the number came from rather than hunting for a control that does not exist.
 | POST | `/save_network` | CSRF | Wi-Fi / AP / hostname |
 | POST | `/save_time` | CSRF | NTP / timezone / DST |
 | POST | `/save_theme` | CSRF | Theme / accent / density / chart source |
-| POST | `/save_datalog` | CSRF | Flow-log rotation / retention / format |
-| POST | `/save_sensorlog` | CSRF | Sensor CSV logging config |
+| POST | `/save_datalog` | CSRF | Data log: file, rotation, retention, format, sensor rows and columns |
 | POST | `/api/next-id` | CSRF | Generate a device id from the MAC |
 | POST | `/api/regen-id` | CSRF | Legacy alias of `/api/next-id` |
 | GET | `/export_settings` | read | Download all settings as JSON |
@@ -1089,8 +1085,8 @@ ISR shared state (existing pattern, unchanged):
 ### 8.1 `fsMutex` — filesystem write serialization
 
 Every writer to LittleFS/SD takes `fsMutex` (via the RAII `MutexGuard`, or the
-`atomicWrite(fs, path, …, fsMutex)` helper). This includes `CsvLogger`,
-`FlowRunLogger`, `ConfigManager` (`saveConfig`/crash-recovery), `AlertEngine`
+`atomicWrite(fs, path, …, fsMutex)` helper). This includes the data log
+writer (`datalogAppend`, src/storage/Datalog.cpp), `ConfigManager` (`saveConfig`/crash-recovery), `AlertEngine`
 (`_save()`), `DataLogger`, `TrendStore` (the 24-hour chart's snapshot),
 `EspNowIngest` (the node table), the boot-counter backup, and the streamed
 `/save_platform` upload. Concurrent unserialized writes can interleave a
@@ -1104,12 +1100,13 @@ A task that already holds it must **not** re-acquire it deeper in the call
 stack — `xSemaphoreTake` on a non-recursive mutex you already own blocks until
 the 2 s timeout and returns `pdFALSE`.
 
-- `StorageTask` takes `fsMutex` once per tick, then calls `CsvLogger::appendRow`
-  and `flowRunLog.tick()` **under that lock**. Their internal helpers
-  (`CsvLogger::_rotate`, `FlowRunLogger::_closeRun` /`_enforceSizeRotation`)
-  therefore run with the lock already held and **must not** re-take it. (Two
-  such self-deadlocks were fixed in the #151 audit — they had silently disabled
-  CSV rotation and dropped every flow run.)
+- `StorageTask` takes `fsMutex` once per batch of rows, then calls
+  `datalogAppend()` **under that lock**; `DataLogger::flushLogBufferToFS` does
+  the same for the legacy rows. `datalogAppend`'s own rotation (a rename) and
+  retention trim (`atomicWrite(…, nullptr)`) therefore run with the lock
+  already held and **must not** re-take it. (Two such self-deadlocks were
+  fixed in the #151 audit — they had silently disabled CSV rotation and
+  dropped every flow run.)
 - A helper reachable **both** with and without the lock held (e.g.
   `RtcManager::backupBootCount`, called from web handlers *and* from
   `DataLogger::flushLogBufferToFS` which already holds `fsMutex`) keeps its own
@@ -1124,11 +1121,11 @@ this.** The rule has no compiler behind it: code that breaks it compiles,
 links, and works on the bench, because the missing thing is a line that is not
 there. Two files got it wrong months apart — the trend snapshot
 (`TrendStore`) and the ESP-NOW node table (`EspNowIngest`), both writing from
-`loop()` while `StorageTask` appended CSV rows. The check is deliberately
+`loop()` while `StorageTask` appended log rows. The check is deliberately
 coarse: it asks whether a file that opens for writing, removes, renames or
 makes a directory has *heard of* `fsMutex` at all, in code or in a comment. A
-class whose writes run under its caller's lock — `CsvLogger`, `FlowRunLogger`
-— says so in a comment and passes, which is right, because it must not
+function whose writes run under its caller's lock — `datalogAppend` —
+says so in a comment and passes, which is right, because it must not
 re-acquire a non-recursive mutex it already holds.
 
 ---

@@ -11,8 +11,8 @@
 #include "../sensors/SensorManager.h"
 #include "../export/ExportManager.h"
 #include "../export/MqttExporter.h"
-// Historical sensor data is now persisted as wide CSV by StorageTask
-// (see src/pipeline/LiveAggregator + src/storage/CsvLogger).  The CSV
+// Historical sensor data is persisted in the data log by StorageTask
+// (see src/pipeline/LiveAggregator + src/storage/Datalog).  The file
 // query/streaming endpoint that replaces JsonLogger lands with the
 // Smart Dashboard rework (chunk F).  Until then, /api/data serves
 // the in-memory ring buffer only — historical FS queries return 0 rows.

@@ -30,6 +30,7 @@
 #include "../managers/StorageManager.h"
 #include "../managers/RtcManager.h"
 #include "../managers/DataLogger.h"
+#include "../storage/Datalog.h"
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
 #include "KindleSkin.h"                 // kdSkinClamp() on settings import
@@ -38,6 +39,7 @@
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
+#include "../tasks/TaskManager.h"      // applyLoggerConfig after a data log save
 #include "../utils/MutexGuard.h"
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
 #include "../utils/PosixTz.h"           // dstRuleClamp, tzOffsetAt
@@ -511,13 +513,24 @@ static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
         return;
     }
 
-    // Efficient tail-read: seek to last ~1KB of file instead of reading every line.
+    // Efficient tail-read: seek to the last few KB instead of reading every line.
+    // 8 KB, not 1: the sensor rows (trigger TIMER) share the file, and the
+    // water events this list shows must still be in the window between them.
     // Buffers moved to the heap — the previous on-stack `lastLines[5][160]` +
     // `lineBuf[160]` (~960 B) ate most of the AsyncTCP worker's budget.
     constexpr int    LR_LINES  = 5;
     constexpr size_t LR_LINELN = 160;
-    const size_t   TAIL_BYTES = 1024;
+    size_t         TAIL_BYTES = 8192;
     const size_t   fSize      = f.size();
+    // Where each field is, from the layout the active file was written with
+    // (a file whose header differs is moved aside before the next write).
+    const DatalogFieldIdx fx = dlFieldIndex(datalogLayout());
+    // Less when the heap cannot spare the window: fewer events, not none.
+    std::unique_ptr<char[]> blockBuf(new (std::nothrow) char[(fSize < TAIL_BYTES ? fSize : TAIL_BYTES) + 1]);
+    if (!blockBuf && fSize > 2048) {
+        TAIL_BYTES = 2048;
+        blockBuf.reset(new (std::nothrow) char[TAIL_BYTES + 1]);
+    }
     const bool     seeked     = fSize > TAIL_BYTES;
     const size_t   toRead     = seeked ? TAIL_BYTES : fSize;
 
@@ -526,7 +539,6 @@ static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
     // char at a time went through the VFS layer for every byte, which is what
     // made this handler block the Async worker for hundreds of milliseconds on
     // a full log.
-    auto blockBuf  = std::unique_ptr<char[]>(new (std::nothrow) char[toRead + 1]);
     if (!lastLines || !blockBuf) {
         f.close();
         // Reported, not swallowed. A silent failure here returns a valid,
@@ -568,6 +580,19 @@ static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
         char* cr = (char*)memchr(ptr, '\r', (size_t)(nl - ptr));
         size_t len = (size_t)((cr ? cr : nl) - ptr);
 
+        // Only the water events: not the header, not the sensor rows.
+        if (len > 0 && !dlIsHeaderLine(ptr)) {
+            const char* tf = ptr;
+            for (int k = 0; k < fx.trigger && tf; k++) {
+                tf = (const char*)memchr(tf, '|', (size_t)(ptr + len - tf));
+                if (tf) tf++;
+            }
+            const size_t rest = tf ? (size_t)(ptr + len - tf) : 0;
+            if (rest >= 5 && strncmp(tf, DL_TRIGGER_TIMER, 5) == 0 &&
+                (rest == 5 || tf[5] == '|')) len = 0;
+        } else {
+            len = 0;
+        }
         if (len > 0) {
             if (len >= LR_LINELN) len = LR_LINELN - 1;
             memcpy(slot(lCount % LR_LINES), ptr, len);
@@ -582,61 +607,47 @@ static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
         int idx = (lCount - 1 - i) % LR_LINES;
         char* lineStr = slot(idx);
         
-        char* saveptr;
+        // Split on '|' keeping empty fields, which strtok would merge: the
+        // fields are found by position.
         char* tokens[10];
         int tCount = 0;
-        char* tok = strtok_r(lineStr, "|", &saveptr);
-        while (tok && tCount < 10) {
-            tokens[tCount++] = tok;
-            tok = strtok_r(NULL, "|", &saveptr);
+        for (char* q = lineStr; q && tCount < 10; ) {
+            tokens[tCount++] = q;
+            q = strchr(q, '|');
+            if (q) *q++ = '\0';
         }
 
-        if (tCount >= 7) {
-            // Opportunistic `?since=<bootcount>` filter — scan tokens for
-            // a `#:<n>` entry and skip if n <= sinceBoot.  If no such token
-            // exists (user disabled includeBootCount) the filter is a
-            // no-op and the entry is returned as before.
-            if (hasSince) {
-                bool skip = false;
-                for (int t = 0; t < tCount; t++) {
-                    if (tokens[t][0] == '#' && tokens[t][1] == ':') {
-                        uint32_t bc = (uint32_t)atoi(tokens[t] + 2);
-                        if (bc <= sinceBoot) skip = true;
-                        break;
-                    }
-                }
-                if (skip) continue;
-            }
+        if (tCount > fx.trigger) {
+            // Opportunistic `?since=<bootcount>` filter — skip entries at or
+            // before that boot. A layout without the boot field is a no-op.
+            if (hasSince && fx.boot >= 0 && fx.boot < tCount &&
+                tokens[fx.boot][0] == '#' && tokens[fx.boot][1] == ':' &&
+                (uint32_t)atoi(tokens[fx.boot] + 2) <= sinceBoot) continue;
 
             JsonObject entry = logs.add<JsonObject>();
-            int tail = tCount - 1;
-
-            if (tCount >= 8) {
-                char timeBuf[80];
-                snprintf(timeBuf, sizeof(timeBuf), "%s %s-%s", tokens[0], tokens[1], tokens[2]);
-                entry["time"] = timeBuf;
-            } else {
-                char timeBuf[80];
-                snprintf(timeBuf, sizeof(timeBuf), "%s|%s", tokens[0], tokens[1]);
-                entry["time"] = timeBuf;
+            auto tok = [&](int8_t k) -> const char* { return (k >= 0 && k < tCount) ? tokens[k] : ""; };
+            char timeBuf[80];
+            if (fx.date >= 0) snprintf(timeBuf, sizeof(timeBuf), "%s %s", tok(fx.date), tok(fx.start));
+            else              snprintf(timeBuf, sizeof(timeBuf), "%s", tok(fx.start));
+            if (fx.end >= 0) {
+                size_t n = strlen(timeBuf);
+                snprintf(timeBuf + n, sizeof(timeBuf) - n, "-%s", tok(fx.end));
             }
+            entry["time"]    = timeBuf;
+            entry["trigger"] = tok(fx.trigger);
 
-            entry["trigger"] = tokens[tail - 3];
-            
-            char* vs = tokens[tail - 2];
-            if (strncmp(vs, "L:", 2) == 0) vs += 2;
-            for (char* p = vs; *p; p++) if (*p == ',') *p = '.';
             char volBuf[32];
-            snprintf(volBuf, sizeof(volBuf), "%s L", vs);
+            const char* vs = tok(fx.volume);
+            if (strncmp(vs, "L:", 2) == 0) vs += 2;
+            strlcpy(volBuf, vs, sizeof(volBuf) - 2);
+            for (char* p = volBuf; *p; p++) if (*p == ',') *p = '.';
+            strlcat(volBuf, " L", sizeof(volBuf));
             entry["volume"] = volBuf;
-            
-            char* ffs = tokens[tail - 1];
-            if (strncmp(ffs, "FF", 2) == 0) ffs += 2;
-            entry["ff"] = atoi(ffs);
-            
-            char* pfs = tokens[tail];
-            if (strncmp(pfs, "PF", 2) == 0) pfs += 2;
-            entry["pf"] = atoi(pfs);
+
+            const char* ffs = tok(fx.ff);
+            entry["ff"] = atoi(strncmp(ffs, "FF", 2) == 0 ? ffs + 2 : ffs);
+            const char* pfs = tok(fx.pf);
+            entry["pf"] = atoi(strncmp(pfs, "PF", 2) == 0 ? pfs + 2 : pfs);
         }
     }
     sendJsonResponse(r, doc);
@@ -761,8 +772,18 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     dl["pfToFfThreshold"]        = config.datalog.pfToFfThreshold > 0 ? config.datalog.pfToFfThreshold : 4.5f;
     dl["ffToPfThreshold"]        = config.datalog.ffToPfThreshold > 0 ? config.datalog.ffToPfThreshold : 3.7f;
     dl["manualPressThresholdMs"] = config.datalog.manualPressThresholdMs;
+    datalogColsToJson(dl["sensorCols"].to<JsonObject>());
+    {
+        // What this device can put in the log, for the page to offer only
+        // that. Read-only: an import ignores it.
+        const DatalogLayout all = datalogLayout(true);
+        JsonObject av = dl["avail"].to<JsonObject>();
+        av["volume"] = all.volume;
+        av["ff"]     = all.ff;
+        av["pf"]     = all.pf;
+    }
 
-    // ── Logger (wide-CSV pipeline) ────────────────────────────────────────
+    // ── Logger (the data log's sensor rows) ────────────────────────────────
     JsonObject lg = doc["logger"].to<JsonObject>();
     lg["csvLoggingEnabled"]         = config.logger.csvLoggingEnabled;
     lg["aggregationIntervalSec"]    = config.logger.aggregationIntervalSec ? config.logger.aggregationIntervalSec : 60;
@@ -1083,26 +1104,37 @@ static void h_post_save_datalog(AsyncWebServerRequest* r) {
     if (r->hasParam("ffToPfThreshold", true))         cfg["ffToPfThreshold"]        = r->getParam("ffToPfThreshold", true)->value().toFloat();
     if (r->hasParam("manualPressThresholdMs", true))  cfg["manualPressThresholdMs"] = r->getParam("manualPressThresholdMs", true)->value().toInt();
 
+    // The columns are checked before anything is applied, so a malformed
+    // table leaves the whole save undone, not half of it.
+    JsonDocument cd;
+    const bool haveCols = r->hasParam("cols", true);
+    if (haveCols) {
+        const String& cj = r->getParam("cols", true)->value();
+        if (deserializeJson(cd, cj.c_str(), cj.length()) || !cd.is<JsonObjectConst>()) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid columns\"}");
+            return;
+        }
+    }
+
     // ArduinoJson v7 doesn't expose .as<>() on JsonObject — but
     // JsonObject is implicitly convertible to JsonObjectConst, which is
     // what DataLogModule::load() expects.
     DataLogModule::instance().load(cfg);
 
-    // Wide-CSV pipeline knobs (config.logger.*) live on the sensors page
-    // now (POST /save_sensorlog). The "create" / "switch" file actions
-    // moved to /api/datalog/{create,switch}.
-
-    saveConfig();
-    r->send(200, "application/json", "{\"ok\":true}");
-}
-
-static void h_post_save_sensorlog(AsyncWebServerRequest* r) {
-    if (!requireMutatingAuth(r)) return;
+    // The sensor rows (formerly the Sensors page's "Sensor CSV logging"):
+    // on/off, the interval, and the columns as JSON from the page's table.
+    // The "create" / "switch" file actions are /api/datalog/{create,switch}.
     config.logger.csvLoggingEnabled = r->hasParam("csvLoggingEnabled", true);
     if (r->hasParam("aggregationIntervalSec", true))
         config.logger.aggregationIntervalSec = constrain(
             r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
+
     saveConfig();
+    TaskManager::applyLoggerConfig();
+    if (haveCols && !datalogColsFromJson(cd.as<JsonVariantConst>())) {
+        r->send(500, "application/json", "{\"ok\":false,\"error\":\"columns not saved\"}");
+        return;
+    }
     r->send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -1393,6 +1425,7 @@ static void h_post_rtc_protect(AsyncWebServerRequest* r) {
 static void h_post_flush_logs(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
     flushLogBufferToFS();
+    datalogRequestFlush();   // StorageTask writes its batch on its next pass
     r->send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -2177,12 +2210,6 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
 
     server.on("/save_datalog", HTTP_POST, h_post_save_datalog);
 
-    // POST /save_sensorlog — wide-CSV pipeline knobs (config.logger.*).
-    // Backs the "Sensor CSV logging" card on the Sensors page; split out of
-    // /save_datalog so the flow-meter event log and the sensor-CSV pipeline
-    // each have their own form + endpoint.
-    server.on("/save_sensorlog", HTTP_POST, h_post_save_sensorlog);
-
     // POST /api/datalog/create  body: prefix + folder + flags + (optional) action=switch
     // Creates a new log file from prefix/folder/timestamp+deviceId flags
     // without saving any other datalog settings. If action=switch, also sets
@@ -2531,7 +2558,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 JsonObject lg = doc["logger"];
                 if (lg["csvLoggingEnabled"].is<bool>())         config.logger.csvLoggingEnabled         = lg["csvLoggingEnabled"];
                 if (lg["aggregationIntervalSec"].is<int>())     config.logger.aggregationIntervalSec    = constrain(lg["aggregationIntervalSec"].as<int>(), 5, 3600);
+                TaskManager::applyLoggerConfig();
             }
+            if (doc["datalog"]["sensorCols"].is<JsonObject>())
+                datalogColsFromJson(doc["datalog"]["sensorCols"]);
             if (doc["kindle"].is<JsonObject>()) {
                 JsonObject kd = doc["kindle"];
                 if (kd["face"].is<int>())          config.kindle.face         = (uint8_t)kd["face"].as<int>();

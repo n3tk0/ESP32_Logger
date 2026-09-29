@@ -60,6 +60,9 @@ public:
     // Caller must hold configMutex.
     static void refreshStorageFromPlatform(fs::FS& fs);
 
+    // Copy config.logger (sensor rows on/off, interval) to StorageTask.
+    static void applyLoggerConfig();
+
     // Task handles (public for diagnostics / watchdog)
     static TaskHandle_t hSensor;
     static TaskHandle_t hSlowSensor;

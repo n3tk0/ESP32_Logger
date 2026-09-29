@@ -118,7 +118,7 @@
                 <option value="2" data-i18n="settingsPages.dlOff">Off</option>
               </select>
             </div>
-            <div class="field" style="min-width:80px">
+            <div class="field" style="min-width:80px" id="dl-volField">
               <label class="field-label" for="dl-vol" data-i18n="settingsPages.dlVolume">Volume</label>
               <select name="volumeFormat" id="dl-vol" class="input" data-change="dlUpdatePreview">
                 <option value="0">L:0,00</option>
@@ -132,15 +132,41 @@
             <label><input type="checkbox" name="includeBootCount" id="dl-boot" value="1"
                           data-change="dlUpdatePreview"> <span data-i18n="settingsPages.dlIncludeBoot">Include boot count</span></label>
             &nbsp;&nbsp;
-            <label><input type="checkbox" name="includeExtraPresses" id="dl-extra" value="1"
+            <label id="dl-extraWrap"><input type="checkbox" name="includeExtraPresses" id="dl-extra" value="1"
                           data-change="dlUpdatePreview"> <span data-i18n="settingsPages.dlIncludeExtra">Include FF/PF extra-press counters</span></label>
           </div>
           <div class="mt-1">
             <label class="field-label" data-i18n="settingsPages.dlPreview">Preview:</label>
             <div id="dl-preview"
-              style="font-family:monospace;font-size:.85rem;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg);border:1px solid var(--border);overflow-x:auto;white-space:nowrap">
+              style="font-family:monospace;font-size:.85rem;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg);border:1px solid var(--border);overflow-x:auto;white-space:pre">
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Sensor columns (formerly "Sensor CSV logging" on the Sensors page):
+           one TIMER row per interval with the averages, in the same file. -->
+      <div class="card" id="dl-sensCard">
+        <div class="card-head"><div class="card-title"><span data-icon="line-chart"></span> <span data-i18n="settingsPages.dlSensors">Sensor readings</span></div></div>
+        <div class="card-body">
+          <p class="hint" style="margin-bottom:.75rem" data-i18n="settingsPages.dlSensorsHint">One row per interval with the average of each selected metric, in the same file as the events (trigger TIMER).</p>
+          <div class="field">
+            <label class="field-label"><input type="checkbox" name="csvLoggingEnabled" id="dl-sensOn" value="1" data-change="dlUpdatePreview">
+              <span data-i18n="settingsPages.dlSensorsOn">Log sensor readings</span></label>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label class="field-label" for="dl-aggSec" data-i18n="settingsPages.dlSensorsInterval">Interval (seconds)</label>
+              <input type="number" name="aggregationIntervalSec" id="dl-aggSec" class="input" min="5" max="3600" step="5" value="60">
+              <p class="hint" data-i18n="settingsPages.dlSensorsIntervalHint">Default 60 s. Rows are written to the file 8 at a time, and before a restart.</p>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label"><input type="checkbox" id="dl-colsAuto" data-change="dlColsChanged">
+              <span data-i18n="settingsPages.dlColsAuto">Add new sensors automatically</span></label>
+          </div>
+          <div id="dl-cols" class="text-muted" style="font-size:.9rem" data-i18n="common.loading">Loading...</div>
+          <input type="hidden" id="dl-colsJson">
         </div>
       </div>
 

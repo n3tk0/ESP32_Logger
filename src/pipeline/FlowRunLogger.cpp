@@ -26,54 +26,6 @@ FlowRunLogger::~FlowRunLogger() {
 }
 
 // ---------------------------------------------------------------------------
-void FlowRunLogger::_ensureDir() {
-    if (!_fs) return;
-    if (!_fs->exists(_dir)) _fs->mkdir(_dir);
-}
-
-void FlowRunLogger::_path(char* buf, size_t len) const {
-    snprintf(buf, len, "%s/runs.txt", _dir);
-}
-
-// ---------------------------------------------------------------------------
-void FlowRunLogger::begin(fs::FS& fs, const char* logDir, uint32_t maxSizeKB) {
-    _fs = &fs;
-    if (logDir && *logDir) {
-        strncpy(_dir, logDir, sizeof(_dir) - 1);
-        _dir[sizeof(_dir) - 1] = '\0';
-    }
-    _maxSizeKB = maxSizeKB ? maxSizeKB : 256;
-    _ensureDir();
-    Serial.printf("[FlowRunLogger] dir=%s maxKB=%lu idle=%lus start=%.2f L/min\n",
-                  _dir, (unsigned long)_maxSizeKB,
-                  (unsigned long)_idleTimeoutSec, _startThreshold);
-}
-
-// ---------------------------------------------------------------------------
-void FlowRunLogger::_enforceSizeRotation() {
-    if (!_fs || _maxSizeKB == 0) return;
-    char path[80]; _path(path, sizeof(path));
-    File f = _fs->open(path, "r");
-    if (!f) return;
-    size_t sz = f.size();
-    f.close();
-    if (sz > (size_t)_maxSizeKB * 1024UL) {
-        char bak[96];
-        snprintf(bak, sizeof(bak), "%s.bak", path);
-        // Caller (StorageTask) holds fsMutex; this runs under it — must NOT re-acquire (non-recursive).
-        if (_fs->rename(path, bak)) {
-            // success — LittleFS overwrote atomically
-        } else if (_fs->exists(bak) && _fs->remove(bak) && _fs->rename(path, bak)) {
-            // SD/FAT fallback — non-atomic but works
-        } else {
-            Serial.printf("[FlowRunLogger] rotation failed for %s\n", path);
-            return;
-        }
-        Serial.printf("[FlowRunLogger] rotated %s -> %s\n", path, bak);
-    }
-}
-
-// ---------------------------------------------------------------------------
 void FlowRunLogger::feed(const SensorReading& r, uint32_t epoch) {
     if (!isfinite(r.value)) return;
     if (r.quality == QUALITY_ERROR) return;
@@ -137,55 +89,19 @@ void FlowRunLogger::_closeRun(uint32_t endTs) {
     if (isfinite(_volumeStart) && isfinite(_volumeLatest))
         volume = _volumeLatest - _volumeStart;
     if (isfinite(volume) && volume < 0.0f) volume = 0.0f;
-    float    meanFlow = (_flowCount > 0) ? (float)(_flowSum / (double)_flowCount) : NAN;
-
-    char line[160];
-    char volBuf[16] = "", meanBuf[16] = "", maxBuf[16] = "";
-    if (isfinite(volume))   snprintf(volBuf,  sizeof(volBuf),  "%.3f", volume);
-    if (isfinite(meanFlow)) snprintf(meanBuf, sizeof(meanBuf), "%.3f", meanFlow);
-    if (isfinite(_maxFlow)) snprintf(maxBuf,  sizeof(maxBuf),  "%.3f", _maxFlow);
-
-    int n = snprintf(line, sizeof(line), "%lu|%lu|%lu|%s|%s|%s",
-                     (unsigned long)_runStart, (unsigned long)endTs,
-                     (unsigned long)duration, volBuf, meanBuf, maxBuf);
-    if (n <= 0 || n >= (int)sizeof(line)) {
-        Serial.println("[FlowRunLogger] line build overflow — dropping run");
-        _state = IDLE;
-        return;
-    }
-
-    _ensureDir();
-    _enforceSizeRotation();
-
-    char path[80]; _path(path, sizeof(path));
-    bool isNew = !_fs || !_fs->exists(path);
-
-    if (_fs) {
-        // Caller (StorageTask) holds fsMutex; this runs under it — must NOT re-acquire (non-recursive).
-        File f = _fs->open(path, FILE_APPEND);
-        if (!f) {
-            Serial.printf("[FlowRunLogger] open FAILED: %s\n", path);
-        } else {
-            if (isNew) {
-                static const char HDR[] =
-                    "# start_ts|end_ts|duration_s|volume_L|mean_Lmin|max_Lmin";
-                f.write((const uint8_t*)HDR, sizeof(HDR) - 1);
-                f.write((uint8_t)'\n');
-            }
-            size_t want    = (size_t)n;
-            size_t written = f.write((const uint8_t*)line, want);
-            size_t nl      = f.write((uint8_t)'\n');
-            f.flush();
-            f.close();
-            if (written != want || nl == 0) {
-                Serial.printf("[FlowRunLogger] short write %u/%u (disk full?)\n",
-                              (unsigned)written, (unsigned)want);
-            } else {
-                Serial.printf("[FlowRunLogger] run END ts=%lu dur=%lus vol=%s L\n",
-                              (unsigned long)endTs, (unsigned long)duration, volBuf);
-            }
-        }
-    }
+    // One row of the data log. The mean and peak flow the old runs.txt
+    // carried are not data log fields; the flow rate itself is a sensor
+    // column when it is logged.
+    _done = DatalogRow{};
+    _done.start  = _runStart;
+    _done.end    = endTs;
+    _done.volume = volume;
+    _done.ff     = -1;
+    _done.pf     = -1;
+    strlcpy(_done.trigger, DL_TRIGGER_FLOW, sizeof(_done.trigger));
+    _hasDone = true;
+    Serial.printf("[FlowRunLogger] run END ts=%lu dur=%lus vol=%.3f L\n",
+                  (unsigned long)endTs, (unsigned long)duration, volume);
 
     _state         = IDLE;
     _runStart      = 0;
@@ -194,4 +110,13 @@ void FlowRunLogger::_closeRun(uint32_t endTs) {
     _flowSum       = 0.0;
     _flowCount     = 0;
     _volumeStart   = NAN;
+}
+
+// ---------------------------------------------------------------------------
+bool FlowRunLogger::takeRun(DatalogRow& out) {
+    Lock lk(_mutex);
+    if (!lk.ok() || !_hasDone) return false;
+    out      = _done;
+    _hasDone = false;
+    return true;
 }

@@ -1238,10 +1238,12 @@ function dlInit() {
   // 2-button toilet event semantics that PLATFORM_HYBRID / CONTINUOUS don't
   // have. Hide the card outside legacy mode. ST.caps.platformMode is
   // populated by /api/status (cached in ST after the dashboard loads).
+  // The sensor rows are the opposite: legacy mode runs no sensor pipeline.
   function _hidePcIfNotLegacy(mode) {
     var card = document.getElementById("dl-pcCard");
-    if (!card) return;
-    card.style.display = (mode === 0) ? "" : "none";
+    if (card) card.style.display = (mode === 0) ? "" : "none";
+    var sens = document.getElementById("dl-sensCard");
+    if (sens) sens.style.display = (mode === 0) ? "none" : "";
   }
   if (ST && ST.caps && ST.caps.platformMode !== undefined) {
     _hidePcIfNotLegacy(ST.caps.platformMode);
@@ -1302,6 +1304,23 @@ function dlInit() {
           setVal("dl-pfff", dl.pfToFfThreshold);
           setVal("dl-ffpf", dl.ffToPfThreshold);
           setVal("dl-hold", dl.manualPressThresholdMs);
+          // Only what this device can log: Volume with a flowmeter, FF/PF
+          // with a button pin (the firmware leaves the rest out anyway).
+          var av = dl.avail || { volume: true, ff: true, pf: true };
+          _dlAvail = av;
+          var vf = document.getElementById("dl-volField");
+          if (vf) vf.style.display = av.volume ? "" : "none";
+          var ew = document.getElementById("dl-extraWrap");
+          if (ew) ew.style.display = (av.ff || av.pf) ? "" : "none";
+          var lg = cfg.logger || {};
+          setChk("dl-sensOn", lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
+          setVal("dl-aggSec", lg.aggregationIntervalSec || 60);
+          var sc = dl.sensorCols || { auto: true, cols: [] };
+          setChk("dl-colsAuto", sc.auto !== false);
+          var build = function (sensors) { dlColsBuild(sc, sensors); };
+          (typeof getSensors === "function" ? getSensors({ maxAgeMs: 0 }) : Promise.resolve(null))
+            .then(function (d) { build((d && d.sensors) || []); })
+            .catch(function () { build([]); });
           dlUpdatePreview();
         });
     });
@@ -1386,48 +1405,156 @@ function _dlSetDeviceOffsetFromIso(iso) {
   _dlDeviceOffsetMs = dev - Date.now();
 }
 
-// Matches original: function updatePreview()
+// ── Sensor columns ──────────────────────────────────────────────────────────
+// Every metric the log knows of (saved list first, in file order), then the
+// metrics of enabled sensors it has not seen yet. Each one is logged or off;
+// the firmware logs at most 24.
+var _dlCols = [];
+var _dlAvail = { volume: true, ff: true, pf: true };
+var DL_MAX_COLS = 24;
+
+function dlColsBuild(saved, sensors) {
+  var list = [], seen = {};
+  (saved.cols || []).forEach(function (c) {
+    seen[c.s + "\u0001" + c.m] = 1;
+    list.push({ s: c.s, m: c.m, l: c.l || "", on: !c.off });
+  });
+  (sensors || []).forEach(function (sn) {
+    if (!sn || !sn.enabled) return;
+    (sn.metrics || []).forEach(function (m) {
+      if (seen[sn.id + "\u0001" + m]) return;
+      seen[sn.id + "\u0001" + m] = 1;
+      list.push({ s: sn.id, m: m, l: "", on: saved.auto !== false });
+    });
+  });
+  _dlCols = list;
+  dlColsRender();
+  // Only a page that has shown the table sends it; one that could not load
+  // it leaves the saved list alone.
+  var h = document.getElementById("dl-colsJson");
+  if (h) h.name = "cols";
+  dlColsChanged();
+}
+
+function dlColsRender() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  var el = document.getElementById("dl-cols");
+  if (!el) return;
+  el.innerHTML = "";
+  if (!_dlCols.length) {
+    el.textContent = t("settingsPages.dlColsNone");
+    return;
+  }
+  var tbl = document.createElement("table");
+  tbl.className = "table";
+  tbl.style.width = "100%";
+  _dlCols.forEach(function (c) {
+    var tr = document.createElement("tr");
+    var td1 = document.createElement("td");
+    var lab = document.createElement("label");
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = c.on;
+    cb.addEventListener("change", function () { c.on = cb.checked; dlColsChanged(); });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(" " + c.s + " \u00b7 " + c.m));
+    td1.appendChild(lab);
+    var td2 = document.createElement("td");
+    var inp = document.createElement("input");
+    inp.className = "input";
+    inp.maxLength = 23;
+    inp.value = c.l;
+    inp.placeholder = c.s + "_" + c.m;
+    inp.setAttribute("aria-label", t("settingsPages.dlColLabel"));
+    inp.addEventListener("input", function () { c.l = inp.value.replace(/[|\r\n]/g, "_"); dlColsChanged(); });
+    td2.appendChild(inp);
+    tr.appendChild(td1);
+    tr.appendChild(td2);
+    tbl.appendChild(tr);
+  });
+  el.appendChild(tbl);
+  var hint = document.createElement("p");
+  hint.className = "hint";
+  hint.id = "dl-colsCount";
+  el.appendChild(hint);
+}
+
+function dlColsChanged() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  var on = _dlCols.filter(function (c) { return c.on; }).length;
+  var hint = document.getElementById("dl-colsCount");
+  if (hint) {
+    hint.textContent = t("settingsPages.dlColsCount", { n: on, max: DL_MAX_COLS });
+    hint.style.color = on > DL_MAX_COLS ? "var(--danger, #e74c3c)" : "";
+  }
+  var auto = document.getElementById("dl-colsAuto");
+  var h = document.getElementById("dl-colsJson");
+  if (h) h.value = JSON.stringify({
+    auto: !!(auto && auto.checked),
+    cols: _dlCols.map(function (c) {
+      var o = { s: c.s, m: c.m, l: c.l };
+      if (!c.on) o.off = true;
+      return o;
+    }),
+  });
+  dlUpdatePreview();
+}
+
+// Matches original: function updatePreview() — now the header line, a button
+// row (with a flowmeter or buttons) and a sensor row, as the firmware writes
+// them (src/storage/DatalogFormat.cpp).
 function dlUpdatePreview() {
-  var p = [],
-    d = new Date(Date.now() + _dlDeviceOffsetMs);
+  var d = new Date(Date.now() + _dlDeviceOffsetMs);
   var df = getVal("dl-date"),
     tf = getVal("dl-time"),
-    ef = getVal("dl-end");
+    ef = getVal("dl-end"),
+    vf = getVal("dl-vol");
   var dd = String(d.getDate()).padStart(2, "0"),
     mm = String(d.getMonth() + 1).padStart(2, "0"),
     yy = d.getFullYear();
   var hh = String(d.getHours()).padStart(2, "0"),
     mi = String(d.getMinutes()).padStart(2, "0"),
     ss = String(d.getSeconds()).padStart(2, "0");
-
-  if (df === "1") p.push(dd + "/" + mm + "/" + yy);
-  else if (df === "2") p.push(mm + "/" + dd + "/" + yy);
-  else if (df === "3") p.push(yy + "-" + mm + "-" + dd);
-  else if (df === "4") p.push(dd + "." + mm + "." + yy);
-
-  var tStr = "";
+  var date = df === "1" ? dd + "/" + mm + "/" + yy
+           : df === "2" ? mm + "/" + dd + "/" + yy
+           : df === "3" ? yy + "-" + mm + "-" + dd
+           : df === "4" ? dd + "." + mm + "." + yy : null;
+  var tStr;
   if (tf === "0") tStr = hh + ":" + mi + ":" + ss;
   else if (tf === "1") tStr = hh + ":" + mi;
-  else {
-    var h12 = d.getHours() % 12 || 12;
-    tStr = h12 + ":" + mi + ":" + ss + (d.getHours() < 12 ? "AM" : "PM");
+  else tStr = (d.getHours() % 12 || 12) + ":" + mi + ":" + ss + (d.getHours() < 12 ? "AM" : "PM");
+
+  var chk = function (id) { var e = document.getElementById(id); return !!(e && e.checked); };
+  var boot = chk("dl-boot"), extra = chk("dl-extra");
+  var hasVol = _dlAvail.volume && vf !== "3";
+  var hasFF = _dlAvail.ff && extra, hasPF = _dlAvail.pf && extra;
+  var cols = chk("dl-sensOn") ? _dlCols.filter(function (c) { return c.on; }).slice(0, DL_MAX_COLS) : [];
+
+  var head = [], ev = [], tm = [];
+  if (date !== null) { head.push("Date"); ev.push(date); tm.push(date); }
+  head.push("Start"); ev.push(tStr); tm.push(tStr);
+  if (ef !== "2") {
+    head.push(ef === "1" ? "Duration" : "End");
+    ev.push(ef === "1" ? "45s" : tStr);
+    tm.push(ef === "1" ? (getVal("dl-aggSec") || 60) + "s" : tStr);
   }
-  p.push(tStr);
-  if (ef === "0") p.push(tStr);
-  else if (ef === "1") p.push("45s");
-  var bootEl  = document.getElementById("dl-boot");
-  var extraEl = document.getElementById("dl-extra");
-  if (bootEl && bootEl.checked) p.push("#:1234");
-  p.push("FF_BTN");
-  var vf = getVal("dl-vol");
-  if (vf === "0") p.push("L:2,50");
-  else if (vf === "1") p.push("L:2.50");
-  else if (vf === "2") p.push("2.50");
-  if (extraEl && extraEl.checked) {
-    p.push("FF0");
-    p.push("PF1");
+  if (boot) { head.push("Boot"); ev.push("#:1234"); tm.push("#:1234"); }
+  head.push("Trigger"); ev.push("FF_BTN"); tm.push("TIMER");
+  if (hasVol) {
+    head.push("Volume");
+    ev.push(vf === "0" ? "L:2,50" : vf === "1" ? "L:2.50" : "2.50");
+    tm.push("");
   }
-  setEl("dl-preview", p.join("|"));
+  if (hasFF) { head.push("FF"); ev.push("FF0"); tm.push(""); }
+  if (hasPF) { head.push("PF"); ev.push("PF1"); tm.push(""); }
+  cols.forEach(function (c, i) {
+    head.push(c.l || c.s + "_" + c.m);
+    tm.push(String(Math.round((20 + i * 1.7) * 10) / 10));
+  });
+  var lines = [head.join("|")];
+  if (hasVol || hasFF || hasPF) lines.push(ev.join("|"));
+  if (cols.length) lines.push(tm.join("|"));
+  setEl("dl-preview", lines.join("\n"));
 }
 
 // ============================================================================
@@ -1832,25 +1959,6 @@ function otaUpload() {
       xhr.send(formData);
     });
   });   // end _otaSha256().then
-}
-
-// ============================================================================
-// ══ SETTINGS: SENSOR LOGGING (wide-CSV pipeline) ══
-// ============================================================================
-// Split out of the Data Log page (PR #105 follow-up) — the wide-CSV pipeline
-// is the per-sensor metric store, conceptually independent from the legacy
-// flow-meter event log that the Data Log page configures.
-function slInit() {
-  fetchWithTimeout("/export_settings", {}, 15000)
-    .then(function (r) { return r.json(); })
-    .then(function (cfg) {
-      CFG = cfg;
-      var lg = cfg.logger || {};
-      setChk("sl-csvEnabled",
-        lg.csvLoggingEnabled === undefined ? true : lg.csvLoggingEnabled);
-      setVal("sl-aggSec",
-        lg.aggregationIntervalSec !== undefined ? lg.aggregationIntervalSec : 60);
-    });
 }
 
 // Set the active log file to whatever the #curFile dropdown selected.
@@ -2779,6 +2887,7 @@ registerHandlers({
   dlSwitchFile: dlSwitchFile,
   dlCreateFile: dlCreateFile,
   dlUpdatePreview: dlUpdatePreview,
+  dlColsChanged: dlColsChanged,
   dlToggleMaxSize: dlToggleMaxSize,
   timeDstPreview: timeDstPreview,
   dlTogglePcFields: dlTogglePcFields,

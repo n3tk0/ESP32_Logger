@@ -1,122 +1,23 @@
 #include "LiveAggregator.h"
-#include <Arduino.h>            // Serial — the discarded-row warning below
-#include "../utils/MutexGuard.h"
 #include <math.h>
 #include <string.h>
 
-namespace {
-class Lock {
-public:
-    Lock(SemaphoreHandle_t s, TickType_t t = pdMS_TO_TICKS(2000))
-        : _s(s), _g(s, t) {}
-    bool ok() const { return _s == nullptr || _g.isLocked(); }
-private:
-    SemaphoreHandle_t _s;
-    MutexGuard _g;
-};
-}
-
-// ---------------------------------------------------------------------------
-LiveAggregator::LiveAggregator() {
-    memset(_cols, 0, sizeof(_cols));
-    _mutex = xSemaphoreCreateMutex();
-}
-
-LiveAggregator::~LiveAggregator() {
-    if (_mutex) { vSemaphoreDelete(_mutex); _mutex = nullptr; }
-}
-
-// ---------------------------------------------------------------------------
-void LiveAggregator::_buildColumnHeader(char* dst, size_t dstLen,
-                                         const char* sensorType,
-                                         const char* metric)
-{
-    if (!dst || dstLen == 0) return;
-    if (!sensorType) sensorType = "x";
-    if (!metric)     metric     = "v";
-    snprintf(dst, dstLen, "%s_%s", sensorType, metric);
-    dst[dstLen - 1] = '\0';
-}
-
-// ---------------------------------------------------------------------------
 float LiveAggregator::_kappaCorrect(float rawPm, float humidity, float kappa) {
     if (!isfinite(rawPm) || rawPm < 0.0f)            return rawPm;
     if (!isfinite(humidity) || humidity <= 0.0f)     return rawPm;
-    // Avoid singularity near 100% RH and protect against bogus over-100% values.
     float rh = humidity > 99.0f ? 99.0f : humidity;
     float factor = 1.0f + kappa * (rh / (100.0f - rh));
     if (factor <= 0.0f || !isfinite(factor)) return rawPm;
     return rawPm / factor;
 }
 
-// ---------------------------------------------------------------------------
-int LiveAggregator::_findOrCreateCol(const char* id,
-                                      const char* sensorType,
-                                      const char* metric,
-                                      const char* unit)
-{
-    const char* idSafe   = id         ? id         : "";
-    const char* typeSafe = sensorType ? sensorType : "";
-    const char* mSafe    = metric     ? metric     : "";
-
-    // Identity match: (ownerId, sensorType, metric).  Comparing the display
-    // header would miss disambiguated columns whose header was suffixed with
-    // the id at creation time, leading to a fresh duplicate column on every
-    // feed() until the pool is exhausted.
-    for (uint8_t i = 0; i < _nCols; i++) {
-        if (strncmp(_cols[i].ownerId,    idSafe,   sizeof(_cols[i].ownerId))    == 0 &&
-            strncmp(_cols[i].sensorType, typeSafe, sizeof(_cols[i].sensorType)) == 0 &&
-            strncmp(_cols[i].metric,     mSafe,    sizeof(_cols[i].metric))     == 0) {
-            return (int)i;
-        }
-    }
-
-    char header[COL_HEADER_LEN];
-    _buildColumnHeader(header, sizeof(header), typeSafe, mSafe);
-
-    // Collision detection: another instance already claimed this base header
-    // (same sensorType + metric, different ownerId).  Disambiguate by
-    // suffixing the id to the new column's display header.
-    bool collision = false;
-    for (uint8_t i = 0; i < _nCols; i++) {
-        if (strncmp(_cols[i].sensorType, typeSafe, sizeof(_cols[i].sensorType)) == 0 &&
-            strncmp(_cols[i].metric,     mSafe,    sizeof(_cols[i].metric))     == 0) {
-            collision = true;
-            break;
-        }
-    }
-
-    if (_nCols >= MAX_COLUMNS) return -1;
-    Col& c = _cols[_nCols];
-    memset(&c, 0, sizeof(c));
-    if (collision) {
-        // header_<short_id>
-        char tmp[COL_HEADER_LEN];
-        snprintf(tmp, sizeof(tmp), "%s_%s", header, id ? id : "x");
-        strncpy(c.header, tmp, sizeof(c.header) - 1);
-    } else {
-        strncpy(c.header, header, sizeof(c.header) - 1);
-    }
-    strncpy(c.sensorType, sensorType ? sensorType : "", sizeof(c.sensorType) - 1);
-    strncpy(c.metric,     metric     ? metric     : "", sizeof(c.metric)     - 1);
-    strncpy(c.unit,       unit       ? unit       : "", sizeof(c.unit)       - 1);
-    strncpy(c.ownerId,    id         ? id         : "", sizeof(c.ownerId)    - 1);
-    return (int)_nCols++;
-}
-
-// ---------------------------------------------------------------------------
-void LiveAggregator::feed(const SensorReading& r) {
+void LiveAggregator::feed(const SensorReading& r, int col) {
     if (!isfinite(r.value)) return;
     if (r.quality == QUALITY_ERROR) return;
 
-    Lock lk(_mutex);
-    if (!lk.ok()) return;
+    if (strcmp(r.metric, "humidity") == 0) _lastHumidity = r.value;
 
-    // Track latest BME-family humidity for SDS011 correction.
-    if (strcmp(r.metric, "humidity") == 0 && isfinite(r.value)) {
-        _lastHumidity = r.value;
-    }
-
+    if (col < 0 || col >= MAX_COLUMNS) return;
     float val = r.value;
     if (_humCorr &&
         strcmp(r.sensorType, "sds011") == 0 &&
@@ -124,137 +25,33 @@ void LiveAggregator::feed(const SensorReading& r) {
     {
         val = _kappaCorrect(val, _lastHumidity, _kappa);
     }
-
-    int idx = _findOrCreateCol(r.sensorId, r.sensorType, r.metric, r.unit);
-    if (idx < 0) return;  // pool full
-
-    Col& c = _cols[idx];
-    c.sum  += (double)val;
-    c.count++;
-    c.used  = true;
+    _sum[col] += (double)val;
+    _count[col]++;
 }
 
-// ---------------------------------------------------------------------------
-int LiveAggregator::buildHeader(char* buf, size_t bufLen) {
-    if (!buf || bufLen < 16) return -1;
-    Lock lk(_mutex);
-    if (!lk.ok()) return -1;
-
-    int n = snprintf(buf, bufLen, "timestamp");
-    for (uint8_t i = 0; i < _nCols; i++) {
-        if ((size_t)n >= bufLen) return -1;
-        int w = snprintf(buf + n, bufLen - n, ",%s", _cols[i].header);
-        if (w < 0 || (size_t)(n + w) >= bufLen) return -1;
-        n += w;
-    }
-    return n;
+void LiveAggregator::reset() {
+    memset(_sum, 0, sizeof(_sum));
+    memset(_count, 0, sizeof(_count));
+    _lastFlushEpoch = 0;   // the next window starts at the next take()
 }
 
-// ---------------------------------------------------------------------------
-int LiveAggregator::_writeRow(uint32_t epoch, char* buf, size_t bufLen) {
-    int n = snprintf(buf, bufLen, "%lu", (unsigned long)epoch);
-    if (n < 0 || (size_t)n >= bufLen) return -1;
-
-    for (uint8_t i = 0; i < _nCols; i++) {
-        const Col& c = _cols[i];
-        int w;
-        if (!c.used || c.count == 0) {
-            w = snprintf(buf + n, bufLen - n, ",");
-        } else {
-            float avg = (float)(c.sum / (double)c.count);
-            // %.4g keeps 4 significant digits, drops trailing zeros — compact
-            // and lossless for typical sensor ranges.
-            w = snprintf(buf + n, bufLen - n, ",%.4g", avg);
-        }
-        if (w < 0 || (size_t)(n + w) >= bufLen) return -1;
-        n += w;
-    }
-    return n;
-}
-
-// ---------------------------------------------------------------------------
-void LiveAggregator::_resetAccumulators() {
-    for (uint8_t i = 0; i < _nCols; i++) {
-        _cols[i].sum   = 0.0;
-        _cols[i].count = 0;
-        _cols[i].used  = false;
-    }
-}
-
-// ---------------------------------------------------------------------------
-bool LiveAggregator::buildRowIfDue(uint32_t nowEpoch, char* buf, size_t bufLen,
-                                    uint32_t* outRowEpoch)
-{
-    Lock lk(_mutex);
-    if (!lk.ok()) return false;
-
-    if (_lastFlushEpoch == 0) {
+bool LiveAggregator::take(uint32_t nowEpoch, bool force, float* vals,
+                          uint32_t* windowStart) {
+    // First call, or the clock went backwards (an NTP correction): start the
+    // window here rather than wait for the old baseline to come round again.
+    if (_lastFlushEpoch == 0 || nowEpoch < _lastFlushEpoch) {
         _lastFlushEpoch = nowEpoch;
-        return false;
+        if (!force) return false;
     }
-    if (nowEpoch < _lastFlushEpoch + _intervalSec) return false;
+    if (!force && nowEpoch < _lastFlushEpoch + _intervalSec) return false;
 
-    bool anySamples = false;
-    for (uint8_t i = 0; i < _nCols; i++) if (_cols[i].used) { anySamples = true; break; }
-    if (!anySamples) {
-        _lastFlushEpoch = nowEpoch;  // advance baseline so we don't backlog
-        return false;
+    bool any = false;
+    for (uint8_t i = 0; i < MAX_COLUMNS; i++) {
+        vals[i] = _count[i] ? (float)(_sum[i] / (double)_count[i]) : NAN;
+        if (_count[i]) any = true;
     }
-
-    int n = _writeRow(nowEpoch, buf, bufLen);
-    // A row that did not fit is an interval of readings thrown away, and the
-    // only other symptom is a CSV that quietly stops growing — so say so.
-    if (n <= 0) {
-        Serial.printf("[LiveAgg] row did not fit %u B for %u column(s) — "
-                      "interval discarded\n",
-                      (unsigned)bufLen, (unsigned)_nCols);
-    }
-    _resetAccumulators();
+    if (windowStart) *windowStart = _lastFlushEpoch;
+    reset();
     _lastFlushEpoch = nowEpoch;
-    if (outRowEpoch) *outRowEpoch = nowEpoch;
-    return n > 0;
-}
-
-// ---------------------------------------------------------------------------
-bool LiveAggregator::flushNow(uint32_t nowEpoch, char* buf, size_t bufLen,
-                               uint32_t* outRowEpoch)
-{
-    Lock lk(_mutex);
-    if (!lk.ok()) return false;
-
-    bool anySamples = false;
-    for (uint8_t i = 0; i < _nCols; i++) if (_cols[i].used) { anySamples = true; break; }
-    if (!anySamples) return false;
-
-    int n = _writeRow(nowEpoch, buf, bufLen);
-    _resetAccumulators();
-    _lastFlushEpoch = nowEpoch;
-    if (outRowEpoch) *outRowEpoch = nowEpoch;
-    return n > 0;
-}
-
-// ---------------------------------------------------------------------------
-size_t LiveAggregator::columns(char keys[][COL_KEY_LEN],
-                                char hdrs[][COL_HEADER_LEN],
-                                size_t maxCols) const
-{
-    Lock lk(_mutex);
-    if (!lk.ok()) return 0;
-
-    size_t n = (_nCols < maxCols) ? _nCols : maxCols;
-    for (size_t i = 0; i < n; i++) {
-        snprintf(keys[i], COL_KEY_LEN, "%s|%s",
-                 _cols[i].sensorType, _cols[i].metric);
-        keys[i][COL_KEY_LEN - 1] = '\0';
-        strncpy(hdrs[i], _cols[i].header, COL_HEADER_LEN - 1);
-        hdrs[i][COL_HEADER_LEN - 1] = '\0';
-    }
-    return n;
-}
-
-// ---------------------------------------------------------------------------
-size_t LiveAggregator::columnCount() const {
-    Lock lk(_mutex);
-    if (!lk.ok()) return 0;
-    return _nCols;
+    return any;
 }

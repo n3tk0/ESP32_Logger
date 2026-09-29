@@ -307,7 +307,7 @@
 // Set to 0 (-DPLATFORM_LEGACY_BUILD=0) for non-legacy deployments to drop
 // the entire legacy code path; PLATFORM_HYBRID gets per-run flowmeter
 // logging via FlowRunLogger instead, and PLATFORM_CONTINUOUS streams flow
-// readings into the wide-CSV pipeline like any other sensor.
+// readings into the data log's sensor columns like any other sensor.
 #ifndef PLATFORM_LEGACY_BUILD
 #  define PLATFORM_LEGACY_BUILD 1
 #endif
@@ -368,12 +368,12 @@
 #  define SLOW_SENSOR_TICK_MS    500
 #endif
 #ifndef STACK_STORAGE_TASK
-#  define STACK_STORAGE_TASK     8192   // LiveAggregator (~2.4 KB) + StorageTask
-                                        // local row/header buffers (2 KB) +
-                                        // CsvLogger.appendRow() 1 KB on-stack
-                                        // existing-header buffer + FS driver
-                                        // overhead — needs headroom for
-                                        // worst-case wide-CSV schema.
+#  define STACK_STORAGE_TASK     8192   // LiveAggregator (~0.3 KB) + the
+                                        // datalogAppend() path: the file's
+                                        // first line (768 B), the trim's
+                                        // copy buffer, atomicWrite and the
+                                        // FS driver. Row and header buffers
+                                        // are on the heap (StorageTask.cpp).
 #endif
 #ifndef STACK_EXPORT_TASK
 #  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation
