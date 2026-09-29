@@ -260,10 +260,17 @@ with sync_playwright() as p:
     pg.wait_for_timeout(1500)
     msg = pg.locator("#sc-msg").inner_text()
     check("highest" in msg, f"the chart combines it the same way ({msg!r})")
-    # The last hour's bucket holds the log's 55s and the ring's 22s: its
-    # highest is 55, where an average would sit between the two.
-    cur = pg.locator("#sc-current").inner_text()
-    check(cur.startswith("55"), f"its buckets are the highest, not the average ({cur})")
+    # Every bucket the log fills is 55 whatever the mode, so which way a
+    # bucket is combined is checked on one that holds two values — not on the
+    # chart's last hour, which holds the log's rows and the ring's readings
+    # only when the page is loaded late enough in the hour (it was not, once,
+    # in CI).
+    got = pg.evaluate("""() => ["max", "min", "avg", "last", "sum"].map(m =>
+        _scAggregate([{ts: 0, v: 55}, {ts: 10, v: 22}], 3600, m).pts.map(p => p.v))""")
+    check(got == [[55], [22], [38.5], [22], [77]],
+          f"a bucket is combined by the column's mode ({got})")
+    cur = pg.locator("#sc-max").inner_text()
+    check(cur.startswith("55"), f"and the column's highs are what is drawn ({cur})")
     # Yesterday's file says its humidity rows were averages: they are not
     # drawn as if they were highs, and the chart says so.
     pts = pg.locator("#sc-pts").inner_text()
