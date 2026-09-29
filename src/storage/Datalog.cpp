@@ -7,6 +7,8 @@
 #include "../utils/AtomicWrite.h"
 #include <LittleFS.h>
 #include <atomic>
+#include <memory>
+#include <new>
 #include <string.h>
 #include <time.h>
 
@@ -30,10 +32,20 @@ std::atomic<bool> s_flushReq{false};
 // Line count of the active file, kept so that the retention check does not
 // read the whole file on every write. Valid while the file still has the
 // size it had when counted.
-struct { const fs::FS* fs; char path[72]; size_t size; int lines; } s_lc = {};
+// One entry per filesystem: with the mirror on, the primary and the mirror
+// would otherwise evict each other and every write would recount both.
+struct LineCount { const fs::FS* fs; char path[72]; size_t size; int lines; };
+LineCount s_lcs[2] = {};
+
+LineCount& lcFor(fs::FS& fs) {
+    if (s_lcs[1].fs == &fs) return s_lcs[1];
+    if (s_lcs[0].fs == &fs || !s_lcs[0].fs) return s_lcs[0];
+    return s_lcs[1];
+}
 
 bool lcValid(fs::FS& fs, const char* path, size_t size) {
-    return s_lc.fs == &fs && s_lc.size == size && strcmp(s_lc.path, path) == 0;
+    const LineCount& c = lcFor(fs);
+    return c.fs == &fs && c.size == size && strcmp(c.path, path) == 0;
 }
 
 class ColsLock {
@@ -56,9 +68,25 @@ void setCol(DatalogCol& c, const char* s, const char* m, const char* l) {
     else snprintf(c.label, sizeof(c.label), "%s_%s", c.sensor, c.metric);
 }
 
+// Which metric is logged in which column; labels are not part of it. The
+// revision moves only when this does, so saving the page with the same
+// columns does not throw the window in progress away.
+uint32_t numbering() {
+    uint32_t h = 2166136261u;
+    for (uint8_t i = 0; i < s_n; i++) {
+        if (!s_cols[i].on) continue;
+        for (const char* p = s_cols[i].sensor; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+        h = (h ^ '|') * 16777619u;
+        for (const char* p = s_cols[i].metric; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+        h = (h ^ '\n') * 16777619u;
+    }
+    return h;
+}
+
 // Parses {"auto":..,"cols":[..]} into the list. Caller holds the lock.
 bool parseCols(JsonVariantConst v) {
     if (!v.is<JsonObjectConst>()) return false;
+    const uint32_t before = numbering();
     JsonArrayConst a = v["cols"];
     s_auto = v["auto"] | true;
     s_n = 0;
@@ -71,7 +99,7 @@ bool parseCols(JsonVariantConst v) {
         c.on = c.on && !(o["off"] | false);
         s_n++;
     }
-    s_rev++;
+    if (numbering() != before) s_rev++;
     return true;
 }
 
@@ -141,11 +169,11 @@ void archive(fs::FS& fs, const char* path, const char* suffix) {
     }
     if (fs.rename(path, dst)) Serial.printf("[datalog] %s -> %s\n", path, dst);
     else                      Serial.printf("[datalog] could not move %s aside\n", path);
-    s_lc.path[0] = '\0';
+    lcFor(fs).path[0] = '\0';
 }
 
 int countLines(fs::FS& fs, const char* path, size_t size) {
-    if (lcValid(fs, path, size)) return s_lc.lines;
+    if (lcValid(fs, path, size)) return lcFor(fs).lines;
     File f = fs.open(path, "r");
     if (!f) return 0;
     int count = 0;
@@ -156,10 +184,11 @@ int countLines(fs::FS& fs, const char* path, size_t size) {
         for (int i = 0; i < n; i++) if (buf[i] == '\n') count++;
     }
     f.close();
-    s_lc.fs = &fs;
-    strlcpy(s_lc.path, path, sizeof(s_lc.path));
-    s_lc.size  = size;
-    s_lc.lines = count;
+    LineCount& c = lcFor(fs);
+    c.fs = &fs;
+    strlcpy(c.path, path, sizeof(c.path));
+    c.size  = size;
+    c.lines = count;
     return count;
 }
 
@@ -198,7 +227,7 @@ bool trim(fs::FS& fs, const char* path, size_t size, int adding) {
         src.close();
         return true;
     }, nullptr);   // the caller holds fsMutex
-    s_lc.path[0] = '\0';
+    lcFor(fs).path[0] = '\0';
     if (ok) Serial.printf("[datalog] trimmed %d old rows from %s\n", drop, path);
     return ok;
 }
@@ -306,14 +335,25 @@ DatalogLayout datalogLayout(bool possible) {
     return l;
 }
 
+bool datalogSensorRows() {
+    return config.logger.csvLoggingEnabled && g_platformMode != PLATFORM_LEGACY;
+}
+
 int datalogHeader(char* buf, size_t cap) {
     const DatalogLayout l = datalogLayout();
     ColsLock g;                         // the labels are read in place
     const char* labels[DL_MAX_COLS];
     int n = 0;
-    for (uint8_t i = 0; i < s_n && n < DL_MAX_COLS; i++)
+    for (uint8_t i = 0; datalogSensorRows() && i < s_n && n < DL_MAX_COLS; i++)
         if (s_cols[i].on) labels[n++] = s_cols[i].label;
     return dlFormatHeader(buf, cap, l, labels, n);
+}
+
+bool datalogSamePeriod(uint32_t a, uint32_t b) {
+    struct tm lt;
+    const uint8_t rot = config.datalog.rotation;
+    if (a < 1000000000UL || b < 1000000000UL) return true;
+    return periodOf(a, rot, &lt) == periodOf(b, rot, &lt);
 }
 
 // ============================================================================
@@ -341,9 +381,12 @@ int datalogAppend(fs::FS& fs, const char* header, const char* lines,
             size = f.size();
             const time_t lastWrite = f.getLastWrite();
             // Longer than any header: DL_MAX_COLS labels of 23 characters
-            // and the base fields come to about 640.
-            char first[768];
-            size_t k = f.readBytesUntil('\n', first, sizeof(first) - 1);
+            // and the base fields come to about 640. On the heap: the legacy
+            // flush also runs on the web server's task.
+            constexpr size_t FIRST = 768;
+            std::unique_ptr<char[]> first(new (std::nothrow) char[FIRST]);
+            if (!first) { f.close(); return -1; }
+            size_t k = f.readBytesUntil('\n', first.get(), FIRST - 1);
             first[k] = '\0';
             if (k && first[k - 1] == '\r') first[k - 1] = '\0';
             f.close();
@@ -361,7 +404,7 @@ int datalogAppend(fs::FS& fs, const char* header, const char* lines,
             } else if (size == 0) {
                 // An empty file just takes the header.
             } else if ((rot == ROTATION_SIZE && size > config.datalog.maxSizeKB * 1024UL) ||
-                       strcmp(first, header) != 0) {
+                       strcmp(first.get(), header) != 0) {
                 // Too big, or a different layout: a file keeps one header.
                 time_t t = (time_t)epoch;
                 localtime_r(&t, &lt);
@@ -399,10 +442,11 @@ int datalogAppend(fs::FS& fs, const char* header, const char* lines,
     // Keep the line count in step with the file instead of recounting it.
     const int hdr = before == 0 ? 1 : 0;
     if (before == 0 || lcValid(fs, path, before)) {
-        s_lc.fs = &fs;
-        strlcpy(s_lc.path, path, sizeof(s_lc.path));
-        s_lc.lines = (before == 0 ? 0 : s_lc.lines) + hdr + written;
-        s_lc.size  = after;
+        LineCount& c = lcFor(fs);
+        c.lines = (before == 0 ? 0 : c.lines) + hdr + written;
+        c.fs = &fs;
+        strlcpy(c.path, path, sizeof(c.path));
+        c.size  = after;
     }
     return written;
 }

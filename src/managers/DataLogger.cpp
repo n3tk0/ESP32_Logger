@@ -19,8 +19,10 @@
 void flushLogBufferToFS() {
     if (logBufferCount == 0 || !fsAvailable || !activeFS) return;
 
-    char header[768];
-    if (datalogHeader(header, sizeof(header)) < 0) return;
+    // On the heap: this runs on the loop task's stack.
+    constexpr size_t HDR_MAX = 768;
+    std::unique_ptr<char[]> header(new (std::nothrow) char[HDR_MAX]);
+    if (!header || datalogHeader(header.get(), HDR_MAX) < 0) return;
     const DatalogLayout layout = datalogLayout();
 
     // CRLF-terminated rows, the line ending this log has always had.
@@ -50,7 +52,7 @@ void flushLogBufferToFS() {
     if (fsMutex && !g.isLocked()) return;  // mutex exists but timed out — skip this flush
 
     const uint32_t newest = logBuffer[logBufferCount - 1].wakeTimestamp;
-    int written = datalogAppend(*activeFS, header, lines.get(), n, newest);
+    int written = datalogAppend(*activeFS, header.get(), lines.get(), n, newest);
     if (written < 0) return;
     // Clear the buffer only if every entry made it to disk. On a partial
     // write, keep the unwritten remainder for the next flush — so failed

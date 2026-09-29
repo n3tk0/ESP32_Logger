@@ -59,8 +59,15 @@ bool datalogColsFromJson(JsonVariantConst v);
 // with a pin. `possible` = what the device could log with every option on,
 // for the settings page.
 DatalogLayout datalogLayout(bool possible = false);
+// Whether TIMER rows are written: sensor logging on, and not legacy mode
+// (which runs no sensor pipeline). The header carries the sensor columns
+// only then.
+bool datalogSensorRows();
 // The header line for the current layout and columns; its length or -1.
 int  datalogHeader(char* buf, size_t cap);
+// Whether two row times fall in the same rotation period (always, without
+// date rotation or a set clock): a batch is written to one period's file.
+bool datalogSamePeriod(uint32_t a, uint32_t b);
 
 // Appends `nLines` newline-terminated rows to the active log file on `fs`,
 // after rotating the file when its period, size or header says so and

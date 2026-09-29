@@ -513,17 +513,23 @@ static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
     }
 
     // Efficient tail-read: seek to the last few KB instead of reading every line.
-    // 3 KB, not 1: the sensor rows (trigger TIMER) share the file, and the
+    // 8 KB, not 1: the sensor rows (trigger TIMER) share the file, and the
     // water events this list shows must still be in the window between them.
     // Buffers moved to the heap — the previous on-stack `lastLines[5][160]` +
     // `lineBuf[160]` (~960 B) ate most of the AsyncTCP worker's budget.
     constexpr int    LR_LINES  = 5;
     constexpr size_t LR_LINELN = 160;
-    const size_t   TAIL_BYTES = 3072;
+    size_t         TAIL_BYTES = 8192;
     const size_t   fSize      = f.size();
     // Where each field is, from the layout the active file was written with
     // (a file whose header differs is moved aside before the next write).
     const DatalogFieldIdx fx = dlFieldIndex(datalogLayout());
+    // Less when the heap cannot spare the window: fewer events, not none.
+    std::unique_ptr<char[]> blockBuf(new (std::nothrow) char[(fSize < TAIL_BYTES ? fSize : TAIL_BYTES) + 1]);
+    if (!blockBuf && fSize > 2048) {
+        TAIL_BYTES = 2048;
+        blockBuf.reset(new (std::nothrow) char[TAIL_BYTES + 1]);
+    }
     const bool     seeked     = fSize > TAIL_BYTES;
     const size_t   toRead     = seeked ? TAIL_BYTES : fSize;
 
@@ -532,7 +538,6 @@ static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
     // char at a time went through the VFS layer for every byte, which is what
     // made this handler block the Async worker for hundreds of milliseconds on
     // a full log.
-    auto blockBuf  = std::unique_ptr<char[]>(new (std::nothrow) char[toRead + 1]);
     if (!lastLines || !blockBuf) {
         f.close();
         // Reported, not swallowed. A silent failure here returns a valid,
@@ -1096,6 +1101,18 @@ static void h_post_save_datalog(AsyncWebServerRequest* r) {
     if (r->hasParam("ffToPfThreshold", true))         cfg["ffToPfThreshold"]        = r->getParam("ffToPfThreshold", true)->value().toFloat();
     if (r->hasParam("manualPressThresholdMs", true))  cfg["manualPressThresholdMs"] = r->getParam("manualPressThresholdMs", true)->value().toInt();
 
+    // The columns are checked before anything is applied, so a malformed
+    // table leaves the whole save undone, not half of it.
+    JsonDocument cd;
+    const bool haveCols = r->hasParam("cols", true);
+    if (haveCols) {
+        const String& cj = r->getParam("cols", true)->value();
+        if (deserializeJson(cd, cj.c_str(), cj.length()) || !cd.is<JsonObjectConst>()) {
+            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid columns\"}");
+            return;
+        }
+    }
+
     // ArduinoJson v7 doesn't expose .as<>() on JsonObject — but
     // JsonObject is implicitly convertible to JsonObjectConst, which is
     // what DataLogModule::load() expects.
@@ -1108,18 +1125,13 @@ static void h_post_save_datalog(AsyncWebServerRequest* r) {
     if (r->hasParam("aggregationIntervalSec", true))
         config.logger.aggregationIntervalSec = constrain(
             r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
-    if (r->hasParam("cols", true)) {
-        JsonDocument cd;
-        const String& cj = r->getParam("cols", true)->value();
-        if (deserializeJson(cd, cj.c_str(), cj.length()) ||
-            !datalogColsFromJson(cd.as<JsonVariantConst>())) {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid columns\"}");
-            return;
-        }
-    }
 
     saveConfig();
     TaskManager::applyLoggerConfig();
+    if (haveCols && !datalogColsFromJson(cd.as<JsonVariantConst>())) {
+        r->send(500, "application/json", "{\"ok\":false,\"error\":\"columns not saved\"}");
+        return;
+    }
     r->send(200, "application/json", "{\"ok\":true}");
 }
 

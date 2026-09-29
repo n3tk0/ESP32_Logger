@@ -32,6 +32,7 @@ void LiveAggregator::feed(const SensorReading& r, int col) {
 void LiveAggregator::reset() {
     memset(_sum, 0, sizeof(_sum));
     memset(_count, 0, sizeof(_count));
+    _lastFlushEpoch = 0;   // the next window starts at the next take()
 }
 
 bool LiveAggregator::take(uint32_t nowEpoch, bool force, float* vals,

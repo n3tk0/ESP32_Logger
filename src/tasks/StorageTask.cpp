@@ -31,7 +31,8 @@ struct Batch {
     char*    row     = nullptr;      // ROW_BYTES
     size_t   len     = 0;
     int      rows    = 0;
-    uint32_t epoch   = 0;
+    uint32_t epoch   = 0;            // newest row
+    uint32_t first   = 0;            // oldest row: the batch's period
 
     bool alloc() {
         char* m = (char*)malloc(PEND_BYTES + 2 * HDR_BYTES + ROW_BYTES);
@@ -63,8 +64,12 @@ struct Batch {
         // mutex for the whole dual write. (AUDIT 2.16)
         if (mirror) {
             MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-            if ((!fsMutex || g.isLocked()) && datalogAppend(*mirror, hdr, buf, rows, epoch) < rows)
-                Serial.println("[StorageTask] mirror rows LOST");
+            const int w = (!fsMutex || g.isLocked())
+                        ? datalogAppend(*mirror, hdr, buf, rows, epoch) : -1;
+            if (w < rows) {
+                Serial.printf("[StorageTask] mirror: %d of %d row(s) LOST\n", rows - (w > 0 ? w : 0), rows);
+                g_queueDrops += rows - (w > 0 ? w : 0);
+            }
         }
         len = 0; rows = 0; buf[0] = '\0';
     }
@@ -76,7 +81,10 @@ struct Batch {
             g_queueDrops++;
             return;
         }
-        if (rows && strcmp(tmpHdr, hdr) != 0) flush();
+        const uint32_t t = r.end ? r.end : r.start;
+        // A batch goes to one file: a new header or a new rotation period
+        // writes what is pending first.
+        if (rows && (strcmp(tmpHdr, hdr) != 0 || !datalogSamePeriod(first, t))) flush();
         const int n = dlFormatRow(row, ROW_BYTES, datalogLayout(), r, vals, nVals);
         if (n < 0) {
             Serial.println("[StorageTask] row dropped - did not fit");
@@ -84,18 +92,19 @@ struct Batch {
             return;
         }
         if (len + n + 3 > PEND_BYTES) flush();
-        if (!rows) strlcpy(hdr, tmpHdr, HDR_BYTES);
+        if (!rows) { strlcpy(hdr, tmpHdr, HDR_BYTES); first = t; }
         memcpy(buf + len, row, n);
         len += n;
         buf[len++] = '\r'; buf[len++] = '\n'; buf[len] = '\0';
         rows++;
-        epoch = r.end ? r.end : r.start;
+        epoch = t;
         if (rows >= DL_BATCH_ROWS) flush();
     }
 };
 
 // The averages of the window just closed, as a TIMER row.
 void addSensorRow(Batch& b, const float* vals, uint32_t start, uint32_t end) {
+    if (!datalogSensorRows()) return;   // the header carries no sensor columns
     DatalogRow r = {};
     r.start  = start;
     r.end    = end;
@@ -192,6 +201,7 @@ void storageTaskFunc(void* param) {
             if (flowRunLog.takeRun(run)) {
                 run.boot = (uint16_t)(bootCount & 0xFFFF);
                 batch.add(run, nullptr, 0);
+                batch.flush();   // a fill is rare and worth not losing
             }
         }
 
