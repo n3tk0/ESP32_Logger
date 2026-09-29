@@ -101,6 +101,12 @@ MODULE_SCHEMA = {
         {"id": "lon", "type": "float", "label": "Longitude"},
     ]}),
     "wifi": json.dumps({"fields": [
+        # An enum with numeric values, as most firmware enums are: the form
+        # must post 1, not "1" (see _enumValue in settings.js).
+        # Its value comes from `default` rather than MODULE_CONFIG, which
+        # keeps this change clear of the time module's lines there.
+        {"id": "wifiMode", "type": "enum", "label": "Mode", "default": 1,
+         "options": [{"v": 0, "l": "Access Point"}, {"v": 1, "l": "Client"}]},
         {"id": "ssid", "type": "string", "max": 32, "label": "SSID"},
         {"id": "useStatic", "type": "bool", "label": "Use a static IP"},
         {"id": "ip", "type": "ipv4", "label": "IP address",

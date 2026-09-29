@@ -2,6 +2,7 @@
 #include "../core/Globals.h"
 #include "../core/Config.h"
 #include "../utils/Utils.h"
+#include "../utils/JsonEnum.h"
 
 namespace {
 
@@ -49,12 +50,12 @@ const char THEME_SCHEMA[] PROGMEM =
 // ---------------------------------------------------------------------------
 bool ThemeModule::load(JsonObjectConst cfg) {
     ThemeConfig& t = config.theme;
-    t.mode             = (ThemeMode)(cfg["mode"] | (int)t.mode);
+    t.mode             = (ThemeMode)jsonEnumInt(cfg["mode"], (int)t.mode);
     if ((int)t.mode < 0 || (int)t.mode > 2) t.mode = (ThemeMode)0;
     t.showIcons        = cfg["showIcons"] | t.showIcons;
-    t.chartSource      = (ChartSource)(cfg["chartSource"] | (int)t.chartSource);
+    t.chartSource      = (ChartSource)jsonEnumInt(cfg["chartSource"], (int)t.chartSource);
     if ((int)t.chartSource < 0 || (int)t.chartSource > 1) t.chartSource = (ChartSource)0;
-    t.chartLabelFormat = (ChartLabelFormat)(cfg["chartLabelFormat"] | (int)t.chartLabelFormat);
+    t.chartLabelFormat = (ChartLabelFormat)jsonEnumInt(cfg["chartLabelFormat"], (int)t.chartLabelFormat);
     if ((int)t.chartLabelFormat < 0 || (int)t.chartLabelFormat > 2) t.chartLabelFormat = (ChartLabelFormat)0;
 
     bool warnedColor = false;
