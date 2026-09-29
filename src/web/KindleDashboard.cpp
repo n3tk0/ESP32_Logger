@@ -14,6 +14,7 @@
 #include "../utils/MutexGuard.h"
 #include "../core/Globals.h"
 #include "DashboardStrings.h"
+#include "../utils/PosixTz.h"   // tzOffsetAt — TIME_OFF
 #include "RefreshCadence.h"
 #include "KindleSkin.h"                 // config.kindle -> face, weight, formats
 #include "KindleChartBmp.h"             // ChartBmpCtx / ChartBmpReader
@@ -2064,8 +2065,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         // The same instant every age in this payload was measured against.
         if (now > 1000000000u) {
             s->printf("TIME_UTC=%lu\n", (unsigned long)now);
-            s->printf("TIME_OFF=%ld\n",
-                      (long)(config.network.timezone + config.network.dstOffsetHours) * 3600L);
+            // The offset in effect NOW, so the panel follows the change
+            // to and from summer time on its next fetch.
+            s->printf("TIME_OFF=%ld\n", tzOffsetAt((time_t)now));
         } else {
             s->print("TIME_UTC=\nTIME_OFF=\n");
         }

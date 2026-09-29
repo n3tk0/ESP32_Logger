@@ -887,11 +887,14 @@ check "$?" "turned back upright, nothing the landscape page set is left behind"
   FC_SUMMARY="Clear" FC_ICON=0 SHOW_WEEK=1 WK_TODAY=2 WK_MON_MONTH="MAY"
   for i in 0 1 2 3 4; do eval "FC${i}_LABEL=D$i FC${i}_ICON=0 FC${i}_TEMP=1$i"; done
   for i in 0 1 2 3 4 5 6; do eval "WK${i}_NAME=N$i WK${i}_DAY=$i"; done
+  # The day's name as a text argument, tab to tab: a bare 'N3' also matches
+  # the font path, which carries mktemp's random directory name.
+  n3="$(printf '\t')N3$(printf '\t')"
   : > "$FBINK_LOG"; draw_forecast_body
   [ "$(grep -c 'GRAYE' "$FBINK_LOG")" = "5" ] || exit 1
-  grep -q 'N3' "$FBINK_LOG" && exit 2               # the week is not in the band
+  grep -q -- "$n3" "$FBINK_LOG" && exit 2           # the week is not in the band
   : > "$FBINK_LOG"; SHOW_CLOCK=1; draw_top_row "12:00"
-  grep -q 'N3' "$FBINK_LOG" || exit 3
+  grep -q -- "$n3" "$FBINK_LOG" || exit 3
   grep -q "top=$TOPROW_Y,left=18,width=764" "$FBINK_LOG" || exit 4   # its rule
   exit 0 )
 check "$?" "on its side: five forecast columns, and the week strip beside the clock"

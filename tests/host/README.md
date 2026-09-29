@@ -33,6 +33,7 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_remote_ingest.cpp` | the mailbox and the separate historical queue it grew |
 | `test_battery_model.cpp` | that the remaining-life model **refuses** to answer when it cannot |
 | `test_kindle_skin.cpp` | `KindleSkin.h` — the override CSS, the time/date/pressure formats, and the clamp that stands between a stored byte and a stylesheet |
+| `test_posix_tz.cpp` | `src/utils/PosixTz.h` — the TZ string for each daylight-saving rule, the EU and US change instants as the C library reads them, and `tzOffsetAt()` across day and year boundaries |
 
 Fuzz targets (random-input property checks):
 

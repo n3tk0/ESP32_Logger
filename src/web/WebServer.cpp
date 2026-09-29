@@ -40,6 +40,7 @@
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
 #include "../utils/MutexGuard.h"
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
+#include "../utils/PosixTz.h"           // dstRuleClamp, tzOffsetAt
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
@@ -820,6 +821,8 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     net["clientPassword"] = clPw;
     net["ntpServer"]      = strlen(config.network.ntpServer)      ? config.network.ntpServer      : DEFAULT_NTP_SERVER;
     net["timezone"]       = config.network.timezone;
+    net["dstRule"]        = config.network.dstRule;
+    net["dstOffsetHours"] = config.network.dstOffsetHours;
     net["useStaticIP"]    = config.network.useStaticIP;
 
     // AP network — uint8_t[4] arrays → "A.B.C.D" strings
@@ -1281,8 +1284,17 @@ static void h_post_save_network(AsyncWebServerRequest* r) {
 static void h_post_save_time(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
     if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
-    if (r->hasParam("timezone", true))  config.network.timezone = r->getParam("timezone", true)->value().toInt();
+    if (r->hasParam("timezone", true)) {
+        const int tz = r->getParam("timezone", true)->value().toInt();
+        if (tz >= -12 && tz <= 14) config.network.timezone = (int8_t)tz;
+    }
+    if (r->hasParam("dstRule", true))
+        config.network.dstRule = dstRuleClamp((uint8_t)r->getParam("dstRule", true)->value().toInt());
+    // The page offers the manual rule as "+1 h all year" and has no field for
+    // the hours, so saving it here means exactly that.
+    if (config.network.dstRule == DST_RULE_MANUAL) config.network.dstOffsetHours = 1;
     saveConfig();
+    applyTimeZone();   // now, not at the next NTP sync
     r->send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -1320,11 +1332,12 @@ static void h_post_set_time(AsyncWebServerRequest* r) {
         struct tm ti = {};
         ti.tm_year = yr - 1900; ti.tm_mon = mo - 1; ti.tm_mday = dy;
         ti.tm_hour = hr; ti.tm_min = mi; ti.tm_sec = 0;
-        const char* prevTz = getenv("TZ");
+        // The zone is put back from the config, not from a saved getenv()
+        // pointer: newlib's setenv() writes a shorter value over the old one
+        // in place, so that pointer would read "UTC0" by the time it is used.
         setenv("TZ", "UTC0", 1); tzset();
         time_t epoch = mktime(&ti);
-        if (prevTz) setenv("TZ", prevTz, 1); else unsetenv("TZ");
-        tzset();
+        applyTimeZone();
         struct timeval tv = { epoch, 0 };
         settimeofday(&tv, nullptr);
         rtcValid = true;
@@ -1944,6 +1957,16 @@ void setupWebServer() {
 
     auto fillRuntime = [](JsonObject o) {
         o["time"]       = getRtcDateTimeString();
+        {
+            // The zone in effect right now, summer time included, for the
+            // clock page's "summer / winter time" line.
+            const time_t nowT = time(nullptr);
+            if (nowT > 1000000000L) {
+                struct tm lt;
+                o["utcOffset"] = tzOffsetAt(nowT);
+                o["isDst"]     = localtime_r(&nowT, &lt) && lt.tm_isdst > 0;
+            }
+        }
         o["rssi"]       = wifiConnectedAsClient ? WiFi.RSSI() : -100;
         o["boot"]       = bootCount;
         o["heap"]       = ESP.getFreeHeap();
@@ -2489,6 +2512,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 if (net["wifiMode"].is<int>())         config.network.wifiMode   = (WiFiModeType)(int)net["wifiMode"];
                 if (net["ntpServer"].is<const char*>()) SAFE_STRNCPY(config.network.ntpServer, net["ntpServer"], sizeof(config.network.ntpServer));
                 if (net["timezone"].is<int>())         config.network.timezone   = net["timezone"];
+                if (net["dstRule"].is<int>())          config.network.dstRule    = dstRuleClamp((uint8_t)(int)net["dstRule"]);
+                if (net["dstOffsetHours"].is<int>())   config.network.dstOffsetHours = net["dstOffsetHours"];
+                if (config.network.timezone < -12 || config.network.timezone > 14) config.network.timezone = 2;
+                if (config.network.dstOffsetHours < 0 || config.network.dstOffsetHours > 2) config.network.dstOffsetHours = 0;
                 if (net["useStaticIP"].is<bool>())     config.network.useStaticIP= net["useStaticIP"];
             }
             if (doc["hardware"].is<JsonObject>()) {
@@ -2556,6 +2583,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 kdSkinClamp(config.kindle);
             }
             saveConfig();
+            applyTimeZone();
             r->send(200, "text/plain", "OK");
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {

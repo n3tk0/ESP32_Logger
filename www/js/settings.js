@@ -947,6 +947,7 @@ function timeInit() {
     .then(function (d) {
       ST = d;
       setEl("time-rtcTime", d.time || "--:--:--");
+      timeDstPreview();
       setEl("time-boot", d.boot);
       var bak = document.getElementById("bootBak");
       if (bak) bak.textContent = "-";
@@ -1010,7 +1011,77 @@ function timeInit() {
       var net = d.network || {};
       setVal("time-ntp", net.ntpServer || "pool.ntp.org");
       setVal("time-tz", net.timezone !== undefined ? net.timezone : 0);
+      setVal("time-dst", net.dstRule !== undefined ? net.dstRule : 0);
+      timeDstPreview();
+      // The "Now:" line comes from /api/status, so refresh it once the
+      // device has applied a newly saved zone or rule.
+      var f = document.querySelector('form[data-save-url="/save_time"]');
+      if (f && !f._dstHooked) {
+        f._dstHooked = true;
+        f.addEventListener("submit", function () {
+          setTimeout(function () {
+            getStatus({ maxAgeMs: 0 }).then(function (d) { ST = d; timeDstPreview(); });
+          }, 1500);
+        });
+      }
     });
+}
+
+// The next change between winter and summer time under the rule and zone on
+// the form (not yet saved), as a UTC Date, or null for a rule that has none.
+// EU: last Sunday of March / October at 01:00 UTC. US: second Sunday of March
+// at 02:00 standard time, first Sunday of November at 02:00 summer time.
+function timeDstNext(rule, tz, now) {
+  function nthSunday(y, m, n) {            // n = -1 for the last one
+    if (n < 0) {
+      var last = new Date(Date.UTC(y, m + 1, 0));
+      return last.getUTCDate() - last.getUTCDay();
+    }
+    var first = new Date(Date.UTC(y, m, 1)).getUTCDay();
+    return 1 + ((7 - first) % 7) + 7 * (n - 1);
+  }
+  var out = [];
+  for (var y = now.getUTCFullYear(); y <= now.getUTCFullYear() + 1; y++) {
+    if (rule === 0) {
+      // 01:00 UTC, i.e. local 1+tz / 2+tz; the firmware holds those at 00:00
+      // local for zones west of UTC-1 (PosixTz.h), and so does this.
+      var on = Math.max(0, 1 + tz), off = Math.max(0, 2 + tz);
+      out.push({ at: Date.UTC(y, 2, nthSunday(y, 2, -1), on - tz), summer: true });
+      out.push({ at: Date.UTC(y, 9, nthSunday(y, 9, -1), off - tz - 1), summer: false });
+    } else if (rule === 1) {
+      out.push({ at: Date.UTC(y, 2, nthSunday(y, 2, 2), 2 - tz), summer: true });
+      out.push({ at: Date.UTC(y, 10, nthSunday(y, 10, 1), 1 - tz), summer: false });
+    }
+  }
+  for (var i = 0; i < out.length; i++) if (out[i].at > now.getTime()) return out[i];
+  return null;
+}
+
+function timeDstPreview() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  var el = document.getElementById("time-dst-info");
+  if (!el) return;
+  var rule = parseInt(getVal("time-dst"), 10) || 0;
+  var tz = parseInt(getVal("time-tz"), 10) || 0;
+  var parts = [];
+  // What the collector is on right now (as saved), from /api/status.
+  if (ST && ST.utcOffset !== undefined) {
+    var h = ST.utcOffset / 3600;
+    parts.push(t(ST.isDst ? "settingsPages.timeDstNowSummer" : "settingsPages.timeDstNowWinter",
+      { off: (h >= 0 ? "+" : "") + h }));
+  }
+  var next = timeDstNext(rule, tz, new Date());
+  if (next) {
+    // The collector's clock just before the change, which is how the change
+    // is announced: 03:00 in March, 04:00 in October for UTC+2.
+    var local = new Date(next.at + (tz + (next.summer ? 0 : 1)) * 3600000);
+    var p2 = function (n) { return (n < 10 ? "0" : "") + n; };
+    var when = p2(local.getUTCDate()) + "." + p2(local.getUTCMonth() + 1) + "." +
+      local.getUTCFullYear() + " " + p2(local.getUTCHours()) + ":" + p2(local.getUTCMinutes());
+    parts.push(t(next.summer ? "settingsPages.timeDstNextSummer" : "settingsPages.timeDstNextWinter",
+      { when: when }));
+  }
+  el.textContent = parts.join(" · ");
 }
 
 function timeSetManual(ev) {
@@ -2694,6 +2765,7 @@ registerHandlers({
   dlCreateFile: dlCreateFile,
   dlUpdatePreview: dlUpdatePreview,
   dlToggleMaxSize: dlToggleMaxSize,
+  timeDstPreview: timeDstPreview,
   dlTogglePcFields: dlTogglePcFields,
   settingsImport: settingsImport,
   otaFileSelected: otaFileSelected,

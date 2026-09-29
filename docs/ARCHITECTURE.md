@@ -988,7 +988,7 @@ once per module per request (no FS scans, no network round-trips).
 ```json
 {
   "id": "time", "name": "Time", "enabled": true, "hasUI": true,
-  "config": { "ntpServer": "pool.ntp.org", "timezone": 1, "dstOffsetHours": 0 },
+  "config": { "ntpServer": "pool.ntp.org", "timezone": 1, "dstRule": 0, "dstOffsetHours": 0 },
   "schema": "{\"fields\":[ … ]}"
 }
 ```
@@ -1144,8 +1144,11 @@ Priority:
 Storage:  everything is stored in UTC — log timestamps, RTC contents and the
           /api/data epochs. After an NTP sync the RTC is written from
           gmtime_r(), so it always holds UTC regardless of the configured zone.
-Display:  all human-facing paths convert with localtime_r(). The zone is set via
-          configTime(timezone*3600, dstOffsetHours*3600, ntpServer).
+Display:  all human-facing paths convert with localtime_r(). The zone is a POSIX
+          TZ string built from timezone + dstRule (utils/PosixTz.h: EU, US,
+          off, or manual +dstOffsetHours all year), set by applyTimeZone() at
+          boot, on every save of the zone, and passed to configTzTime() on an
+          NTP sync. Summer/winter time therefore changes by itself, offline too.
 NTP sync: on boot (if WiFi client) and then self-healing — while the link is up
           and the clock is not yet valid, loop() re-queues a sync every 60 s
           until one succeeds. Manual sync: POST /sync_time (CSRF) → poll

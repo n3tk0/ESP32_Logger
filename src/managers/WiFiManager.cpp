@@ -1,6 +1,7 @@
 #include "WiFiManager.h"
 #include "../core/Globals.h"
 #include "ConfigManager.h"
+#include "RtcManager.h"                 // currentPosixTz
 #include "../pipeline/DataPipeline.h"   // rtcMutex
 #include "../utils/MutexGuard.h"
 #include <WiFi.h>
@@ -171,7 +172,12 @@ bool syncTimeFromNTP() {
     // connected client with internet. Fall back to the build default.
     const char* ntp = config.network.ntpServer[0] ? config.network.ntpServer
                                                    : DEFAULT_NTP_SERVER;
-    configTime(config.network.timezone * 3600, config.network.dstOffsetHours * 3600, ntp);
+    // The zone travels as a full TZ string so the daylight-saving rule
+    // survives the sync; configTime()'s two offsets could only say "DST on"
+    // under the C library's default (US) dates.
+    char tz[48];
+    currentPosixTz(tz, sizeof(tz));
+    configTzTime(tz, ntp);
 
     time_t now = 0;
     struct tm ti = {0};

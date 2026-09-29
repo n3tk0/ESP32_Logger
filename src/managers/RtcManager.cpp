@@ -2,6 +2,7 @@
 #include "../core/Globals.h"
 #include "../utils/AtomicWrite.h"
 #include "../utils/MutexGuard.h"      // rtcMutex — the DS1302 bus
+#include "../utils/PosixTz.h"
 #include "../pipeline/DataPipeline.h"
 #include <LittleFS.h>
 #include <esp_sleep.h>
@@ -161,6 +162,25 @@ void restoreBootCount() {
         f.close();
     }
     DBGF("Bootcount from flash: %d\n", bootCount);
+}
+
+// ---------------------------------------------------------------------------
+// The zone. Before this, TZ was set only inside syncTimeFromNTP(), so a
+// collector keeping time from its RTC (which skips the boot NTP sync) or
+// running offline showed and rotated its files in UTC, and a changed zone
+// waited for the next sync. The clock itself is UTC everywhere; only this
+// decides how it is shown.
+void currentPosixTz(char* out, size_t cap) {
+    buildPosixTz(config.network.timezone, config.network.dstRule,
+                 config.network.dstOffsetHours, out, cap);
+}
+
+void applyTimeZone() {
+    char tz[48];
+    currentPosixTz(tz, sizeof(tz));
+    setenv("TZ", tz, 1);
+    tzset();
+    DBGF("TZ: %s\n", tz);
 }
 
 // ---------------------------------------------------------------------------
