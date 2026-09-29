@@ -122,12 +122,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
     // --- Fetch raw data ---
     // Strategy: first try in-memory ring buffer (recent data),
     //           fall back to filesystem query for historical data.
-    constexpr size_t MAX_RAW = 300;  // ~20 KB — prevents OOM on ESP32-C3
-    SensorReading* raw = new(std::nothrow) SensorReading[MAX_RAW];
-    if (!raw) {
-        req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
-        return;
-    }
+    constexpr size_t MAX_RAW = 300;  // readings of the ring looked at
 
     // Slots given to the ring buffer. The split with the filesystem query is
     // moot while that path is disabled (see "chunk F" below, fsCount = 0), so
@@ -147,22 +142,24 @@ static void handleApiData(AsyncWebServerRequest* req) {
     size_t ringCount = 0;
     size_t fsCount   = 0;
 
-    // 1) Ring buffer (recent, in-memory)
+    // 1) Ring buffer (recent, in-memory): the window's readings of this
+    //    sensor and metric, counted first so the copy is only as big as they
+    //    are. A buffer for the whole window was 21 KB for every request, and
+    //    the Overview asks for six sparklines at once while the browser is
+    //    still fetching the page's scripts — on a C3 with ~40 KB free after
+    //    boot that ran the heap out and the device panicked mid-page.
+    SensorReading* raw = nullptr;
     if (webDataMutex && xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        ringCount = webRingBuf.copyRecent(raw, RING_SHARE, fromTs);
+        const size_t want = webRingBuf.copyMatching(nullptr, 0, RING_SHARE, fromTs, toTs,
+                                                    sensorFilter, metricFilter, true);
+        if (want > 0) raw = new (std::nothrow) SensorReading[want];
+        if (raw) ringCount = webRingBuf.copyMatching(raw, want, RING_SHARE, fromTs, toTs,
+                                                     sensorFilter, metricFilter);
         xSemaphoreGive(webDataMutex);
-    }
-    // Filter ring results
-    {
-        size_t out = 0;
-        for (size_t i = 0; i < ringCount; i++) {
-            if (raw[i].timestamp > toTs) continue;
-            if (sensorFilter && strcmp(raw[i].sensorId, sensorFilter) != 0) continue;
-            if (metricFilter && strcmp(raw[i].metric,   metricFilter) != 0) continue;
-            if (out != i) raw[out] = raw[i];
-            out++;
+        if (want > 0 && !raw) {
+            req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
+            return;
         }
-        ringCount = out;
     }
 
     // Copy agg/mode strings — c_str() pointers may dangle during async response (N21)
@@ -192,14 +189,18 @@ static void handleApiData(AsyncWebServerRequest* req) {
         delete[] raw;
         raw = nullptr;
     } else {
-        agg = new(std::nothrow) SensorReading[limit + 1];
+        // FS query disabled until the wide-CSV reader ships (chunk F).
+        fsCount = 0;
+        // No more points than readings come out of the aggregation (each one
+        // consumes at least one), so the output is sized by what was copied
+        // rather than by `limit` — up to 21 KB for a handful of readings.
+        const size_t outCap = ringCount + fsCount < limit ? ringCount + fsCount : limit;
+        agg = new(std::nothrow) SensorReading[outCap + 1];
         if (!agg) {
             delete[] raw;
             req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
             return;
         }
-        // FS query disabled until the wide-CSV reader ships (chunk F).
-        fsCount = 0;
 
         size_t rawCount = ringCount + fsCount;
         // Report truncation when the ring hit its share too, not just when the
@@ -232,8 +233,8 @@ static void handleApiData(AsyncWebServerRequest* req) {
 
         if (rawCount > 0) {
             aggCount = AggregationEngine::aggregate(raw, rawCount,
-                                                    agg, limit,
-                                                    bucket, mode, limit);
+                                                    agg, outCap,
+                                                    bucket, mode, outCap);
         }
         delete[] raw;
         raw = nullptr;
@@ -286,10 +287,11 @@ static void handleApiData(AsyncWebServerRequest* req) {
 //   sensor's display name from SensorManager.  Designed to be cheap enough
 //   to poll every 60 s from the dashboard:
 //   - single mutex acquire
-//   - scan bounded by MAX_RAW (500) readings copied out of the ring, NOT by
+//   - scan bounded by the newest MAX_RAW (500) readings of the ring, NOT by
 //     the ring's own capacity — which is now a runtime value and, on a PSRAM
-//     board, tens of thousands of entries. copyRecent() stops at maxOut, so
-//     the cost of this endpoint does not grow with the ring.
+//     board, tens of thousands of entries — so the cost of this endpoint does
+//     not grow with the ring. The scan is in place; only the ≤ 32 readings
+//     it returns are copied.
 //   - JsonDocument sized for ≤ 32 (sensor, metric) pairs
 //
 // Response shape:
@@ -301,36 +303,23 @@ static void handleApiData(AsyncWebServerRequest* req) {
 //     ] }
 // ---------------------------------------------------------------------------
 static void handleApiLatest(AsyncWebServerRequest* req) {
-    constexpr size_t MAX_RAW = 500;
-    SensorReading* raw = new (std::nothrow) SensorReading[MAX_RAW];
-    if (!raw) {
+    constexpr size_t MAX_RAW = 500;     // newest readings of the ring looked at
+    // 32 unique pairs is well above the realistic device sensor count. Only
+    // those are copied — the ring is scanned in place — where a copy of the
+    // whole window took 36 KB of heap per request, more than a C3 has in one
+    // block after boot.
+    constexpr size_t MAX_PAIRS = 32;
+    SensorReading* latest = new (std::nothrow) SensorReading[MAX_PAIRS];
+    if (!latest) {
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
         return;
     }
 
-    size_t copied = 0;
-    if (webDataMutex && xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        copied = webRingBuf.copyRecent(raw, MAX_RAW, 0);
-        xSemaphoreGive(webDataMutex);
-    }
-
-    // Walk newest→oldest, keeping the first occurrence of each (id, metric).
-    // 32 unique pairs is well above the realistic device sensor count.
-    constexpr size_t MAX_PAIRS = 32;
-    int    latestIdx[MAX_PAIRS];
+    // Newest first, the first occurrence of each (id, metric).
     size_t nPairs = 0;
-
-    if (copied > 0) {
-        for (int i = (int)copied - 1; i >= 0 && nPairs < MAX_PAIRS; --i) {
-            const SensorReading& r = raw[i];
-            bool seen = false;
-            for (size_t j = 0; j < nPairs; j++) {
-                const SensorReading& p = raw[latestIdx[j]];
-                if (strcmp(p.sensorId, r.sensorId) == 0 &&
-                    strcmp(p.metric,   r.metric)   == 0) { seen = true; break; }
-            }
-            if (!seen) latestIdx[nPairs++] = i;
-        }
+    if (webDataMutex && xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        nPairs = webRingBuf.latestPerMetric(latest, MAX_PAIRS, MAX_RAW);
+        xSemaphoreGive(webDataMutex);
     }
 
     JsonDocument doc;
@@ -338,7 +327,7 @@ static void handleApiLatest(AsyncWebServerRequest* req) {
     doc["ts"] = (uint32_t)(millis() / 1000UL);
     JsonArray arr = doc["items"].to<JsonArray>();
     for (size_t k = 0; k < nPairs; k++) {
-        const SensorReading& r = raw[latestIdx[k]];
+        const SensorReading& r = latest[k];
         JsonObject o = arr.add<JsonObject>();
         o["id"]     = r.sensorId;
         o["type"]   = r.sensorType;
@@ -349,7 +338,7 @@ static void handleApiLatest(AsyncWebServerRequest* req) {
         o["q"]      = (uint8_t)r.quality;
     }
 
-    delete[] raw;
+    delete[] latest;
     String out;
     jsonToString(doc, out);
     req->send(200, "application/json", out);

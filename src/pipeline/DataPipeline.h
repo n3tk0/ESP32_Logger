@@ -237,6 +237,65 @@ public:
         return copied;
     }
 
+    // The same window as copyRecent(out, maxScan, fromTs) — the newest
+    // maxScan entries — but only the readings in [fromTs, toTs] of sensorId
+    // and metric (nullptr = any). count = true counts them and writes
+    // nothing; otherwise the newest maxOut of them go to `out`, oldest first.
+    // So a caller counts first and allocates what it will copy, instead of a
+    // buffer for the whole window: 300 readings are 21 KB of heap, one
+    // sensor's share of them usually a few hundred bytes.
+    size_t copyMatching(SensorReading* out, size_t maxOut, size_t maxScan,
+                        uint32_t fromTs, uint32_t toTs,
+                        const char* sensorId, const char* metric,
+                        bool count = false) const
+    {
+        if (!_buf || (!count && (!out || maxOut == 0))) return 0;
+        const size_t N = _cap;
+        size_t h      = _head.load(std::memory_order_acquire);
+        size_t t      = _tail.load(std::memory_order_relaxed);
+        size_t oldest = (h > N) ? (h - N) : t;
+        size_t start  = oldest;
+        if ((h - oldest) > maxScan) start = h - maxScan;
+
+        size_t n = 0;
+        for (size_t i = h; i > start && (count || n < maxOut); ) {
+            --i;
+            const SensorReading& e = _buf[i % N];
+            if (e.timestamp < fromTs || e.timestamp > toTs) continue;
+            if (sensorId && strcmp(e.sensorId, sensorId) != 0) continue;
+            if (metric   && strcmp(e.metric,   metric)   != 0) continue;
+            if (!count) out[maxOut - 1 - n] = e;
+            n++;
+        }
+        if (!count && n < maxOut && n > 0)
+            memmove(out, out + maxOut - n, n * sizeof(SensorReading));
+        return n;
+    }
+
+    // The newest reading of each (sensorId, metric) among the newest maxScan
+    // entries, newest first, at most maxOut of them. No copy of the window.
+    size_t latestPerMetric(SensorReading* out, size_t maxOut, size_t maxScan) const {
+        if (!_buf || !out || maxOut == 0) return 0;
+        const size_t N = _cap;
+        size_t h      = _head.load(std::memory_order_acquire);
+        size_t t      = _tail.load(std::memory_order_relaxed);
+        size_t oldest = (h > N) ? (h - N) : t;
+        size_t start  = oldest;
+        if ((h - oldest) > maxScan) start = h - maxScan;
+
+        size_t n = 0;
+        for (size_t i = h; i > start && n < maxOut; ) {
+            --i;
+            const SensorReading& e = _buf[i % N];
+            bool seen = false;
+            for (size_t j = 0; j < n && !seen; j++)
+                seen = strcmp(out[j].sensorId, e.sensorId) == 0 &&
+                       strcmp(out[j].metric,   e.metric)   == 0;
+            if (!seen) out[n++] = e;
+        }
+        return n;
+    }
+
     size_t size() const {
         if (!_buf) return 0;
         size_t h = _head.load(std::memory_order_relaxed);
