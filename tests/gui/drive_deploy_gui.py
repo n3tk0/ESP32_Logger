@@ -1102,9 +1102,16 @@ def run_remote(app) -> None:
     app._save_targets()
     check(app.cfg["node_fw_targets"] == ["e:3"] and not app.targets_all_var.get(),
           "ticking one node picks it and unticks \"every node\"")
+    app.targets_all_var.set(True)
+    app._on_targets_all()
+    check(app.cfg["node_fw_targets"] == "all" and not app.node_target_vars["e:3"].get(),
+          "ticking \"every node\" while a node is picked clears the pick")
+    app.node_target_vars["e:3"].set(True)
+    app._save_targets()
     app.node_target_vars["e:3"].set(False)
     app._save_targets()
-    check(app.cfg["node_fw_targets"] == "all", "unticking the last one is every node again")
+    check(app.cfg["node_fw_targets"] == "all" and app.targets_all_var.get(),
+          "unticking the last node is every node again")
 
     app.http_pass_entry.insert(0, "hunter2")
     app.node_pass_entry.insert(0, "nodepw")

@@ -84,6 +84,7 @@ class Device:
         self.targets: dict = {}
         self.start_body: dict | None = None
         self.uploads = 0
+        self.old_firmware = False   # a WiFi node from before /update existed
         self.gets_after_start = 0
 
 
@@ -150,6 +151,14 @@ def make_handler(dev: Device, node: bool):
             if not self._authed():
                 return self._send(401)
             if node:
+                if dev.old_firmware:
+                    # Every unknown path gets the setup page, with a 200.
+                    raw = b"<!doctype html><title>setup</title>"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    return self.wfile.write(raw)
                 if path != "/update":
                     return self._send(404)
                 field, data = file_part(self, body)
@@ -262,6 +271,13 @@ def main() -> int:
     check(dc.run_order([1, 5, 8, 13]) == [1, 5, 13, 8],
           "step 13 runs before step 8: firmware first, then its pages")
     check(dc.PRESETS["O"][1] == [1, 5, 13, 8], "preset O is compile, remote update, pages")
+    check(dc._blocked_by(13, [5], {}) == 5,
+          "a failed compile stops step 13 sending the previous build")
+    check(dc._blocked_by(13, [5], {"remote_fw_file": "x.bin"}) is None,
+          "but not a chosen file, which the compile did not make")
+    check(dc._blocked_by(14, [11], {}) == 11, "the same for the node's compile and step 14")
+    check(dc._blocked_by(8, [13], {}) == 13,
+          "a failed step 13 stops step 8 putting new pages on the old firmware")
 
     print("Step 13, the collector:")
     col = Device()
@@ -320,6 +336,15 @@ def main() -> int:
     check(rc == 0 and col6.start_body["keys"] == "all" and "Every node runs" in log,
           "\"all\" starts every node of the kind, and following it waits for done")
 
+    col7 = Device()
+    host7 = serve(col7)
+    # An earlier rollout's node that failed and stays failed.
+    col7.targets["e:9"] = {"kind": "espnow-c3", "st": "failed", "err": "old", "attempt": 1}
+    rc, log, _ = run(14, {"device_ip": host7, "node_fw_file": nfw,
+                          "node_fw_targets": ["e:3"], "node_fw_watch": True})
+    check(rc == 0 and "e:9" not in log,
+          f"following the rollout looks at this run's nodes only (rc={rc})")
+
     nodes = ota.list_nodes(ota.Http(host6))
     keys = [n["key"] for n in nodes]
     check(keys == ["e:3", "e:4", "w:balcony"], f"the node list uses the Nodes page keys: {keys}")
@@ -341,6 +366,13 @@ def main() -> int:
     check("2.1" in log, "and the log names the version it came back with")
     rc, log, _ = run(14, {**direct, "node_http_pass": "wrong"})
     check(rc == 1 and "refused the user" in log, "a wrong node password is reported as such")
+    wnode.old_firmware = True
+    rc, log, _ = run(14, direct)
+    check(rc == 1 and "older than local updates" in log,
+          "a node too old for /update (it answers with its page) is named as such")
+    wnode.old_firmware = False
+    rc, log, _ = run(14, {**direct, "node_ip": "127.0.0.1:9"})
+    check(rc == 1, "a node that does not answer fails the step instead of raising")
     rc, log, _ = run(14, {**direct, "node_fw_file": nfw})
     check(rc == 2 and "WiFi node only" in log, "an ESP-NOW image is not sent the direct way")
 

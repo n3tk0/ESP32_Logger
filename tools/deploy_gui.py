@@ -1299,7 +1299,7 @@ class DeployerGUI:
             self.via_box, text="Every node of this kind",
             variable=self.targets_all_var, font=self.fonts["body"],
             checkbox_width=self.px(22), checkbox_height=self.px(22),
-            command=self._save_targets).pack(anchor="w")
+            command=self._on_targets_all).pack(anchor="w")
         # height=1: an empty CTkFrame is 200 px tall until something is in it.
         self.node_list_box = ctk.CTkFrame(self.via_box, fg_color="transparent",
                                           height=1)
@@ -1377,16 +1377,20 @@ class DeployerGUI:
                 command=self._save_targets).pack(anchor="w", pady=(2, 0))
 
     def _save_targets(self) -> None:
+        """A node ticked or unticked: those nodes, or every node when none is."""
         picked = [k for k, v in self.node_target_vars.items() if v.get()]
-        if self.targets_all_var.get() or not picked:
-            targets = "all"
-        else:
-            targets = picked
-        # Ticking a node means "these ones": untick "every node" with it.
-        if picked and self.targets_all_var.get():
-            self.targets_all_var.set(False)
-            targets = picked
-        self._save_setting("node_fw_targets", None, targets)
+        self.targets_all_var.set(not picked)
+        self._save_setting("node_fw_targets", None, picked or "all")
+
+    def _on_targets_all(self) -> None:
+        """"Every node" ticked clears the single picks; unticked alone it
+        stays ticked, since no pick is the same as every node."""
+        if self.targets_all_var.get():
+            for var in self.node_target_vars.values():
+                var.set(False)
+        elif not any(v.get() for v in self.node_target_vars.values()):
+            self.targets_all_var.set(True)
+        self._save_targets()
 
     def _sync_remote_fields(self) -> None:
         """Read the remote-update fields the user may not have left yet."""

@@ -112,6 +112,23 @@ STEP_DETAIL: dict[int, tuple[str, str]] = {
 _RUN_ORDER: dict[int, float] = {13: 7.5}
 
 
+def _blocked_by(step: int, failed: list[int], cfg: dict[str, Any]) -> Optional[int]:
+    """A failed earlier step this one must not run after, or None.
+
+    Steps 13 and 14 send "the last build" when no file is chosen — after a
+    failed compile that is the PREVIOUS build, and step 13 would flash and
+    confirm it. Step 8 after a failed step 13 would put the new pages on the
+    old firmware, which is what running 13 first is there to prevent.
+    """
+    if step == 13 and 5 in failed and not cfg.get("remote_fw_file"):
+        return 5
+    if step == 14 and 11 in failed and not cfg.get("node_fw_file"):
+        return 11
+    if step == 8 and 13 in failed:
+        return 13
+    return None
+
+
 def run_order(steps) -> list[int]:
     """The steps in the order run_steps() runs them."""
     return sorted(steps, key=lambda n: _RUN_ORDER.get(n, n))
@@ -1766,10 +1783,17 @@ class DeployManager:
             self._emit_complete(14, 2)
             return 2
 
-        if self.cfg.get("node_fw_route") == "direct":
-            rc = self._node_direct(kind, path.name, data)
-        else:
-            rc = self._node_via_collector(kind, path.name, data)
+        try:
+            if self.cfg.get("node_fw_route") == "direct":
+                rc = self._node_direct(kind, path.name, data)
+            else:
+                rc = self._node_via_collector(kind, path.name, data)
+        except OSError as exc:
+            # Any request the routes do not catch themselves — the device
+            # went away between two calls. The step still has to complete,
+            # or the GUI shows it running for ever.
+            self._log(f"ERROR: connection lost: {exc}")
+            rc = 1
         self._emit_complete(14, rc)
         return rc
 
@@ -1834,9 +1858,19 @@ class DeployManager:
         self._log(f"✓ Rollout started for {who} ({js.get('targets', '?')} target(s)). "
                   f"Each node fetches it the next time it wakes.")
 
-        return self._watch_rollout(http, kind)
+        # Which targets are THIS run's: the keys asked for, or for "all" the
+        # kind's targets right after the start (which reset each of them to
+        # pending). Others of the kind are an earlier rollout's business.
+        mine: Optional[set] = set(keys) if keys != "all" else None
+        if mine is None:
+            st, fw = http.get("/api/nodes/fw")
+            if st == 200 and isinstance(fw, dict):
+                mine = {k for k, t in (fw.get("targets") or {}).items()
+                        if isinstance(t, dict) and t.get("kind") == kind}
+        return self._watch_rollout(http, kind, mine)
 
-    def _watch_rollout(self, http: "ota.Http", kind: str) -> int:
+    def _watch_rollout(self, http: "ota.Http", kind: str,
+                       mine: Optional[set] = None) -> int:
         watch = bool(self.cfg.get("node_fw_watch"))
         limit = time.monotonic() + 60 * float(self.cfg.get("node_fw_watch_min") or 30)
         last: list[str] = []
@@ -1846,6 +1880,8 @@ class DeployManager:
             except OSError:
                 st, fw = 0, None
             targets = fw.get("targets") if st == 200 and isinstance(fw, dict) else None
+            if targets is not None and mine is not None:
+                targets = {k: t for k, t in targets.items() if k in mine}
             if targets is not None:
                 lines = ota.fmt_targets(targets, kind)
                 if lines != last:
@@ -1855,6 +1891,9 @@ class DeployManager:
                     last = lines
                 states = [t.get("st") for t in targets.values()
                           if isinstance(t, dict) and t.get("kind") == kind]
+                if watch and not states:
+                    self._log("No node of this kind to follow.")
+                    return 0
                 if watch and all(s in ota.NODE_DONE_STATES for s in states):
                     failed = states.count("failed")
                     if failed:
@@ -1912,7 +1951,9 @@ class DeployManager:
         except OSError as exc:
             self._log(f"ERROR: {http.base} does not answer: {exc}")
             return 1
-        if st == 404:
+        # An older node has no /update: it answers 404, or — every unknown
+        # path gets the setup page — 200 with HTML instead of JSON.
+        if st == 404 or (st == 200 and not isinstance(js, dict)):
             self._log("✗ This node's firmware is older than local updates; flash "
                       "it over USB once (step 12).")
             return 1
@@ -2269,6 +2310,14 @@ class DeployManager:
                 break
             fn = dispatch.get(s)
             if fn is None:
+                continue
+            blocker = _blocked_by(s, failed, self.cfg)
+            if blocker is not None:
+                self._emit_start(s, STEP_NAMES[s])
+                self._log(f"✗ Not run: step {blocker} failed, and this step "
+                          f"depends on it.")
+                self._emit_complete(s, 1)
+                failed.append(s)
                 continue
             try:
                 rc = fn()
