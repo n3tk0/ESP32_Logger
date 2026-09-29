@@ -22,6 +22,7 @@ on:
       - '**/*.md'
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
+      - 'scripts/gen_module_schemas.py'
       - 'src/web/failsafe.html'
       - 'www/**'
       - 'tests/web/**'
@@ -66,6 +67,7 @@ on:
       - '**/*.md'
       - 'tools/check_metric_names.py'
       - 'scripts/gen_failsafe.py'
+      - 'scripts/gen_module_schemas.py'
       - 'src/web/failsafe.html'
       - 'www/**'
       - 'tests/web/**'
@@ -641,6 +643,31 @@ jobs:
 
           restore
           echo "failsafe drift guard fires as expected on both stale and corrupt"
+
+      - name: Verify the committed module schema header matches its JSON
+        # The forms on Settings → Modules are src/modules/schemas/*.json,
+        # gzipped into src/modules/ModuleSchemas.h — committed for the
+        # Arduino IDE path, like FailsafeHtml.h. --check validates each schema
+        # (the check ModuleRegistry::add used to run on the device at boot)
+        # and inflates every stored array against its source.
+        run: |
+          set -e
+          python3 scripts/gen_module_schemas.py --check
+          # And it fails when it should: a schema edited without regenerating,
+          # and a schema with a field the page cannot draw.
+          cp src/modules/schemas/time.json /tmp/time.json.orig
+          restore() { cp /tmp/time.json.orig src/modules/schemas/time.json; }
+          sed -i 's/"label": "NTP server"/"label": "NTP host"/' src/modules/schemas/time.json
+          if python3 scripts/gen_module_schemas.py --check; then
+            restore; echo "::error::--check passed a stale ModuleSchemas.h"; exit 1
+          fi
+          restore
+          sed -i '0,/"type": "string"/s//"type": "text"/' src/modules/schemas/time.json
+          if python3 scripts/gen_module_schemas.py --check; then
+            restore; echo "::error::--check passed a field type the page cannot draw"; exit 1
+          fi
+          restore
+          python3 scripts/gen_module_schemas.py --check
 
       - name: Verify the gzipped page still inflates to the original
         # Deliberately a second, independent implementation of what --check

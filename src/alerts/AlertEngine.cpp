@@ -16,6 +16,7 @@
 #include "../pipeline/DataPipeline.h"   // global fsMutex — serialise FS writes
 #include <LittleFS.h>
 #include "../export/MqttExporter.h"
+#include "../utils/JsonIO.h"
 
 // Forward-declared in Logger.ino (same sketch scope as ApiHandlers.cpp)
 #ifdef EXPORT_MQTT_ENABLED
@@ -67,7 +68,7 @@ bool AlertEngine::begin(fs::FS& fs, const char* path) {
     }
 
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, f);
+    DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
 
     if (err) {

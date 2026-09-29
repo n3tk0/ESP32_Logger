@@ -172,8 +172,8 @@ Current, `xiao_esp32c3`, `firmware.bin`:
 
 | build | image | free of 1,507,328 |
 |---|---:|---:|
-| default `src/setup.h` | 1,294,080 | 213,248 (86 %) |
-| every optional feature on | 1,454,064 | 53,264 (96.5 %) |
+| default `src/setup.h` | 1,278,688 | 228,640 (84.8 %) |
+| every optional feature on | 1,472,048 | 35,280 (97.7 %) |
 
 Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 
@@ -186,17 +186,23 @@ Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 | mbedTLS error sentences replaced by the bare code (`LOGGER_TERSE_TLS_ERRORS`, C3 envs) | **−15,584** — see `src/core/IdfTrims.c` |
 | core dump writer dropped, there is no `coredump` partition (`LOGGER_NO_COREDUMP`, C3 envs) | **−11,888** — same file |
 | `remoteIngest`, `trendRing`, `readingCache` kept in `.bss` (spinlock set in the constructor) | **−10,464** with every feature on — a non-zero member initialiser had put each whole object into the image |
-
 | ArduinoJson parser compiled once for memory input, not seven times: every `deserializeJson` from memory passes `(const char*, length)` | **−9,376** — String, `char*`, `uint8_t*` and the rest each compiled the whole parser again |
 | ArduinoJson serialiser compiled once for streams: `serializeJson` to a response, File or Serial passes `static_cast<Print&>` | **−3,184** |
 | Kindle stylesheet emitted by one call instead of 271 (`kdEmitSheet()`, same bytes out) | **−2,672** |
+| ESP_ERR_* names replaced by the bare code (`LOGGER_TERSE_ESP_ERRORS`, C3 envs) | **−7,312** — `src/core/IdfTrims.c` again |
+| JSON files read through the memory parser (`deserializeJsonFile()`), and JSON written to a `String` or a `char` buffer through the `Print` serialiser (`jsonToString()`, `jsonToBuf()`) — `src/utils/JsonIO.h` | **−6,784** — the last File parser and the String and `char[]` serialisers |
+| module form schemas stored gzipped and served as they are stored (`GET /api/modules/:id/schema`), checked by `scripts/gen_module_schemas.py` instead of at boot | **−5,807** by symbol sizes — 10,456 B of text became 4,362 B of gzip |
+| settings file through the modules' own `save()`/`load()`, one Kindle field table for `/api/kindle/config` and the file, Kindle shell values printed by `kdShellInt()` | **~−7,700** — this row and the one above measure −13,552 together as a `firmware.bin` delta |
+| form and query fields looked up once (`formArg()`, `queryArg()`, `formCopy()` in `src/web/FormArgs.h`) | **−2,528** |
+| `KD_METRIC_STYLE` linked once instead of in both files that include `KindleSlots.h` | **−540** |
 
-The last six are measured with every optional feature on, and
-`tools/check_flash_trims.py` reads the linked ELF in CI so none of them can
-quietly come undone — including a new call site that hands ArduinoJson a type
-it has not been compiled for yet.
+Everything from the mbedTLS row down is measured with every optional feature
+on, and `tools/check_flash_trims.py` reads the linked ELF in
+CI so none of it can quietly come undone — including a new call site that
+hands ArduinoJson a type it has not been compiled for yet, and a table defined
+`static` in a header, which every file that includes it links again.
 
-The last one is listed for honesty rather than for its size: the estimate before
+The route-handler row is listed for honesty rather than for its size: the estimate before
 it was made was −11 KB, from summing `_Function_handler` symbol sizes in the
 object file. Most of that turned out to be exception metadata that
 `-fno-exceptions` removes anyway, and the two changes overlap almost entirely.

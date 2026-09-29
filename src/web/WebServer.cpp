@@ -33,7 +33,8 @@
 #include "../storage/Datalog.h"
 #include "../utils/Utils.h"
 #include "ApiHandlers.h"
-#include "KindleSkin.h"                 // kdSkinClamp() on settings import
+#include "SettingsJson.h"               // /export_settings, /import_settings
+#include "FormArgs.h"                   // formArg / formCopy / formParam
 #include "FirstRunHandler.h"            // R11 first-run wizard backend
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
@@ -54,6 +55,7 @@
 #include <math.h>
 #include <time.h>
 #include <sys/time.h>
+#include "../utils/JsonIO.h"
 
 // Safe strncpy that always null-terminates
 #define SAFE_STRNCPY(dst, src, n) do { strncpy(dst, src, (n) - 1); dst[(n) - 1] = '\0'; } while(0)
@@ -192,7 +194,7 @@ void publishLiveEvent() {
     JsonDocument doc;
     buildLiveSnapshot(doc);
     String buf;
-    serializeJson(doc, buf);
+    jsonToString(doc, buf);
     liveEvents.send(buf.c_str(), "live", millis());
 }
 
@@ -366,13 +368,6 @@ static bool scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
 }
 
 // ============================================================================
-// IP ARRAY FORMATTER  (uint8_t[4] → "A.B.C.D")
-// ============================================================================
-static void fmtIP(const uint8_t* ip, char* buf16) {
-    snprintf(buf16, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
-}
-
-// ============================================================================
 // ROUTE HANDLERS
 // ============================================================================
 // These are the bodies that used to be inline lambdas inside
@@ -487,8 +482,8 @@ static void h_get_api_recent_logs(AsyncWebServerRequest* r) {
 
     uint32_t sinceBoot = 0;
     bool hasSince = false;
-    if (r->hasParam("since")) {
-        sinceBoot = (uint32_t)r->getParam("since")->value().toInt();
+    if (const String* v = queryArg(r, "since")) {
+        sinceBoot = (uint32_t)v->toInt();
         hasSince  = true;
     }
     doc["bootCount"] = bootCount;  // client advances cursor from this
@@ -657,11 +652,11 @@ static void h_get_api_filelist(AsyncWebServerRequest* r) {
     JsonDocument doc;
     JsonArray files = doc["files"].to<JsonArray>();
 
-    String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+    String storage = queryOr(r, "storage", currentStorageView);
     // sanitizePath() rejects "..", backslash, control chars, NUL (returns
     // "") — mirrors /download, /delete, /move_file. Without it a caller
     // could enumerate arbitrary directories (e.g. /config) by traversal.
-    String dir     = sanitizePath(r->hasParam("dir") ? r->getParam("dir")->value() : "/");
+    String dir     = sanitizePath(queryOr(r, "dir", "/"));
     // sanitizePath() returns "" for a rejected/traversal path; reject
     // explicitly with 400 like /download, /delete, /mkdir, /move_file
     // rather than letting scanDir() open an empty path.
@@ -669,7 +664,7 @@ static void h_get_api_filelist(AsyncWebServerRequest* r) {
         r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid dir\"}");
         return;
     }
-    String filter  = r->hasParam("filter")  ? r->getParam("filter")->value()  : "";
+    String filter  = queryOr(r, "filter", "");
     bool recursive = r->hasParam("recursive");
 
     fs::FS* targetFS = nullptr;
@@ -706,8 +701,6 @@ static void h_get_api_changelog(AsyncWebServerRequest* r) {
 }
 
 static void h_get_export_settings(AsyncWebServerRequest* r) {
-    char ipBuf[16];
-
     // Guarantee the payload is complete regardless of how config landed
     // in memory — fillConfigDefaults() is idempotent, so callers still
     // see their last-saved non-default values.  Audit Pass 4 F:
@@ -715,166 +708,12 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     // applyDefaults() before serialization."
     fillConfigDefaults();
 
-    JsonDocument doc;
-
-    // ── Identity ──────────────────────────────────────────────────────────
-    doc["deviceName"]     = strlen(config.deviceName) ? config.deviceName : "Water Logger";
-    doc["deviceId"]       = config.deviceId;
-    doc["forceWebServer"] = config.forceWebServer;
-
-    // ── Theme ─────────────────────────────────────────────────────────────
-    JsonObject th = doc["theme"].to<JsonObject>();
-    th["mode"]              = (int)config.theme.mode;
-    th["primaryColor"]      = config.theme.primaryColor;
-    th["secondaryColor"]    = config.theme.secondaryColor;
-    th["lightBgColor"]      = config.theme.lightBgColor;
-    th["lightTextColor"]    = config.theme.lightTextColor;
-    th["darkBgColor"]       = config.theme.darkBgColor;
-    th["darkTextColor"]     = config.theme.darkTextColor;
-    th["ffColor"]           = config.theme.ffColor;
-    th["pfColor"]           = config.theme.pfColor;
-    th["otherColor"]        = config.theme.otherColor;
-    th["storageBarColor"]   = config.theme.storageBarColor;
-    th["storageBar70Color"] = config.theme.storageBar70Color;
-    th["storageBar90Color"] = config.theme.storageBar90Color;
-    th["storageBarBorder"]  = config.theme.storageBarBorder;
-    th["logoSource"]        = config.theme.logoSource;
-    th["faviconPath"]       = config.theme.faviconPath;
-    th["boardDiagramPath"]  = config.theme.boardDiagramPath;
-    th["chartSource"]       = (int)config.theme.chartSource;
-    th["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/uPlot.iife.min.js";
-    th["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
-    th["showIcons"]         = config.theme.showIcons;
-
-    // ── Flow Meter ────────────────────────────────────────────────────────
-    JsonObject fm = doc["flowMeter"].to<JsonObject>();
-    fm["pulsesPerLiter"]                = config.flowMeter.pulsesPerLiter > 0    ? config.flowMeter.pulsesPerLiter    : 450.0f;
-    fm["calibrationMultiplier"]         = config.flowMeter.calibrationMultiplier ? config.flowMeter.calibrationMultiplier : 1.0f;
-    fm["testMode"]                      = config.flowMeter.testMode;
-    fm["blinkDuration"]                 = config.flowMeter.blinkDuration > 0 ? config.flowMeter.blinkDuration : 250;
-
-    // ── Datalog ───────────────────────────────────────────────────────────
-    JsonObject dl = doc["datalog"].to<JsonObject>();
-    dl["rotation"]               = (int)config.datalog.rotation;
-    dl["maxSizeKB"]              = config.datalog.maxSizeKB > 0 ? config.datalog.maxSizeKB : 1024;
-    dl["maxEntries"]             = config.datalog.maxEntries > 0 ? config.datalog.maxEntries : 10000;
-    dl["folder"]                 = config.datalog.folder;
-    dl["timestampFilename"]      = config.datalog.timestampFilename;
-    dl["includeDeviceId"]        = config.datalog.includeDeviceId;
-    dl["prefix"]                 = strlen(config.datalog.prefix) ? config.datalog.prefix : "datalog";
-    dl["dateFormat"]             = (int)config.datalog.dateFormat;
-    dl["timeFormat"]             = (int)config.datalog.timeFormat;
-    dl["endFormat"]              = (int)config.datalog.endFormat;
-    dl["volumeFormat"]           = (int)config.datalog.volumeFormat;
-    dl["includeBootCount"]       = config.datalog.includeBootCount;
-    dl["includeExtraPresses"]    = config.datalog.includeExtraPresses;
-    dl["postCorrectionEnabled"]  = config.datalog.postCorrectionEnabled;
-    dl["pfToFfThreshold"]        = config.datalog.pfToFfThreshold > 0 ? config.datalog.pfToFfThreshold : 4.5f;
-    dl["ffToPfThreshold"]        = config.datalog.ffToPfThreshold > 0 ? config.datalog.ffToPfThreshold : 3.7f;
-    dl["manualPressThresholdMs"] = config.datalog.manualPressThresholdMs;
-    datalogColsToJson(dl["sensorCols"].to<JsonObject>());
-    {
-        // What this device can put in the log, for the page to offer only
-        // that. Read-only: an import ignores it.
-        const DatalogLayout all = datalogLayout(true);
-        JsonObject av = dl["avail"].to<JsonObject>();
-        av["volume"] = all.volume;
-        av["ff"]     = all.ff;
-        av["pf"]     = all.pf;
-    }
-
-    // ── Logger (the data log's sensor rows) ────────────────────────────────
-    JsonObject lg = doc["logger"].to<JsonObject>();
-    lg["csvLoggingEnabled"]         = config.logger.csvLoggingEnabled;
-    lg["aggregationIntervalSec"]    = config.logger.aggregationIntervalSec ? config.logger.aggregationIntervalSec : 60;
-
-    // ── Kindle dashboard appearance ───────────────────────────────────────
-    // Exported on every build, including one without FEATURE_KINDLE_DASHBOARD:
-    // a settings file is a record of the device's configuration, and dropping
-    // a section because this particular firmware cannot draw it would mean a
-    // backup taken on one build quietly resetting the appearance on another.
-    JsonObject kd = doc["kindle"].to<JsonObject>();
-    kd["face"]          = config.kindle.face;
-    kd["faceCustom"]    = config.kindle.faceCustom;
-    kd["boldZones"]     = config.kindle.boldZones;
-    kd["showFlags"]     = config.kindle.showFlags;
-    kd["clockStyle"]    = config.kindle.clockStyle;
-    kd["timeFormat"]    = config.kindle.timeFormat;
-    kd["dateFormat"]    = config.kindle.dateFormat;
-    kd["pressureUnit"]  = config.kindle.pressureUnit;
-    kd["tempDecimals"]  = config.kindle.tempDecimals;
-    // v15. Added here as well as to the struct, because the paragraph above is
-    // the promise this section makes: a settings file is a record of the
-    // device's configuration. Six new fields that a backup did not carry would
-    // have made a restore silently revert the sensor mapping and the FBInk
-    // resolution while appearing to restore everything.
-    kd["refreshSec"]      = config.kindle.refreshSec;
-    kd["followData"]      = config.kindle.followData;
-    kd["clockPinRefresh"] = config.kindle.clockPinRefresh;
-    kd["fbinkResW"]       = config.kindle.fbinkResW;
-    kd["outdoorSensor"]   = config.kindle.outdoorSensor;
-    kd["indoorSensor"]    = config.kindle.indoorSensor;
-    kd["rotation"]        = config.kindle.rotation * 90;   // degrees, as the API and ?rot= spell it
-    kd["pageRotation"]    = kdPageRotDeg(config.kindle);   // -1: the same as the panel
-    kd["clockOff"]        = config.kindle.clockOff;
-    kd["clockSync"]       = kdClockSyncDays(config.kindle);   // days, 0 never
-    // The week strip's look and content, and the rules, as the bytes they
-    // are stored in — kdSkinClamp() narrows them on the way back in.
-    kd["weekStyle"]       = config.kindle.weekStyle;
-    kd["rules"]           = config.kindle.rules;
-    kd["metricSize"]      = config.kindle.metricSize;
-
-    // ── Network ───────────────────────────────────────────────────────────
-    JsonObject net = doc["network"].to<JsonObject>();
-    net["wifiMode"]       = (int)config.network.wifiMode;
-    net["apSSID"]         = strlen(config.network.apSSID)         ? config.network.apSSID         : DEFAULT_AP_SSID;
-    const char* apPw = "***";
-    const char* clPw = "***";
+    bool reveal = false;
 #if WEB_BASIC_AUTH_ENABLED
-    if (r->hasParam("reveal_secrets") &&
-        r->getParam("reveal_secrets")->value() == "1") {
-        apPw = config.network.apPassword;
-        clPw = config.network.clientPassword;
-    }
+    if (const String* v = queryArg(r, "reveal_secrets")) reveal = *v == "1";
 #endif
-    net["apPassword"]     = apPw;
-    net["clientSSID"]     = config.network.clientSSID;
-    net["clientPassword"] = clPw;
-    net["ntpServer"]      = strlen(config.network.ntpServer)      ? config.network.ntpServer      : DEFAULT_NTP_SERVER;
-    net["timezone"]       = config.network.timezone;
-    net["dstRule"]        = config.network.dstRule;
-    net["dstOffsetHours"] = config.network.dstOffsetHours;
-    net["useStaticIP"]    = config.network.useStaticIP;
-
-    // AP network — uint8_t[4] arrays → "A.B.C.D" strings
-    fmtIP(config.network.apIP,      ipBuf); net["apIP"]      = ipBuf;
-    fmtIP(config.network.apGateway, ipBuf); net["apGateway"] = ipBuf;
-    fmtIP(config.network.apSubnet,  ipBuf); net["apSubnet"]  = ipBuf;
-
-    // Client static IP — uint8_t[4] arrays → "A.B.C.D" strings
-    fmtIP(config.network.staticIP, ipBuf); net["staticIP"] = ipBuf;
-    fmtIP(config.network.gateway,  ipBuf); net["gateway"]  = ipBuf;
-    fmtIP(config.network.subnet,   ipBuf); net["subnet"]   = ipBuf;
-    fmtIP(config.network.dns,      ipBuf); net["dns"]      = ipBuf;
-
-    // ── Hardware ──────────────────────────────────────────────────────────
-    JsonObject hw = doc["hardware"].to<JsonObject>();
-    hw["storageType"]        = (int)config.hardware.storageType;
-    hw["wakeupMode"]         = (int)config.hardware.wakeupMode;
-    hw["cpuFreqMHz"]         = config.hardware.cpuFreqMHz > 0 ? config.hardware.cpuFreqMHz : 80;
-    hw["defaultStorageView"] = config.hardware.defaultStorageView;
-    hw["debounceMs"]         = config.hardware.debounceMs > 0  ? config.hardware.debounceMs : 100;
-    hw["pinWifiTrigger"]     = config.hardware.pinWifiTrigger;
-    hw["pinWakeupFF"]        = config.hardware.pinWakeupFF;
-    hw["pinWakeupPF"]        = config.hardware.pinWakeupPF;
-    hw["pinFlowSensor"]      = config.hardware.pinFlowSensor;
-    hw["pinRtcCE"]           = config.hardware.pinRtcCE;
-    hw["pinRtcIO"]           = config.hardware.pinRtcIO;
-    hw["pinRtcSCLK"]         = config.hardware.pinRtcSCLK;
-    hw["pinSdCS"]            = config.hardware.pinSdCS;
-    hw["pinSdMOSI"]          = config.hardware.pinSdMOSI;
-    hw["pinSdMISO"]          = config.hardware.pinSdMISO;
-    hw["pinSdSCK"]           = config.hardware.pinSdSCK;
+    JsonDocument doc;
+    settingsToJson(doc.to<JsonObject>(), reveal);
 
     AsyncResponseStream *resp = r->beginResponseStream("application/json");
     String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
@@ -885,16 +724,14 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
 
 static void h_post_save_device(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
-    if (r->hasParam("deviceName", true))
-        SAFE_STRNCPY(config.deviceName, r->getParam("deviceName", true)->value().c_str(), sizeof(config.deviceName));
-    if (r->hasParam("deviceId", true)) {
-        String newId = r->getParam("deviceId", true)->value();
-        if (newId.length() > 0 && newId.length() <= 12)
-            SAFE_STRNCPY(config.deviceId, newId.c_str(), sizeof(config.deviceId));
+    formCopy(r, "deviceName", config.deviceName, sizeof(config.deviceName));
+    if (const String* v = formArg(r, "deviceId")) {
+        if (v->length() > 0 && v->length() <= 12)
+            SAFE_STRNCPY(config.deviceId, v->c_str(), sizeof(config.deviceId));
     }
     config.forceWebServer = r->hasParam("forceWebServer", true);
-    if (r->hasParam("defaultStorageView", true))
-        config.hardware.defaultStorageView = r->getParam("defaultStorageView", true)->value().toInt();
+    if (const String* v = formArg(r, "defaultStorageView"))
+        config.hardware.defaultStorageView = v->toInt();
     // PR #105 follow-up: Reset Boot Count migrated from /save_flowmeter
     // (page retired) to the System Info card on settings_device.
     if (r->hasParam("resetBootCount", true)) { bootCount = 0; backupBootCount(); }
@@ -909,8 +746,9 @@ static void h_post_save_hardware(AsyncWebServerRequest* r) {
     // First violation aborts the save with a 400; partial assignment is
     // never persisted (saveConfig runs only at the end).
     auto setPin = [&](const char* name, uint8_t& dest) -> bool {
-        if (!r->hasParam(name, true)) return true;
-        int v = r->getParam(name, true)->value().toInt();
+        const String* arg = formArg(r, name);
+        if (!arg) return true;
+        int v = arg->toInt();
         if (v == -1) { dest = PIN_UNSET; return true; }
         if (v < 0 || v > 255) {
             r->send(400, "application/json",
@@ -931,8 +769,8 @@ static void h_post_save_hardware(AsyncWebServerRequest* r) {
         dest = (uint8_t)v;
         return true;
     };
-    if (r->hasParam("storageType", true))    config.hardware.storageType    = (StorageType)r->getParam("storageType", true)->value().toInt();
-    if (r->hasParam("wakeupMode", true))     config.hardware.wakeupMode     = (WakeupMode)r->getParam("wakeupMode", true)->value().toInt();
+    if (const String* v = formArg(r, "storageType"))    config.hardware.storageType    = (StorageType)v->toInt();
+    if (const String* v = formArg(r, "wakeupMode"))     config.hardware.wakeupMode     = (WakeupMode)v->toInt();
     if (!setPin("pinWifiTrigger", config.hardware.pinWifiTrigger)) return;
     if (!setPin("pinWakeupFF",    config.hardware.pinWakeupFF))    return;
     if (!setPin("pinWakeupPF",    config.hardware.pinWakeupPF))    return;
@@ -977,21 +815,21 @@ static void h_post_save_hardware(AsyncWebServerRequest* r) {
             }
         }
     }
-    if (r->hasParam("cpuFreqMHz", true))     config.hardware.cpuFreqMHz     = r->getParam("cpuFreqMHz", true)->value().toInt();
-    if (r->hasParam("debounceMs", true))     config.hardware.debounceMs     = constrain(r->getParam("debounceMs", true)->value().toInt(), 20, 500);
-    if (r->hasParam("debugMode", true))      config.hardware.debugMode      = r->getParam("debugMode", true)->value() == "1";
+    if (const String* v = formArg(r, "cpuFreqMHz"))     config.hardware.cpuFreqMHz     = v->toInt();
+    if (const String* v = formArg(r, "debounceMs"))     config.hardware.debounceMs     = constrain(v->toInt(), 20, 500);
+    if (const String* v = formArg(r, "debugMode"))      config.hardware.debugMode      = *v == "1";
     
     // Chunk G: move testMode / blinkDuration to hardware page
-    if (r->hasParam("testMode", true)) {
-        config.flowMeter.testMode = r->getParam("testMode", true)->value() == "on" || r->getParam("testMode", true)->value() == "1";
+    if (const String* v = formArg(r, "testMode")) {
+        config.flowMeter.testMode = *v == "on" || *v == "1";
     } else {
         config.flowMeter.testMode = false;
     }
-    if (r->hasParam("blinkDuration", true)) {
+    if (const String* v = formArg(r, "blinkDuration")) {
         // PR #105 review (Gemini medium): restore the lower-bound clamp
         // the original /save_flowmeter handler had — values < 50 ms make
         // the LED timing-loop in ESP_Logger.ino spin too tight.
-        config.flowMeter.blinkDuration = max(50L, (long)r->getParam("blinkDuration", true)->value().toInt());
+        config.flowMeter.blinkDuration = max(50L, (long)v->toInt());
     }
     saveConfig();
     sendRestartPage(r, "Device is restarting with new hardware settings.");
@@ -1001,27 +839,27 @@ static void h_post_save_hardware(AsyncWebServerRequest* r) {
 
 static void h_post_save_theme(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
-    if (r->hasParam("themeMode", true))        config.theme.mode           = (ThemeMode)r->getParam("themeMode", true)->value().toInt();
+    if (const String* v = formArg(r, "themeMode"))        config.theme.mode           = (ThemeMode)v->toInt();
     config.theme.showIcons = r->hasParam("showIcons", true);
-    if (r->hasParam("primaryColor", true))     SAFE_STRNCPY(config.theme.primaryColor,      r->getParam("primaryColor", true)->value().c_str(), sizeof(config.theme.primaryColor));
-    if (r->hasParam("secondaryColor", true))   SAFE_STRNCPY(config.theme.secondaryColor,    r->getParam("secondaryColor", true)->value().c_str(), sizeof(config.theme.secondaryColor));
-    if (r->hasParam("lightBgColor", true))     SAFE_STRNCPY(config.theme.lightBgColor,      r->getParam("lightBgColor", true)->value().c_str(), sizeof(config.theme.lightBgColor));
-    if (r->hasParam("lightTextColor", true))   SAFE_STRNCPY(config.theme.lightTextColor,    r->getParam("lightTextColor", true)->value().c_str(), sizeof(config.theme.lightTextColor));
-    if (r->hasParam("darkBgColor", true))      SAFE_STRNCPY(config.theme.darkBgColor,       r->getParam("darkBgColor", true)->value().c_str(), sizeof(config.theme.darkBgColor));
-    if (r->hasParam("darkTextColor", true))    SAFE_STRNCPY(config.theme.darkTextColor,     r->getParam("darkTextColor", true)->value().c_str(), sizeof(config.theme.darkTextColor));
-    if (r->hasParam("ffColor", true))          SAFE_STRNCPY(config.theme.ffColor,           r->getParam("ffColor", true)->value().c_str(), sizeof(config.theme.ffColor));
-    if (r->hasParam("pfColor", true))          SAFE_STRNCPY(config.theme.pfColor,           r->getParam("pfColor", true)->value().c_str(), sizeof(config.theme.pfColor));
-    if (r->hasParam("otherColor", true))       SAFE_STRNCPY(config.theme.otherColor,        r->getParam("otherColor", true)->value().c_str(), sizeof(config.theme.otherColor));
-    if (r->hasParam("storageBarColor", true))  SAFE_STRNCPY(config.theme.storageBarColor,   r->getParam("storageBarColor", true)->value().c_str(), sizeof(config.theme.storageBarColor));
-    if (r->hasParam("storageBar70Color", true))SAFE_STRNCPY(config.theme.storageBar70Color, r->getParam("storageBar70Color", true)->value().c_str(), sizeof(config.theme.storageBar70Color));
-    if (r->hasParam("storageBar90Color", true))SAFE_STRNCPY(config.theme.storageBar90Color, r->getParam("storageBar90Color", true)->value().c_str(), sizeof(config.theme.storageBar90Color));
-    if (r->hasParam("storageBarBorder", true)) SAFE_STRNCPY(config.theme.storageBarBorder,  r->getParam("storageBarBorder", true)->value().c_str(), sizeof(config.theme.storageBarBorder));
-    if (r->hasParam("logoSource", true))       SAFE_STRNCPY(config.theme.logoSource,        r->getParam("logoSource", true)->value().c_str(), sizeof(config.theme.logoSource));
-    if (r->hasParam("faviconPath", true))      SAFE_STRNCPY(config.theme.faviconPath,       r->getParam("faviconPath", true)->value().c_str(), sizeof(config.theme.faviconPath));
-    if (r->hasParam("boardDiagramPath", true)) SAFE_STRNCPY(config.theme.boardDiagramPath,  r->getParam("boardDiagramPath", true)->value().c_str(), sizeof(config.theme.boardDiagramPath));
-    if (r->hasParam("chartSource", true))      config.theme.chartSource      = (ChartSource)r->getParam("chartSource", true)->value().toInt();
-    if (r->hasParam("chartLocalPath", true))   SAFE_STRNCPY(config.theme.chartLocalPath,    r->getParam("chartLocalPath", true)->value().c_str(), sizeof(config.theme.chartLocalPath));
-    if (r->hasParam("chartLabelFormat", true)) config.theme.chartLabelFormat = (ChartLabelFormat)r->getParam("chartLabelFormat", true)->value().toInt();
+    formCopy(r, "primaryColor", config.theme.primaryColor, sizeof(config.theme.primaryColor));
+    formCopy(r, "secondaryColor", config.theme.secondaryColor, sizeof(config.theme.secondaryColor));
+    formCopy(r, "lightBgColor", config.theme.lightBgColor, sizeof(config.theme.lightBgColor));
+    formCopy(r, "lightTextColor", config.theme.lightTextColor, sizeof(config.theme.lightTextColor));
+    formCopy(r, "darkBgColor", config.theme.darkBgColor, sizeof(config.theme.darkBgColor));
+    formCopy(r, "darkTextColor", config.theme.darkTextColor, sizeof(config.theme.darkTextColor));
+    formCopy(r, "ffColor", config.theme.ffColor, sizeof(config.theme.ffColor));
+    formCopy(r, "pfColor", config.theme.pfColor, sizeof(config.theme.pfColor));
+    formCopy(r, "otherColor", config.theme.otherColor, sizeof(config.theme.otherColor));
+    formCopy(r, "storageBarColor", config.theme.storageBarColor, sizeof(config.theme.storageBarColor));
+    formCopy(r, "storageBar70Color", config.theme.storageBar70Color, sizeof(config.theme.storageBar70Color));
+    formCopy(r, "storageBar90Color", config.theme.storageBar90Color, sizeof(config.theme.storageBar90Color));
+    formCopy(r, "storageBarBorder", config.theme.storageBarBorder, sizeof(config.theme.storageBarBorder));
+    formCopy(r, "logoSource", config.theme.logoSource, sizeof(config.theme.logoSource));
+    formCopy(r, "faviconPath", config.theme.faviconPath, sizeof(config.theme.faviconPath));
+    formCopy(r, "boardDiagramPath", config.theme.boardDiagramPath, sizeof(config.theme.boardDiagramPath));
+    if (const String* v = formArg(r, "chartSource"))      config.theme.chartSource      = (ChartSource)v->toInt();
+    formCopy(r, "chartLocalPath", config.theme.chartLocalPath, sizeof(config.theme.chartLocalPath));
+    if (const String* v = formArg(r, "chartLabelFormat")) config.theme.chartLabelFormat = (ChartLabelFormat)v->toInt();
     saveConfig();
     r->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1033,21 +871,12 @@ static void h_post_save_datalog(AsyncWebServerRequest* r) {
     // DataLogModule::load() trusts that prefix/folder/currentFile have
     // already been sanitised; the gates below keep that contract honest
     // and return HTTP 400 with field-specific messages if they fail.
-    auto isSafePrefix = [](const String& s) -> bool {
-        if (s.length() == 0 || s.length() > 32) return false;
-        for (size_t i = 0; i < s.length(); i++) {
-            char c = s[i];
-            if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) return false;
-        }
-        if (s == "." || s == "..") return false;
-        return true;
-    };
     String safeCurrentFile;
     String safePrefix;
     String safeFolder;
     bool   haveCurrentFile = false, havePrefix = false, haveFolder = false;
-    if (r->hasParam("currentFile", true)) {
-        safeCurrentFile = sanitizePath(r->getParam("currentFile", true)->value());
+    if (const String* v = formArg(r, "currentFile")) {
+        safeCurrentFile = sanitizePath(*v);
         if (safeCurrentFile.length() == 0) {
             r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid currentFile path\"}");
             return;
@@ -1058,16 +887,16 @@ static void h_post_save_datalog(AsyncWebServerRequest* r) {
         }
         haveCurrentFile = true;
     }
-    if (r->hasParam("prefix", true)) {
-        safePrefix = r->getParam("prefix", true)->value();
-        if (!isSafePrefix(safePrefix)) {
+    if (const String* v = formArg(r, "prefix")) {
+        safePrefix = *v;
+        if (!datalogPrefixOk(safePrefix.c_str(), safePrefix.length())) {
             r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix (no slashes, control chars, or ..)\"}");
             return;
         }
         havePrefix = true;
     }
-    if (r->hasParam("folder", true)) {
-        String fld = r->getParam("folder", true)->value();
+    if (const String* v = formArg(r, "folder")) {
+        String fld = *v;
         if (fld.length() > 0) {
             safeFolder = sanitizePath(fld);
             if (safeFolder.length() == 0) {
@@ -1088,21 +917,21 @@ static void h_post_save_datalog(AsyncWebServerRequest* r) {
     if (haveCurrentFile)                       cfg["currentFile"]            = safeCurrentFile;
     if (havePrefix)                            cfg["prefix"]                 = safePrefix;
     if (haveFolder)                            cfg["folder"]                 = safeFolder;
-    if (r->hasParam("rotation", true))         cfg["rotation"]               = r->getParam("rotation", true)->value().toInt();
-    if (r->hasParam("maxSizeKB", true))        cfg["maxSizeKB"]              = r->getParam("maxSizeKB", true)->value().toInt();
-    if (r->hasParam("maxEntries", true))       cfg["maxEntries"]             = r->getParam("maxEntries", true)->value().toInt();
+    if (const String* v = formArg(r, "rotation"))         cfg["rotation"]               = v->toInt();
+    if (const String* v = formArg(r, "maxSizeKB"))        cfg["maxSizeKB"]              = v->toInt();
+    if (const String* v = formArg(r, "maxEntries"))       cfg["maxEntries"]             = v->toInt();
     cfg["timestampFilename"]                   = r->hasParam("timestampFilename", true);
     cfg["includeDeviceId"]                     = r->hasParam("includeDeviceId", true);
     cfg["includeBootCount"]                    = r->hasParam("includeBootCount", true);
     cfg["includeExtraPresses"]                 = r->hasParam("includeExtraPresses", true);
-    if (r->hasParam("dateFormat", true))       cfg["dateFormat"]             = r->getParam("dateFormat", true)->value().toInt();
-    if (r->hasParam("timeFormat", true))       cfg["timeFormat"]             = r->getParam("timeFormat", true)->value().toInt();
-    if (r->hasParam("endFormat", true))        cfg["endFormat"]              = r->getParam("endFormat", true)->value().toInt();
-    if (r->hasParam("volumeFormat", true))     cfg["volumeFormat"]           = r->getParam("volumeFormat", true)->value().toInt();
+    if (const String* v = formArg(r, "dateFormat"))       cfg["dateFormat"]             = v->toInt();
+    if (const String* v = formArg(r, "timeFormat"))       cfg["timeFormat"]             = v->toInt();
+    if (const String* v = formArg(r, "endFormat"))        cfg["endFormat"]              = v->toInt();
+    if (const String* v = formArg(r, "volumeFormat"))     cfg["volumeFormat"]           = v->toInt();
     cfg["postCorrectionEnabled"]               = r->hasParam("postCorrectionEnabled", true);
-    if (r->hasParam("pfToFfThreshold", true))         cfg["pfToFfThreshold"]        = r->getParam("pfToFfThreshold", true)->value().toFloat();
-    if (r->hasParam("ffToPfThreshold", true))         cfg["ffToPfThreshold"]        = r->getParam("ffToPfThreshold", true)->value().toFloat();
-    if (r->hasParam("manualPressThresholdMs", true))  cfg["manualPressThresholdMs"] = r->getParam("manualPressThresholdMs", true)->value().toInt();
+    if (const String* v = formArg(r, "pfToFfThreshold"))         cfg["pfToFfThreshold"]        = v->toFloat();
+    if (const String* v = formArg(r, "ffToPfThreshold"))         cfg["ffToPfThreshold"]        = v->toFloat();
+    if (const String* v = formArg(r, "manualPressThresholdMs"))  cfg["manualPressThresholdMs"] = v->toInt();
 
     // The columns are checked before anything is applied, so a malformed
     // table leaves the whole save undone, not half of it.
@@ -1125,9 +954,8 @@ static void h_post_save_datalog(AsyncWebServerRequest* r) {
     // on/off, the interval, and the columns as JSON from the page's table.
     // The "create" / "switch" file actions are /api/datalog/{create,switch}.
     config.logger.csvLoggingEnabled = r->hasParam("csvLoggingEnabled", true);
-    if (r->hasParam("aggregationIntervalSec", true))
-        config.logger.aggregationIntervalSec = constrain(
-            r->getParam("aggregationIntervalSec", true)->value().toInt(), 5, 3600);
+    if (const String* v = formArg(r, "aggregationIntervalSec"))
+        config.logger.aggregationIntervalSec = constrain(v->toInt(), 5, 3600);
 
     saveConfig();
     TaskManager::applyLoggerConfig();
@@ -1144,25 +972,19 @@ static void h_post_api_datalog_create(AsyncWebServerRequest* r) {
         r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
         return;
     }
-    if (!r->hasParam("prefix", true)) {
+    const String* pv = formArg(r, "prefix");
+    if (!pv) {
         r->send(400, "application/json", "{\"ok\":false,\"error\":\"prefix required\"}");
         return;
     }
-    String prefix = r->getParam("prefix", true)->value();
-    // Same prefix rules as /save_datalog (kept in sync — see the inline
-    // isSafePrefix lambda in that handler).
-    if (prefix.length() == 0 || prefix.length() > 32 || prefix == "." || prefix == "..") {
+    const String& prefix = *pv;
+    // Same prefix rules as /save_datalog: one function, in DataLogModule.
+    if (!datalogPrefixOk(prefix.c_str(), prefix.length())) {
         r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
         return;
     }
-    for (size_t i = 0; i < prefix.length(); i++) {
-        char c = prefix[i];
-        if (c == '/' || c == '\\' || c == '\0' || (unsigned char)c < 0x20 || c == 0x7f) {
-            r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid prefix\"}");
-            return;
-        }
-    }
-    String folder = r->hasParam("folder", true) ? r->getParam("folder", true)->value() : "";
+    const String* fv = formArg(r, "folder");
+    String folder = fv ? *fv : String();
     if (folder.length() > 0) {
         folder = sanitizePath(folder);
         if (folder.length() == 0) {
@@ -1214,8 +1036,8 @@ static void h_post_api_datalog_create(AsyncWebServerRequest* r) {
     // Make this the active file unless caller explicitly opts out via
     // ?switch=0; default behaviour mirrors the pre-split UX where the
     // newly-created file became current.
-    bool switchToNew = !r->hasParam("switch", true) ||
-                        r->getParam("switch", true)->value() != "0";
+    const String* sw = formArg(r, "switch");
+    bool switchToNew = !sw || *sw != "0";
     if (switchToNew) {
         SAFE_STRNCPY(config.datalog.currentFile, newFile.c_str(), sizeof(config.datalog.currentFile));
         saveConfig();
@@ -1231,11 +1053,12 @@ static void h_post_api_datalog_switch(AsyncWebServerRequest* r) {
         r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
         return;
     }
-    if (!r->hasParam("path", true)) {
+    const String* pv = formArg(r, "path");
+    if (!pv) {
         r->send(400, "application/json", "{\"ok\":false,\"error\":\"path required\"}");
         return;
     }
-    String path = sanitizePath(r->getParam("path", true)->value());
+    String path = sanitizePath(*pv);
     if (path.length() == 0) {
         r->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid path\"}");
         return;
@@ -1288,11 +1111,6 @@ const char* applyNetworkForm(NetworkConfig& net, NetFormGet get, void* ctx) {
     return nullptr;
 }
 
-static const char* formParam(void* ctx, const char* key) {
-    AsyncWebServerRequest* r = static_cast<AsyncWebServerRequest*>(ctx);
-    return r->hasParam(key, true) ? r->getParam(key, true)->value().c_str() : nullptr;
-}
-
 // Applied to a copy and committed whole: a refused field used to leave the
 // ones before it changed in RAM (and saved by whatever wrote config next).
 // The same function applies a network handover's form (docs/NODE_CONFIG.md
@@ -1315,13 +1133,13 @@ static void h_post_save_network(AsyncWebServerRequest* r) {
 
 static void h_post_save_time(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
-    if (r->hasParam("ntpServer", true)) SAFE_STRNCPY(config.network.ntpServer, r->getParam("ntpServer", true)->value().c_str(), sizeof(config.network.ntpServer));
-    if (r->hasParam("timezone", true)) {
-        const int tz = r->getParam("timezone", true)->value().toInt();
+    formCopy(r, "ntpServer", config.network.ntpServer, sizeof(config.network.ntpServer));
+    if (const String* v = formArg(r, "timezone")) {
+        const int tz = v->toInt();
         if (tz >= -12 && tz <= 14) config.network.timezone = (int8_t)tz;
     }
-    if (r->hasParam("dstRule", true))
-        config.network.dstRule = dstRuleClamp((uint8_t)r->getParam("dstRule", true)->value().toInt());
+    if (const String* v = formArg(r, "dstRule"))
+        config.network.dstRule = dstRuleClamp((uint8_t)v->toInt());
     // The page offers the manual rule as "+1 h all year" and has no field for
     // the hours, so saving it here means exactly that.
     if (config.network.dstRule == DST_RULE_MANUAL) config.network.dstOffsetHours = 1;
@@ -1336,9 +1154,11 @@ static void h_post_set_time(AsyncWebServerRequest* r) {
         r->send(409, "application/json", "{\"ok\":false,\"error\":\"Busy\"}");
         return;
     }
-    if (r->hasParam("date", true) && r->hasParam("time", true)) {
-        String ds = r->getParam("date", true)->value();
-        String ts = r->getParam("time", true)->value();
+    const String* dv = formArg(r, "date");
+    const String* tv = formArg(r, "time");
+    if (dv && tv) {
+        const String& ds = *dv;
+        const String& ts = *tv;
         int yr = ds.substring(0,4).toInt(), mo = ds.substring(5,7).toInt(), dy = ds.substring(8,10).toInt();
         int hr = ts.substring(0,2).toInt(), mi = ts.substring(3,5).toInt();
 
@@ -1509,15 +1329,16 @@ static void h_post_api_format_filesystem(AsyncWebServerRequest* r) {
 }
 
 static void h_get_download(AsyncWebServerRequest* r) {
-    if (!r->hasParam("file")) { r->send(400, "text/plain", "No file"); return; }
-    String path = sanitizePath(r->getParam("file")->value());
+    const String* file = queryArg(r, "file");
+    if (!file) { r->send(400, "text/plain", "No file"); return; }
+    String path = sanitizePath(*file);
     if (path.isEmpty() || path == "/") { r->send(400, "text/plain", "Invalid path"); return; }
     if (isPathProtected(path) && !isPathDownloadAllowed(path)) {
         r->send(403, "application/json",
                 "{\"ok\":false,\"error\":\"protected path\"}");
         return;
     }
-    String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+    String storage = queryOr(r, "storage", currentStorageView);
     fs::FS* targetFS = (storage == "sdcard" && sdAvailable) ? sdFs() :
                        (littleFsAvailable ? (fs::FS*)&LittleFS : nullptr);
     if (targetFS && targetFS->exists(path)) {
@@ -1560,13 +1381,14 @@ static void h_get_download(AsyncWebServerRequest* r) {
 static void h_post_mkdir(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
     fs::FS* targetFS = getCurrentViewFS();
-    if (!r->hasParam("name") || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
-    String dirRaw  = r->hasParam("dir")     ? r->getParam("dir")->value()     : "/";
-    String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+    const String* nameArg = queryArg(r, "name");
+    if (!nameArg || !targetFS) { r->send(400, "text/plain", "Missing name"); return; }
+    String dirRaw  = queryOr(r, "dir", "/");
+    String storage = queryOr(r, "storage", currentStorageView);
     if (storage == "sdcard" && sdAvailable) targetFS = sdFs();
     else targetFS = &LittleFS;
     String dir  = sanitizePath(dirRaw);
-    String name = sanitizeFilename(r->getParam("name")->value());
+    String name = sanitizeFilename(*nameArg);
     if (dir.isEmpty() || name.isEmpty()) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid name or dir\"}"); return; }
     String fp   = buildPath(dir, name);
     // 500 ms cap: report busy rather than freeze the AsyncTCP worker.
@@ -1581,10 +1403,10 @@ static void h_post_mkdir(AsyncWebServerRequest* r) {
 
 static void h_post_move_file(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
-    String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+    String storage = queryOr(r, "storage", currentStorageView);
     String src     = r->hasParam("src")     ? sanitizePath(r->getParam("src")->value())     : "";
     String newName = r->hasParam("newName") ? sanitizeFilename(r->getParam("newName")->value()) : "";
-    String destRaw = r->hasParam("destDir") ? r->getParam("destDir")->value() : "";
+    String destRaw = queryOr(r, "destDir", "");
     if (src.isEmpty() || newName.isEmpty() || src == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid src or newName\"}"); return; }
     if (isPathProtected(src)) { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
     fs::FS* targetFS = nullptr;
@@ -2274,16 +2096,15 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
     // Accept both GET (legacy web.js compat) and POST (preferred)
     auto deleteHandler = [](AsyncWebServerRequest *r) {
         if (!requireMutatingAuth(r)) return;
-        if (!r->hasParam("path") && !r->hasParam("path", true)) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
         // Prefer POST param; fall back to query — sanitizePath rejects "..",
         // control chars, backslash, and NUL, returning "" on any violation.
-        String raw = r->hasParam("path", true)
-                     ? r->getParam("path", true)->value()
-                     : r->getParam("path")->value();
-        String path = sanitizePath(raw);
+        const String* raw = formArg(r, "path");
+        if (!raw) raw = queryArg(r, "path");
+        if (!raw) { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing path\"}"); return; }
+        String path = sanitizePath(*raw);
         if (path.isEmpty() || path == "/") { r->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid path\"}"); return; }
         if (isPathProtected(path))          { r->send(403, "application/json", "{\"ok\":false,\"error\":\"Protected path\"}"); return; }
-        String storage = r->hasParam("storage") ? r->getParam("storage")->value() : currentStorageView;
+        String storage = queryOr(r, "storage", currentStorageView);
         fs::FS* targetFS = nullptr;
         if (storage == "sdcard" && sdAvailable)              targetFS = sdFs();
         else if (storage == "internal" && littleFsAvailable) targetFS = &LittleFS;
@@ -2372,9 +2193,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     return;
                 }
 
-                String upDirRaw = request->hasParam("path")
-                                  ? request->getParam("path")->value()
-                                  : String("/www/");
+                String upDirRaw = queryOr(request, "path", "/www/");
                 String upDir = sanitizePath(upDirRaw);
                 if (upDir.isEmpty()) {
                     DBGF("Upload: invalid path '%s'\n", upDirRaw.c_str());
@@ -2389,9 +2208,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     return;
                 }
 
-                String upStorage = request->hasParam("storage")
-                                   ? request->getParam("storage")->value()
-                                   : String("internal");
+                String upStorage = queryOr(request, "storage", "internal");
 
                 bool wantSD = (upStorage == "sdcard");
                 fs::FS* targetFS = (wantSD && sdAvailable)
@@ -2493,127 +2310,9 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             r->_tempObject = nullptr;
             if (err) { r->send(400, "text/plain", String("JSON error: ") + err.c_str()); return; }
 
-            if (doc["deviceName"].is<const char*>()) SAFE_STRNCPY(config.deviceName, doc["deviceName"], sizeof(config.deviceName));
-            if (doc["forceWebServer"].is<bool>()) config.forceWebServer = doc["forceWebServer"];
-
-            if (doc["theme"].is<JsonObject>()) {
-                JsonObject t = doc["theme"];
-                if (t["mode"].is<int>()) config.theme.mode = (ThemeMode)(int)t["mode"];
-                auto cpColor = [&](const char* k, char* dst, size_t sz){ if(t[k].is<const char*>()) SAFE_STRNCPY(dst, t[k], sz); };
-                cpColor("primaryColor",   config.theme.primaryColor,   sizeof(config.theme.primaryColor));
-                cpColor("secondaryColor", config.theme.secondaryColor, sizeof(config.theme.secondaryColor));
-                cpColor("lightBgColor",   config.theme.lightBgColor,   sizeof(config.theme.lightBgColor));
-                cpColor("lightTextColor", config.theme.lightTextColor, sizeof(config.theme.lightTextColor));
-                cpColor("darkBgColor",    config.theme.darkBgColor,    sizeof(config.theme.darkBgColor));
-                cpColor("darkTextColor",  config.theme.darkTextColor,  sizeof(config.theme.darkTextColor));
-                cpColor("ffColor",        config.theme.ffColor,        sizeof(config.theme.ffColor));
-                cpColor("pfColor",        config.theme.pfColor,        sizeof(config.theme.pfColor));
-                cpColor("otherColor",     config.theme.otherColor,     sizeof(config.theme.otherColor));
-                if (t["showIcons"].is<bool>())        config.theme.showIcons        = t["showIcons"];
-                if (t["chartSource"].is<int>())       config.theme.chartSource       = (ChartSource)(int)t["chartSource"];
-                if (t["chartLabelFormat"].is<int>())  config.theme.chartLabelFormat  = (ChartLabelFormat)(int)t["chartLabelFormat"];
-            }
-            if (doc["flowMeter"].is<JsonObject>()) {
-                JsonObject fm = doc["flowMeter"];
-                if (fm["pulsesPerLiter"].is<float>())               config.flowMeter.pulsesPerLiter               = fm["pulsesPerLiter"];
-                if (fm["calibrationMultiplier"].is<float>())        config.flowMeter.calibrationMultiplier        = fm["calibrationMultiplier"];
-            }
-            if (doc["datalog"].is<JsonObject>()) {
-                JsonObject dl = doc["datalog"];
-                if (dl["rotation"].is<int>())               config.datalog.rotation               = (DatalogRotation)(int)dl["rotation"];
-                if (dl["maxSizeKB"].is<int>())              config.datalog.maxSizeKB              = constrain(dl["maxSizeKB"].as<int>(), 10, 10000);
-                if (dl["maxEntries"].is<int>())             config.datalog.maxEntries             = constrain(dl["maxEntries"].as<int>(), 10, 65535);
-                if (dl["dateFormat"].is<int>())             config.datalog.dateFormat             = dl["dateFormat"];
-                if (dl["timeFormat"].is<int>())             config.datalog.timeFormat             = dl["timeFormat"];
-                if (dl["endFormat"].is<int>())              config.datalog.endFormat              = dl["endFormat"];
-                if (dl["volumeFormat"].is<int>())           config.datalog.volumeFormat           = dl["volumeFormat"];
-                if (dl["includeBootCount"].is<bool>())      config.datalog.includeBootCount       = dl["includeBootCount"];
-                if (dl["includeExtraPresses"].is<bool>())   config.datalog.includeExtraPresses    = dl["includeExtraPresses"];
-                if (dl["postCorrectionEnabled"].is<bool>()) config.datalog.postCorrectionEnabled  = dl["postCorrectionEnabled"];
-                if (dl["pfToFfThreshold"].is<float>())      config.datalog.pfToFfThreshold        = max(0.1f, dl["pfToFfThreshold"].as<float>());
-                if (dl["ffToPfThreshold"].is<float>())      config.datalog.ffToPfThreshold        = max(0.1f, dl["ffToPfThreshold"].as<float>());
-                if (dl["manualPressThresholdMs"].is<int>()) config.datalog.manualPressThresholdMs = dl["manualPressThresholdMs"];
-            }
-            if (doc["network"].is<JsonObject>()) {
-                JsonObject net = doc["network"];
-                if (net["wifiMode"].is<int>())         config.network.wifiMode   = (WiFiModeType)(int)net["wifiMode"];
-                if (net["ntpServer"].is<const char*>()) SAFE_STRNCPY(config.network.ntpServer, net["ntpServer"], sizeof(config.network.ntpServer));
-                if (net["timezone"].is<int>())         config.network.timezone   = net["timezone"];
-                if (net["dstRule"].is<int>())          config.network.dstRule    = dstRuleClamp((uint8_t)(int)net["dstRule"]);
-                if (net["dstOffsetHours"].is<int>())   config.network.dstOffsetHours = net["dstOffsetHours"];
-                if (config.network.timezone < -12 || config.network.timezone > 14) config.network.timezone = 2;
-                if (config.network.dstOffsetHours < 0 || config.network.dstOffsetHours > 2) config.network.dstOffsetHours = 0;
-                if (net["useStaticIP"].is<bool>())     config.network.useStaticIP= net["useStaticIP"];
-            }
-            if (doc["hardware"].is<JsonObject>()) {
-                JsonObject hw = doc["hardware"];
-                if (hw["storageType"].is<int>())        config.hardware.storageType        = (StorageType)(int)hw["storageType"];
-                if (hw["wakeupMode"].is<int>())         config.hardware.wakeupMode         = (WakeupMode)(int)hw["wakeupMode"];
-                if (hw["cpuFreqMHz"].is<int>())         config.hardware.cpuFreqMHz         = hw["cpuFreqMHz"];
-                if (hw["defaultStorageView"].is<int>()) config.hardware.defaultStorageView = hw["defaultStorageView"];
-                if (hw["debounceMs"].is<int>())         config.hardware.debounceMs         = hw["debounceMs"];
-                if (hw["debugMode"].is<bool>())         config.hardware.debugMode          = hw["debugMode"].as<bool>();
-            }
-            if (doc["logger"].is<JsonObject>()) {
-                JsonObject lg = doc["logger"];
-                if (lg["csvLoggingEnabled"].is<bool>())         config.logger.csvLoggingEnabled         = lg["csvLoggingEnabled"];
-                if (lg["aggregationIntervalSec"].is<int>())     config.logger.aggregationIntervalSec    = constrain(lg["aggregationIntervalSec"].as<int>(), 5, 3600);
-                TaskManager::applyLoggerConfig();
-            }
-            if (doc["datalog"]["sensorCols"].is<JsonObject>())
-                datalogColsFromJson(doc["datalog"]["sensorCols"]);
-            if (doc["kindle"].is<JsonObject>()) {
-                JsonObject kd = doc["kindle"];
-                if (kd["face"].is<int>())          config.kindle.face         = (uint8_t)kd["face"].as<int>();
-                if (kd["faceCustom"].is<const char*>())
-                    SAFE_STRNCPY(config.kindle.faceCustom, kd["faceCustom"], sizeof(config.kindle.faceCustom));
-                if (kd["boldZones"].is<int>())     config.kindle.boldZones    = (uint16_t)kd["boldZones"].as<int>();
-                if (kd["showFlags"].is<int>())     config.kindle.showFlags    = (uint16_t)kd["showFlags"].as<int>();
-                if (kd["clockStyle"].is<int>())    config.kindle.clockStyle   = (uint8_t)kd["clockStyle"].as<int>();
-                if (kd["timeFormat"].is<int>())    config.kindle.timeFormat   = (uint8_t)kd["timeFormat"].as<int>();
-                if (kd["dateFormat"].is<int>())    config.kindle.dateFormat   = (uint8_t)kd["dateFormat"].as<int>();
-                if (kd["pressureUnit"].is<int>())  config.kindle.pressureUnit = (uint8_t)kd["pressureUnit"].as<int>();
-                if (kd["tempDecimals"].is<int>())  config.kindle.tempDecimals = (uint8_t)kd["tempDecimals"].as<int>();
-                // v15. Absent keys leave the field alone, so a settings file
-                // written by an older firmware restores what it knew about and
-                // does not reset what it never carried.
-                if (kd["refreshSec"].is<int>())
-                    config.kindle.refreshSec = (uint16_t)constrain(kd["refreshSec"].as<int>(), 0, 86400);
-                if (kd["followData"].is<int>())
-                    config.kindle.followData = (uint8_t)kd["followData"].as<int>();
-                if (kd["clockPinRefresh"].is<int>())
-                    config.kindle.clockPinRefresh = (uint8_t)kd["clockPinRefresh"].as<int>();
-                if (kd["fbinkResW"].is<int>())
-                    config.kindle.fbinkResW = (uint16_t)constrain(kd["fbinkResW"].as<int>(), 0, 4096);
-                if (kd["outdoorSensor"].is<const char*>())
-                    SAFE_STRNCPY(config.kindle.outdoorSensor, kd["outdoorSensor"], sizeof(config.kindle.outdoorSensor));
-                if (kd["indoorSensor"].is<const char*>())
-                    SAFE_STRNCPY(config.kindle.indoorSensor, kd["indoorSensor"], sizeof(config.kindle.indoorSensor));
-                if (kd["rotation"].is<int>())
-                    config.kindle.rotation = kdRotFromDeg(kd["rotation"].as<int>(),
-                                                          config.kindle.rotation);
-                if (kd["pageRotation"].is<int>())
-                    config.kindle.pageRot = kdPageRotFromDeg(kd["pageRotation"].as<int>(),
-                                                             config.kindle.pageRot);
-                if (kd["clockOff"].is<int>())
-                    config.kindle.clockOff = (uint8_t)kd["clockOff"].as<int>();
-                if (kd["clockSync"].is<int>())
-                    config.kindle.clockSync = kdClockSyncFromDays(kd["clockSync"].as<int>(),
-                                                                  config.kindle.clockSync);
-                if (kd["weekStyle"].is<int>())
-                    config.kindle.weekStyle = (uint8_t)kd["weekStyle"].as<int>();
-                if (kd["rules"].is<int>())
-                    config.kindle.rules = (uint8_t)kd["rules"].as<int>();
-                if (kd["metricSize"].is<int>())
-                    config.kindle.metricSize = (uint8_t)kd["metricSize"].as<int>();
-                // An imported file is not a form: it can carry anything,
-                // including values written by a firmware that had one more
-                // clock style than this one. Clamped here so the renderer
-                // never has to consider that it might not have been.
-                kdSkinClamp(config.kindle);
-            }
-            saveConfig();
-            applyTimeZone();
+            settingsFromJson(doc.as<JsonObjectConst>());
+            if (doc["logger"].is<JsonObjectConst>()) TaskManager::applyLoggerConfig();
+            saveConfig();   // the clock was re-applied by TimeModule::load()
             r->send(200, "text/plain", "OK");
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
@@ -2868,8 +2567,8 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
 
                     // Expected hash arrives as a query param (header-free
                     // for client simplicity).  Empty → verification skipped.
-                    if (req->hasParam("sha256")) {
-                        ctx->expectedSha = req->getParam("sha256")->value();
+                    if (const String* v = queryArg(req, "sha256")) {
+                        ctx->expectedSha = *v;
                         ctx->expectedSha.toLowerCase();
                         if (ctx->expectedSha.length() != 64) {
                             DBGF("OTA: bad sha256 length %u (expected 64), ignoring\n",

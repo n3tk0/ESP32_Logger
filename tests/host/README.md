@@ -36,6 +36,7 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_datalog_format.cpp` | `src/storage/DatalogFormat.cpp` — the original data_log row byte for byte in every format, the header line and field positions, sensor columns with empty fields and the empty tail cut off |
 | `test_kindle_skin.cpp` | `KindleSkin.h` — the override CSS, the time/date/pressure formats, and the clamp that stands between a stored byte and a stylesheet |
 | `test_posix_tz.cpp` | `src/utils/PosixTz.h` — the TZ string for each daylight-saving rule, the EU and US change instants as the C library reads them, and `tzOffsetAt()` across day and year boundaries |
+| `test_settings_json.cpp` | `src/web/SettingsJson.cpp` — the settings file: export → import → export gives the same file, a backup restores every setting it carries (the Kindle language and page shape included) and leaves the WiFi credentials, pins and current log file alone, a key an older file lacks changes nothing, and a file gets the forms' checks. Compiles the four modules it goes through, with shims for `<WiFi.h>`, `<ESPAsyncWebServer.h>` and `<pgmspace.h>` |
 
 Fuzz targets (random-input property checks):
 
@@ -44,8 +45,8 @@ Fuzz targets (random-input property checks):
 | `fuzz_pathutils.cpp` | `sanitizePath`/`sanitizeFilename`: output is rooted, contains no `..` / `//` / `\` / control bytes, and `sanitizePath` is idempotent |
 | `fuzz_aggregation.cpp` | `aggregate()`: output count never exceeds `outMaxLen` / `maxPoints` (ASan/UBSan catch internal OOB / UB) |
 
-Some suites (`test_aggregation`, `test_pathutils`, the fuzz targets) `#include` the
-`.cpp` under test directly so each stays a single self-contained binary; the few
+Some suites (`test_aggregation`, `test_pathutils`, `test_settings_json`, the fuzz
+targets) `#include` the `.cpp` under test directly so each stays a single self-contained binary; the few
 firmware globals they don't exercise (`Serial`, `usbCdc`) are stubbed in the
 test TU. The rest exercise header-only logic.
 

@@ -69,7 +69,8 @@ public:
     // ------------------------------------------------------------------
     // JSON serialisation for /api/modules endpoints.
     //   toIndexJson(arr) → [{id,name,enabled,hasUI}, ...]
-    //   toDetailJson(id, obj) → {id,name,enabled,hasUI,config,schema?}
+    //   toDetailJson(id, obj) → {id,name,enabled,hasUI,config}
+    //     (the form schema is GET /api/modules/:id/schema, see IModule)
     //     Returns false if `id` is unknown.
     // ------------------------------------------------------------------
     void toIndexJson(JsonArray arr) const;

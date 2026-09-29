@@ -14,6 +14,7 @@
 #include "../utils/JsonResponse.h"
 #include "../modules/UsbCdcModule.h"  // usbCdc: live USB D-/D+ lock
 #include "../pipeline/DataPipeline.h"   // fsMutex
+#include "../utils/JsonIO.h"
 
 namespace {
 
@@ -34,7 +35,7 @@ bool persistPlatformMode(const char* mode) {
         File f = activeFS->open(PATH, FILE_READ);
         if (!f) return false;
         if (f.size() > MAX_SIZE) { f.close(); return false; }
-        DeserializationError err = deserializeJson(doc, f);
+        DeserializationError err = deserializeJsonFile(doc, f);
         f.close();
         if (err) return false;
     }

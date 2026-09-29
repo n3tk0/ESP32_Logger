@@ -411,7 +411,7 @@ with sync_playwright() as p:
 
     # ── The preview draws the numbers the DEVICE would draw ─────────────────
     # "Automatic" decimals is the metric table's own number in the firmware
-    # (KD_METRIC_STYLE in src/web/KindleSlots.h), and the decimals control on
+    # (kdMetricStyles() in src/web/KindleSlots.h), and the decimals control on
     # this page is the temperature's — the firmware applies it to temperatures
     # and nothing else. Running every reading through it drew "640.0 ppm" and
     # "71.0 %", over-stating the width of every integer reading on a page whose

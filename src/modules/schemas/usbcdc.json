@@ -1,0 +1,3 @@
+{"fields": [
+  {"id": "onBoot", "type": "bool", "label": "USB CDC on boot", "group": "Serial", "help": "On = USB serial available (USB GPIO pins reserved). Off = those pins are freed for sensors/IO. Saved to NVS now; takes effect after the next firmware recompile/flash."}
+]}

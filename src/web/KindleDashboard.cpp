@@ -20,6 +20,7 @@
 #include "KindleChartBmp.h"             // ChartBmpCtx / ChartBmpReader
 #include "KindleSlotStore.h"            // the configurable slot list
 #include "KindleFlow.h"                 // where everything goes, for what is on the page
+#include "FormArgs.h"                   // queryArg
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
 #endif
@@ -91,10 +92,9 @@ static bool kdStandalone() {
 // ?shape= so the layout is worked out for the page it will actually draw; a
 // request that does not say takes the collector's own answer.
 static bool kdStandaloneFor(AsyncWebServerRequest* req) {
-    if (req && req->hasParam("shape")) {
-        const String& v = req->getParam("shape")->value();
-        if (v == "normal")     return false;
-        if (v == "standalone") return true;
+    if (const String* v = req ? queryArg(req, "shape") : nullptr) {
+        if (*v == "normal")     return false;
+        if (*v == "standalone") return true;
     }
     return kdStandalone();
 }
@@ -106,8 +106,8 @@ static bool kdStandaloneFor(AsyncWebServerRequest* req) {
 // `stored` — the panel's rotation for the FBInk payload, the page's own
 // (kdPageRot(), which may differ) for the browser page.
 static uint8_t kdRotFor(AsyncWebServerRequest* req, uint8_t stored) {
-    if (req && req->hasParam("rot"))
-        return kdRotFromDeg(req->getParam("rot")->value().toInt(), stored);
+    if (const String* v = req ? queryArg(req, "rot") : nullptr)
+        return kdRotFromDeg(v->toInt(), stored);
     return stored;
 }
 
@@ -116,8 +116,9 @@ static uint8_t kdRotFor(AsyncWebServerRequest* req, uint8_t stored) {
 // side, or one tap on "refresh" turns it upright. Empty when there was none.
 static String kdRotArg(AsyncWebServerRequest* req, char sep) {
     String a;
-    if (!req || !req->hasParam("rot")) return a;
-    const long deg = req->getParam("rot")->value().toInt();
+    const String* v = req ? queryArg(req, "rot") : nullptr;
+    if (!v) return a;
+    const long deg = v->toInt();
     if (kdRotFromDeg(deg, 0xFF) == 0xFF) return a;
     a += sep;
     a += F("rot=");
@@ -292,7 +293,14 @@ static void fmtInt(char* buf, size_t n, float v) {
 // home station can produce, and TrendRing already stores pressure hourly —
 // it was simply never shown. Bands follow the usual synoptic convention:
 // 1.6 hPa / 3 h is "rapid", 0.5 is the threshold for calling any direction.
-struct Tendency { bool have = false; float delta = 0.0f; const char* word = ""; const char* arrow = ""; };
+// `idx` is the band, 0 rising fast .. 4 falling fast: the page, the panel and
+// the place arrows each draw it with their own glyphs, from this one reading
+// of the thresholds.
+struct Tendency { bool have = false; uint8_t idx = 2; float delta = 0.0f; const char* word = ""; const char* arrow = ""; };
+
+// The same five bands as UTF-8, for the panel and the places: `arrow` above
+// is an HTML entity, which only the page can use.
+static const char* const KD_TEND_ARROWS[] = { "↑", "↗", "→", "↘", "↓" };
 
 static Tendency pressureTendency(const TrendRing::Hour* h) {
     Tendency t;
@@ -302,11 +310,11 @@ static Tendency pressureTendency(const TrendRing::Hour* h) {
 
     t.delta = (now.sum / now.count) - (then.sum / then.count);
     t.have  = true;
-    if      (t.delta >=  1.6f) { t.word = KD_T("rising fast",  "расте бързо"); t.arrow = "&#8593;"; }
-    else if (t.delta >=  0.5f) { t.word = KD_T("rising",       "расте");       t.arrow = "&#8599;"; }
-    else if (t.delta >  -0.5f) { t.word = KD_T("steady",       "без промяна"); t.arrow = "&#8594;"; }
-    else if (t.delta >  -1.6f) { t.word = KD_T("falling",      "пада");        t.arrow = "&#8600;"; }
-    else                       { t.word = KD_T("falling fast", "пада бързо");  t.arrow = "&#8595;"; }
+    if      (t.delta >=  1.6f) { t.idx = 0; t.word = KD_T("rising fast",  "расте бързо"); t.arrow = "&#8593;"; }
+    else if (t.delta >=  0.5f) { t.idx = 1; t.word = KD_T("rising",       "расте");       t.arrow = "&#8599;"; }
+    else if (t.delta >  -0.5f) { t.idx = 2; t.word = KD_T("steady",       "без промяна"); t.arrow = "&#8594;"; }
+    else if (t.delta >  -1.6f) { t.idx = 3; t.word = KD_T("falling",      "пада");        t.arrow = "&#8600;"; }
+    else                       { t.idx = 4; t.word = KD_T("falling fast", "пада бързо");  t.arrow = "&#8595;"; }
     return t;
 }
 
@@ -857,8 +865,8 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     // As wide as the reader's layout left the chart, when it says: the
     // landscape page's is beside the readings. See LY_GR_W.
     uint16_t askW = 0;
-    if (req->hasParam("w")) {
-        const long v = req->getParam("w")->value().toInt();
+    if (const String* arg = queryArg(req, "w")) {
+        const long v = arg->toInt();
         if (v > 0 && v < 4000) askW = (uint16_t)v;
     }
     const uint16_t W = ChartBmp::clampW(askW, skin.fbinkResW);
@@ -866,8 +874,8 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     // LY_GR_H in /kindle/data. A reader that does not say gets the fixed
     // image it has always been sent.
     uint16_t askH = 0;
-    if (req->hasParam("h")) {
-        const long v = req->getParam("h")->value().toInt();
+    if (const String* arg = queryArg(req, "h")) {
+        const long v = arg->toInt();
         if (v > 0 && v < 4000) askH = (uint16_t)v;
     }
     const uint16_t H = ChartBmp::clampH(askH, skin.fbinkResW);
@@ -973,6 +981,23 @@ static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const ch
     kdShellVar(s, key, val);
 }
 
+/// KEY=<number> and a newline, unquoted: the same bytes a printf with "%d"
+/// wrote, without a format string per key and a vsnprintf behind each one.
+static void kdShellInt(AsyncResponseStream* s, const char* key, long v) {
+    s->print(key);
+    s->print('=');
+    s->print(v);
+    s->print('\n');
+}
+
+/// The same for the unsigned values (%u, %lu) — advance widths, epoch seconds.
+static void kdShellUint(AsyncResponseStream* s, const char* key, unsigned long v) {
+    s->print(key);
+    s->print('=');
+    s->print(v);
+    s->print('\n');
+}
+
 // ---------------------------------------------------------------------------
 // The eleven places
 // ---------------------------------------------------------------------------
@@ -984,7 +1009,7 @@ struct KdResolved {
 
     /// A BUFFER, NOT A POINTER, and that is the whole point of it.
     ///
-    /// The unit usually comes from KD_METRIC_STYLE and is a string literal, but
+    /// The unit usually comes from kdMetricStyles() and is a string literal, but
     /// for a metric the table does not list — or lists with a null unit, which
     /// is wind, wind_speed, uva, uvb and flow_rate — kdSlotUnit() hands back the
     /// unit the SENSOR reported, and that lives in the `Latest` the resolve loop
@@ -994,7 +1019,7 @@ struct KdResolved {
     char        unit[12];   ///< sized to match Latest::unit
 
     const char* label;      ///< into KindleZones or a table literal — both outlive us
-    const char* arrow;      ///< a literal from ARROWS[]
+    const char* arrow;      ///< a literal from KD_TEND_ARROWS[]
     bool        ok;
     uint32_t    ts;
 };
@@ -1012,7 +1037,6 @@ struct KdResolved {
 /// on which screen you were looking at.
 static void kdResolveZones(const KindleConfig& skin, KdResolved out[KZ_COUNT]) {
     const KindleZones& zones = kdSlots();
-    static const char* ARROWS[] = { "↑", "↗", "→", "↘", "↓" };
 
     for (int i = 0; i < KZ_COUNT; i++) {
         out[i] = KdResolved{};      // zeroes unit[], which is an empty string
@@ -1067,15 +1091,7 @@ static void kdResolveZones(const KindleConfig& skin, KdResolved out[KZ_COUNT]) {
             if (trendRing.series(sl.sensorId, "pressure",
                                  (uint32_t)time(nullptr), h)) {
                 const Tendency t = pressureTendency(h);
-                if (t.have) {
-                    int ai = 2;
-                    if      (t.delta >=  1.6f) ai = 0;
-                    else if (t.delta >=  0.5f) ai = 1;
-                    else if (t.delta >  -0.5f) ai = 2;
-                    else if (t.delta >  -1.6f) ai = 3;
-                    else                       ai = 4;
-                    out[i].arrow = ARROWS[ai];
-                }
+                if (t.have) out[i].arrow = KD_TEND_ARROWS[t.idx];
             }
         }
     }
@@ -1276,7 +1292,7 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
 
     kdShellVar(s, "Z_SUB", rd.sub);
     // Its width, for centring it under a headline with nothing beside it.
-    s->printf("Z_SUB_ADVW=%u\n", kdAdvanceMille(rd.sub));
+    kdShellUint(s, "Z_SUB_ADVW", kdAdvanceMille(rd.sub));
 
     char key[24];
     for (int i = 0; i < KZ_COUNT; i++) {
@@ -1331,7 +1347,7 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         if (i == KZ_HERO) {
             char whole[40];
             snprintf(whole, sizeof(whole), "%s%s", res[i].text, res[i].unit);
-            s->printf("Z_HERO_ADVW=%u\n", kdFigAdvance(whole));
+            kdShellUint(s, "Z_HERO_ADVW", kdFigAdvance(whole));
         }
     }
 
@@ -1654,7 +1670,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // ── Outdoor ──
     fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
     kdShellVar(s, "OUT_TEMP", outT.ok ? buf : "--");
-    s->printf("OUT_HUM=%d\n", outH.ok ? (int)roundf(outH.value) : -1);
+    kdShellInt(s, "OUT_HUM", outH.ok ? (int)roundf(outH.value) : -1);
     
     if (outP.ok) {
         const float pv = kdPressureValue(outP.value, skin.pressureUnit);
@@ -1671,14 +1687,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         const Tendency t = pressureTendency(tPress);
         if (t.have) {
             kdShellVar(s, "OUT_TEND", t.word);
-            const char* arrows[] = {"↑", "↗", "→", "↘", "↓"};
-            int ai = 2; // steady default
-            if (t.delta >= 1.6f) ai = 0;
-            else if (t.delta >= 0.5f) ai = 1;
-            else if (t.delta > -0.5f) ai = 2;
-            else if (t.delta > -1.6f) ai = 3;
-            else ai = 4;
-            kdShellVar(s, "OUT_TEND_ARROW", arrows[ai]);
+            kdShellVar(s, "OUT_TEND_ARROW", KD_TEND_ARROWS[t.idx]);
             const float dv = kdPressureValue(t.delta, skin.pressureUnit);
             const int ddec = kdPressureDecimals(skin.pressureUnit) + 1;
             s->printf("OUT_TEND_DELTA=\"%+.*f\"\n", ddec, (double)dv);
@@ -1708,7 +1717,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     }
 
     if (outT.ok && outT.ts && now > outT.ts) {
-        s->printf("OUT_AGE_MIN=%u\n", (unsigned)((now - outT.ts) / 60));
+        kdShellUint(s, "OUT_AGE_MIN", (unsigned)((now - outT.ts) / 60));
     } else {
         s->print("OUT_AGE_MIN=0\n");
     }
@@ -1721,17 +1730,16 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // the flag and the panel did not, so switching the badge off in Settings
     // silenced it on the browser and left it on the Kindle — which is the one
     // of the two that is on the wall being looked at.
-    s->printf("OUT_BATT_WARN=%d\n",
-              (battWarn && (skin.showFlags & KSHOW_BATTERY)) ? 1 : 0);
+    kdShellInt(s, "OUT_BATT_WARN", (battWarn && (skin.showFlags & KSHOW_BATTERY)) ? 1 : 0);
 
     // ── Indoor ──
     fmtTemp(buf, sizeof(buf), inT.value, skin.tempDecimals);
     kdShellVar(s, "IN_TEMP", inT.ok ? buf : "--");
-    s->printf("IN_HUM=%d\n", inH.ok ? (int)roundf(inH.value) : -1);
-    if (inA.ok) s->printf("IN_AQI=%d\n", (int)roundf(inA.value));
+    kdShellInt(s, "IN_HUM", inH.ok ? (int)roundf(inH.value) : -1);
+    if (inA.ok) kdShellInt(s, "IN_AQI", (int)roundf(inA.value));
     else s->print("IN_AQI=\n");
     if (inT.ok && inT.ts && now > inT.ts)
-        s->printf("IN_AGE_MIN=%u\n", (unsigned)((now - inT.ts) / 60));
+        kdShellUint(s, "IN_AGE_MIN", (unsigned)((now - inT.ts) / 60));
     else
         s->print("IN_AGE_MIN=0\n");
 
@@ -1759,7 +1767,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             // draws one size per call and will not say how wide it drew.
             // The boxed and ruled clock styles centre the time, and this is
             // what the reader centres it with.
-            s->printf("CLOCK_ADVW=%u\n", kdAdvanceMille(tbuf));
+            kdShellUint(s, "CLOCK_ADVW", kdAdvanceMille(tbuf));
 
             char dbuf[32];
             kdFmtDate(dbuf, sizeof(dbuf), tm, skin.dateFormat);
@@ -1795,7 +1803,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
             s->printf("WK%d_DAY=%s\n", i, wkd);
             s->printf("WK%d_DAYW=%u\n", i, kdAdvanceMille(wkd));
         }
-        s->printf("WK_TODAY=%d\n", wday);
+        kdShellInt(s, "WK_TODAY", wday);
 
         // THE FORECAST IN THE WEEK STRIP, when the reader asked for it and
         // there is a fresh one: today and the six days after it. The calendar
@@ -1875,16 +1883,16 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     if (!standalone) {
         const auto& fc = forecastModule.snapshot();
         kdShellVar(s, "FC_SUMMARY", forecastSummary(fc));
-        s->printf("FC_CODE=%d\n", fc.code);
+        kdShellInt(s, "FC_CODE", fc.code);
         // FC_ICON, NOT FC_CODE, IS WHAT THE PANEL DRAWS WITH. It has eleven BMP
         // files, one per range, and no way to reduce a code itself — so it looked
         // for fc_2_52.bmp on a partly-cloudy afternoon, did not find it, and drew
         // the circled question mark that means "no forecast at all". FC_CODE stays
         // for anything that wants the raw number.
-        s->printf("FC_ICON=%d\n", weatherIconCode(fc.code));
-        s->printf("FC_HIGH=%d\n", (int)roundf(fc.highC));
-        s->printf("FC_LOW=%d\n", (int)roundf(fc.lowC));
-        s->printf("FC_WIND=%d\n", (int)roundf(fc.windKph));
+        kdShellInt(s, "FC_ICON", weatherIconCode(fc.code));
+        kdShellInt(s, "FC_HIGH", (int)roundf(fc.highC));
+        kdShellInt(s, "FC_LOW", (int)roundf(fc.lowC));
+        kdShellInt(s, "FC_WIND", (int)roundf(fc.windKph));
 
         // How old the forecast is, formatted here rather than on the panel: the
         // page draws "· 8 мин" beside the wind and the panel drew nothing, so the
@@ -1979,8 +1987,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // #777, in one line of markup. On a framebuffer that is two draws at two
     // greys, and the second one starts where the first ended — which FBInk
     // will not say. Measured here, like every other width the reader needs.
-    s->printf("KEY_OUT_ADVW=%u\n",
-              kdAdvanceMille(KD_T("outside mean", "средно навън")));
+    kdShellUint(s, "KEY_OUT_ADVW", kdAdvanceMille(KD_T("outside mean", "средно навън")));
 
     // ── The eleven places ──
     //
@@ -2026,23 +2033,23 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // The layout keys above are scaled by the SHORT side on either page.
     const uint16_t resH = (resW > 600) ? 1448 : 800;
     const bool land = kdRotLandscape(rot);
-    s->printf("RES_W=%u\n", land ? resH : resW);
-    s->printf("RES_H=%u\n", land ? resW : resH);
-    s->printf("PAGE_ROT=%d\n", (int)rot * 90);
+    kdShellUint(s, "RES_W", land ? resH : resW);
+    kdShellUint(s, "RES_H", land ? resW : resH);
+    kdShellInt(s, "PAGE_ROT", (int)rot * 90);
     kdShellVar(s, "LANG", KD_T("en", "bg"));
-    s->printf("DECIMALS=%d\n", skin.tempDecimals);
-    s->printf("CLOCK_STYLE=%d\n", skin.clockStyle);
+    kdShellInt(s, "DECIMALS", skin.tempDecimals);
+    kdShellInt(s, "CLOCK_STYLE", skin.clockStyle);
     // How the week strip's cells are drawn (KWEEK_*), and the dividing lines:
     // their thickness at this panel's size, their pens and their style
     // (0 solid, 1 dashed, 2 dotted). A reader too old to know these draws
     // the page's defaults, which are what 0 in each means anyway.
-    s->printf("WK_STYLE=%d\n", kdWeekStyle(skin));
-    s->printf("RULE_PX=%d\n", kdfMax(1, kdFlowPanel(kdRulePx(skin), resW)));
+    kdShellInt(s, "WK_STYLE", kdWeekStyle(skin));
+    kdShellInt(s, "RULE_PX", kdfMax(1, kdFlowPanel(kdRulePx(skin), resW)));
     s->printf("RULE_INK=%s\nRULE_SOFT=%s\nRULE_STYLE=%d\n",
               kdRuleFbink(kdRuleInk(skin), false), kdRuleFbink(kdRuleInk(skin), true),
               kdRuleStyle(skin));
-    s->printf("TIME_FORMAT=%d\n", skin.timeFormat);
-    s->printf("SHOW_FLAGS=%u\n", skin.showFlags);
+    kdShellInt(s, "TIME_FORMAT", skin.timeFormat);
+    kdShellUint(s, "SHOW_FLAGS", skin.showFlags);
 
     // THE SWITCHES SPELT OUT, one key each, rather than left as bits of
     // SHOW_FLAGS for the reader to mask. Decoding them there would be a second
@@ -2050,9 +2057,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // day one of them moves is the day the panel starts hiding the wrong
     // section. The grid and the indoor row are already handled this way —
     // emitZones() sends an empty list for a group that is switched off.
-    s->printf("SHOW_CHART=%d\n", (skin.showFlags & KSHOW_CHART) ? 1 : 0);
-    s->printf("SHOW_WEEK=%d\n",  (skin.showFlags & KSHOW_WEEK)  ? 1 : 0);
-    s->printf("SHOW_CLOCK=%d\n", (kdShowMask(skin) & KSHOW_CLOCK) ? 1 : 0);
+    kdShellInt(s, "SHOW_CHART", (skin.showFlags & KSHOW_CHART) ? 1 : 0);
+    kdShellInt(s, "SHOW_WEEK", (skin.showFlags & KSHOW_WEEK)  ? 1 : 0);
+    kdShellInt(s, "SHOW_CLOCK", (kdShowMask(skin) & KSHOW_CLOCK) ? 1 : 0);
 
     // THE TIME, FOR THE READER TO SET ITS OWN CLOCK BY — which it does once
     // every SYNC_DAYS days, not on every fetch: between those it keeps its own
@@ -2060,14 +2067,14 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // TIME_OFF is this collector's zone, daylight saving included, so the
     // panel shows the time the web page shows. Neither is sent without a real
     // time to send: a collector still at 1970 would set the reader back to it.
-    s->printf("SYNC_DAYS=%u\n", (unsigned)kdClockSyncDays(skin));
+    kdShellUint(s, "SYNC_DAYS", (unsigned)kdClockSyncDays(skin));
     {
         // The same instant every age in this payload was measured against.
         if (now > 1000000000u) {
-            s->printf("TIME_UTC=%lu\n", (unsigned long)now);
+            kdShellUint(s, "TIME_UTC", (unsigned long)now);
             // The offset in effect NOW, so the panel follows the change
             // to and from summer time on its next fetch.
-            s->printf("TIME_OFF=%ld\n", tzOffsetAt((time_t)now));
+            kdShellInt(s, "TIME_OFF", tzOffsetAt((time_t)now));
         } else {
             s->print("TIME_UTC=\nTIME_OFF=\n");
         }
@@ -2084,8 +2091,8 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // A key naming two lines over an empty grid describes a chart that is not
     // there.
     if (chartFine) kdChartUseFine(now, tOut, tIn, haveOut, haveIn);
-    s->printf("CHART_OUT=%d\n", (haveOut && seriesHasData(tOut)) ? 1 : 0);
-    s->printf("CHART_IN=%d\n",  (haveIn  && seriesHasData(tIn))  ? 1 : 0);
+    kdShellInt(s, "CHART_OUT", (haveOut && seriesHasData(tOut)) ? 1 : 0);
+    kdShellInt(s, "CHART_IN", (haveIn  && seriesHasData(tIn))  ? 1 : 0);
 
     // ── The chart's axis, which the image itself cannot carry ───────────────
     //
@@ -2976,8 +2983,8 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
     static const int FRAMES = 4;
 
     int step = 1;
-    if (req->hasParam("s")) {
-        step = req->getParam("s")->value().toInt();
+    if (const String* v = queryArg(req, "s")) {
+        step = v->toInt();
         if (step < 1)       step = 1;
         if (step > FRAMES)  step = FRAMES;
     }
@@ -3030,8 +3037,8 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
     const bool text = req->hasParam("t");
 
     // ?w=<n>: a poll, not a request.
-    if (req->hasParam("w")) {
-        int step = req->getParam("w")->value().toInt();
+    if (const String* v = queryArg(req, "w")) {
+        int step = v->toInt();
         if (step < 1)        step = 1;
         if (step > POLL_MAX) step = POLL_MAX;
         const bool busy = forecastModule.refreshPending();

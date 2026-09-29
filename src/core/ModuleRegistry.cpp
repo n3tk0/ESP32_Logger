@@ -2,6 +2,7 @@
 #include "../pipeline/DataPipeline.h"
 #include "../utils/MutexGuard.h"
 #include <LittleFS.h>
+#include "../utils/JsonIO.h"
 
 ModuleRegistry moduleRegistry;
 
@@ -29,10 +30,6 @@ bool ModuleRegistry::add(IModule* mod) {
     }
     if (getById(mod->getId()) != nullptr) {
         Serial.printf("[ModuleRegistry] duplicate id: %s\n", mod->getId());
-        return false;
-    }
-    if (!IModule::validateSchema(mod->schema())) {
-        Serial.printf("[ModuleRegistry] invalid schema for %s\n", mod->getId());
         return false;
     }
     _modules[_count++] = mod;
@@ -83,8 +80,15 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     }
 
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, f);
+    DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
+    // Out of heap is not a bad file: the size was checked above, so NoMemory
+    // here means the read buffer or the document did not fit right now.
+    // Keep the file and run on defaults until the next boot.
+    if (err == DeserializationError::NoMemory) {
+        Serial.printf("[ModuleRegistry] %s: out of memory — file kept\n", path);
+        return false;
+    }
     if (err) {
         Serial.printf("[ModuleRegistry] parse error: %s — quarantining\n", err.c_str());
         quarantine(fs, path);
@@ -217,7 +221,7 @@ bool ModuleRegistry::toDetailJson(const char* id, JsonObject out) const {
     if (st.size() == 0) out.remove("status");
     JsonObject cfg = out["config"].to<JsonObject>();
     (void)m->save(cfg);
-    const char* s = m->schema();
-    if (s) out["schema"] = (const __FlashStringHelper*)s;
+    // The form's schema is not in here: it is served gzipped, as stored, from
+    // GET /api/modules/:id/schema.
     return true;
 }

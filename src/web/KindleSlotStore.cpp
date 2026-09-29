@@ -7,6 +7,7 @@
 
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include "../utils/MutexGuard.h"
+#include "../utils/JsonIO.h"
 
 static KindleZones s_zones;
 
@@ -98,8 +99,13 @@ bool kdSlotsLoad(fs::FS& fs, KindleZones& out,
     }
 
     JsonDocument doc;
-    const DeserializationError err = deserializeJson(doc, f);
+    const DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
+    // Out of heap is not a bad file (the size was checked above): keep it.
+    if (err == DeserializationError::NoMemory) {
+        Serial.printf("[kindle] %s: out of memory — file kept\n", path);
+        return false;
+    }
     if (err) {
         Serial.printf("[kindle] %s: %s — quarantining\n", path, err.c_str());
         fs.remove(bad.c_str());

@@ -123,7 +123,7 @@ public:
 
     /// Drives the settings form under Modules → Weather forecast. Without it
     /// hasUI() is false and the module offers only an on/off switch.
-    const char* schema() const override;
+    ModuleSchema schema() const override;
 
     bool load(JsonObjectConst cfg) override;
     bool save(JsonObject cfg) const override;

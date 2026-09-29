@@ -674,7 +674,8 @@ collector with no clock of its own cannot judge and takes `ts` as sent.
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/modules` | read | Module index (status chips) |
-| GET | `/api/modules/:id` | read | Module detail + config + schema |
+| GET | `/api/modules/:id` | read | Module detail + config |
+| GET | `/api/modules/:id/schema` | read | The module's form schema, gzipped (404 without a form) |
 | POST | `/api/modules/:id` | CSRF | Save `{enabled, config}` |
 | POST | `/api/modules/:id/enable` | CSRF | Fast enable/disable (`?on=1`) |
 | POST | `/api/modules/:id/restart` | CSRF | `stop()` + `start()` without changing enable |
@@ -978,16 +979,23 @@ Both come from the `IModule` hooks `getDescription()` and `statusJson(JsonObject
 `statusJson()` must be cheap and non-blocking — it runs on the AsyncTCP worker,
 once per module per request (no FS scans, no network round-trips).
 
-**`GET /api/modules/:id`** adds the per-module `config` object plus the PROGMEM
-`schema` string that drives the settings form:
+**`GET /api/modules/:id`** adds the per-module `config` object:
 
 ```json
 {
   "id": "time", "name": "Time", "enabled": true, "hasUI": true,
-  "config": { "ntpServer": "pool.ntp.org", "timezone": 1, "dstRule": 0, "dstOffsetHours": 0 },
-  "schema": "{\"fields\":[ … ]}"
+  "config": { "ntpServer": "pool.ntp.org", "timezone": 1, "dstRule": 0, "dstOffsetHours": 0 }
 }
 ```
+
+**`GET /api/modules/:id/schema`** is the form that `config` is edited in, for a
+module with `hasUI`: `{"fields":[ … ]}`. It is stored in the firmware gzipped
+and sent that way, with `Content-Encoding: gzip`, like the failsafe page — the
+browser inflates it. The sources are `src/modules/schemas/<id>.json`;
+`scripts/gen_module_schemas.py` validates them and generates
+`src/modules/ModuleSchemas.h` (committed; a PlatformIO pre-script and CI's
+`--check` keep the two in step). Firmware before this route sent the schema
+inside the detail as a JSON string, and the settings page still reads that.
 
 Schema field keys: `id`, `type` (`string`/`int`/`float`/`bool`/`enum`/`color`/
 `password`/`ipv4`), `label`, `min`/`max`/`step`, `unit`, `group`, `help`,

@@ -1,24 +1,6 @@
 #include "OtaModule.h"
+#include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../managers/OtaManager.h"
-
-namespace {
-
-// PROGMEM schema — the editable settings. The read-only partition/rollback
-// info travels in the `config` block (save() below) and is rendered by the
-// manager's OTA status+actions panel rather than as form inputs.
-const char OTA_SCHEMA[] PROGMEM =
-    "{\"fields\":["
-      "{\"id\":\"requireManualConfirm\",\"type\":\"bool\",\"label\":\"Require manual confirm\","
-        "\"group\":\"Rollback\","
-        "\"help\":\"When on, a freshly flashed image is never auto-confirmed — confirm it from "
-        "this page (or POST /api/ota/confirm). It rolls back on the next crash until then.\"},"
-      "{\"id\":\"autoConfirmSec\",\"type\":\"int\",\"min\":10,\"max\":3600,\"unit\":\"s\","
-        "\"group\":\"Rollback\",\"label\":\"Auto-confirm window\","
-        "\"help\":\"Seconds the new firmware must run before it is marked valid.\","
-        "\"showIf\":{\"requireManualConfirm\":false}}"
-    "]}";
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 bool OtaModule::load(JsonObjectConst cfg) {
@@ -50,8 +32,12 @@ bool OtaModule::save(JsonObject cfg) const {
 }
 
 // ---------------------------------------------------------------------------
-const char* OtaModule::schema() const {
-    return OTA_SCHEMA;
+// The editable settings (src/modules/schemas/ota.json). The read-only
+// partition/rollback info travels in the `config` block (save() above) and is
+// rendered by the manager's OTA status+actions panel rather than as form
+// inputs.
+ModuleSchema OtaModule::schema() const {
+    return {MODULE_SCHEMA_OTA_GZ, sizeof(MODULE_SCHEMA_OTA_GZ)};
 }
 
 // ---------------------------------------------------------------------------

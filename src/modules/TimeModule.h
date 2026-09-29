@@ -26,7 +26,7 @@ public:
     // returns immediately. Returns true (no reboot needed).
     bool start() override;
 
-    const char* schema() const override;
+    ModuleSchema schema() const override;
 
     static TimeModule& instance() { static TimeModule m; return m; }
 };

@@ -179,6 +179,7 @@
 #include "src/web/ApiHandlers.h"
 #include "src/serial/SerialProvisioner.h"
 #include "src/alerts/AlertEngine.h"
+#include "src/utils/JsonIO.h"          // deserializeJsonFile
 
 // Phase 3 chaos/telemetry hooks — self-guarded headers that expand to no-ops
 // unless ENABLE_CHAOS_TELEMETRY / ENABLE_CHAOS_MONKEY are defined (only by the
@@ -275,7 +276,7 @@ static void _loadSleepConfig() {
     if (!f) return;
     // Use a dedicated small doc — sleep section only needs ~256 bytes
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, f);
+    DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
     if (err) return;
 
@@ -350,7 +351,7 @@ static PlatformMode _detectPlatformMode() {
     JsonDocument   filter;
     filter["mode"] = true;
     JsonDocument  doc;
-    if (deserializeJson(doc, f, DeserializationOption::Filter(filter)) != DeserializationError::Ok) {
+    if (deserializeJsonFile(doc, f, filter) != DeserializationError::Ok) {
         f.close(); return PLATFORM_LEGACY;
     }
     f.close();
@@ -401,7 +402,7 @@ static void _checkPinConflicts() {
     File f = activeFS->open("/platform_config.json", FILE_READ);
     if (!f) return;
     JsonDocument doc;
-    if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return; }
+    if (deserializeJsonFile(doc, f) != DeserializationError::Ok) { f.close(); return; }
     f.close();
 
     JsonArray sensors = doc["sensors"].as<JsonArray>();

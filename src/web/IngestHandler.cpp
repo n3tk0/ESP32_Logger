@@ -11,6 +11,7 @@
 
 #include "IngestBatch.h"
 #include "RateLimiter.h"
+#include "FormArgs.h"                 // queryArg
 #include "../nodes/NodeCfgStore.h"   // cfg_rev / cfg / cfg_error, docs/NODE_CONFIG.md §3
 #include "../nodes/NodeFwStore.h"    // fw_md5 / fw_error, docs/NODE_OTA.md §3
 #include "../sensors/RemoteIngest.h"
@@ -58,8 +59,8 @@ bool ingestAuthorised(AsyncWebServerRequest* req) {
     if (req->hasHeader("X-Ingest-Token")) {
         return tokenMatches(req->getHeader("X-Ingest-Token")->value().c_str());
     }
-    if (req->hasParam("token")) {
-        return tokenMatches(req->getParam("token")->value().c_str());
+    if (const String* v = queryArg(req, "token")) {
+        return tokenMatches(v->c_str());
     }
     return false;
 }

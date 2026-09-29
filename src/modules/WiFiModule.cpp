@@ -1,4 +1,5 @@
 #include "WiFiModule.h"
+#include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../core/Globals.h"
 #include "../core/Config.h"
 #include <WiFi.h>
@@ -13,31 +14,11 @@ bool parseIPv4(const char* s, uint8_t out[4]) {
     return ipv4Parse(s, out);   // not sscanf: see Ipv4Parse.h
 }
 
+} // namespace
+
 void formatIPv4(const uint8_t in[4], char* out, size_t n) {
     snprintf(out, n, "%u.%u.%u.%u", in[0], in[1], in[2], in[3]);
 }
-
-// PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
-const char WIFI_SCHEMA[] PROGMEM =
-    "{\"fields\":["
-      "{\"id\":\"wifiMode\",\"type\":\"enum\",\"label\":\"Mode\",\"group\":\"Connection\","
-        "\"help\":\"Access Point hosts its own network; Client joins an existing one.\","
-        "\"options\":[{\"v\":0,\"l\":\"Access Point\"},{\"v\":1,\"l\":\"Client\"}]},"
-      "{\"id\":\"clientSSID\",\"type\":\"string\",\"max\":32,\"label\":\"SSID\",\"group\":\"Connection\","
-        "\"showIf\":{\"wifiMode\":1}},"
-      "{\"id\":\"clientPassword\",\"type\":\"password\",\"max\":64,\"label\":\"Password\",\"group\":\"Connection\","
-        "\"help\":\"Leave blank to keep the currently stored password.\","
-        "\"showIf\":{\"wifiMode\":1}},"
-      "{\"id\":\"useStaticIP\",\"type\":\"bool\",\"label\":\"Use static IP\",\"group\":\"Static IP\","
-        "\"help\":\"Off = DHCP. On = use the fixed addresses below.\","
-        "\"showIf\":{\"wifiMode\":1}},"
-      "{\"id\":\"staticIP\",\"type\":\"ipv4\",\"label\":\"IP\",\"group\":\"Static IP\",\"showIf\":\"useStaticIP\"},"
-      "{\"id\":\"gateway\",\"type\":\"ipv4\",\"label\":\"Gateway\",\"group\":\"Static IP\",\"showIf\":\"useStaticIP\"},"
-      "{\"id\":\"subnet\",\"type\":\"ipv4\",\"label\":\"Subnet\",\"group\":\"Static IP\",\"showIf\":\"useStaticIP\"},"
-      "{\"id\":\"dns\",\"type\":\"ipv4\",\"label\":\"DNS\",\"group\":\"Static IP\",\"showIf\":\"useStaticIP\"}"
-    "]}";
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 bool WiFiModule::load(JsonObjectConst cfg) {
@@ -81,8 +62,8 @@ bool WiFiModule::save(JsonObject cfg) const {
 }
 
 // ---------------------------------------------------------------------------
-const char* WiFiModule::schema() const {
-    return WIFI_SCHEMA;
+ModuleSchema WiFiModule::schema() const {
+    return {MODULE_SCHEMA_WIFI_GZ, sizeof(MODULE_SCHEMA_WIFI_GZ)};
 }
 
 // ---------------------------------------------------------------------------

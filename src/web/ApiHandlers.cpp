@@ -31,6 +31,8 @@
 #endif
 #include "../espnow/EspNowIngest.h"   // GET/POST /api/espnow/* (FEATURE_ESPNOW_INGEST)
 #include "KindleSkin.h"               // GET/POST /api/kindle/config
+#include "KindleConfigJson.h"         // … field by field, the same table as the settings file
+#include "FormArgs.h"                 // formArg / queryArg / formParam
 #include "KindleSlotStore.h"           // GET/POST /api/kindle/slots
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
@@ -49,6 +51,7 @@ extern MqttExporter* g_mqttExporter;
 #include "../utils/MutexGuard.h"   // R19.D: guarded diagnostic-log read
 #include "../core/EventLog.h"      // EVENT_LOG_PATH
 #include "../core/SdCompat.h"      // sdSupportCompiledIn() for /api/diag
+#include "../utils/JsonIO.h"
 
 // ---------------------------------------------------------------------------
 // GET /api/data
@@ -79,39 +82,38 @@ static void handleApiData(AsyncWebServerRequest* req) {
     const bool     haveNow  = (sysT > 1000000000L);
     const uint32_t now      = haveNow ? (uint32_t)sysT : 0u;
 
-    uint32_t fromTs = req->hasParam("from")
-                      ? (uint32_t)req->getParam("from")->value().toInt()
-                      : (now > 86400u ? now - 86400u : 0u);
-    uint32_t toTs   = req->hasParam("to")
-                      ? (uint32_t)req->getParam("to")->value().toInt()
-                      : (haveNow ? now : UINT32_MAX);
+    const String* fromArg = queryArg(req, "from");
+    const String* toArg   = queryArg(req, "to");
+    uint32_t fromTs = fromArg ? (uint32_t)fromArg->toInt()
+                              : (now > 86400u ? now - 86400u : 0u);
+    uint32_t toTs   = toArg   ? (uint32_t)toArg->toInt()
+                              : (haveNow ? now : UINT32_MAX);
 
     // Copy filter strings to local buffers — AsyncWebParameter::value() is a
     // String whose c_str() may dangle after the param object is freed during
     // async response streaming.  (AUDIT 3.10)
     char sensorFilterBuf[33] = "";
     char metricFilterBuf[24] = "";
-    if (req->hasParam("sensor")) {
-        strncpy(sensorFilterBuf, req->getParam("sensor")->value().c_str(),
+    if (const String* v = queryArg(req, "sensor")) {
+        strncpy(sensorFilterBuf, v->c_str(),
                 sizeof(sensorFilterBuf) - 1);
     }
-    if (req->hasParam("metric")) {
-        strncpy(metricFilterBuf, req->getParam("metric")->value().c_str(),
+    if (const String* v = queryArg(req, "metric")) {
+        strncpy(metricFilterBuf, v->c_str(),
                 sizeof(metricFilterBuf) - 1);
     }
     const char* sensorFilter = sensorFilterBuf[0] ? sensorFilterBuf : nullptr;
     const char* metricFilter = metricFilterBuf[0] ? metricFilterBuf : nullptr;
 
-    TimeBucket bucket = parseBucket(req->hasParam("agg")
-                        ? req->getParam("agg")->value().c_str() : "5m");
-    AggMode    mode   = parseMode(req->hasParam("mode")
-                        ? req->getParam("mode")->value().c_str() : "lttb");
+    const String* aggArg  = queryArg(req, "agg");
+    const String* modeArg = queryArg(req, "mode");
+    TimeBucket bucket = parseBucket(aggArg  ? aggArg->c_str()  : "5m");
+    AggMode    mode   = parseMode(modeArg ? modeArg->c_str() : "lttb");
     // CM-2: parse + validate as a SIGNED long first.  Casting toInt() straight
     // to size_t turned a negative "limit" into a multi-GB value that the
     // `< 1` guard could never catch; validate the sign before the cast.
-    long limitRaw = req->hasParam("limit")
-                    ? req->getParam("limit")->value().toInt()
-                    : 250;
+    const String* limitArg = queryArg(req, "limit");
+    long limitRaw = limitArg ? limitArg->toInt() : 250;
     if (limitRaw < 1)   limitRaw = 250;
     if (limitRaw > 300) limitRaw = 300; // Cap to 300 to prevent OOM on ESP32-C3 (~24KB)
     size_t limit = (size_t)limitRaw;
@@ -165,8 +167,8 @@ static void handleApiData(AsyncWebServerRequest* req) {
     // Copy agg/mode strings — c_str() pointers may dangle during async response (N21)
     char aggParamBuf[16]  = "5m";
     char modeParamBuf[16] = "lttb";
-    if (req->hasParam("agg"))  { strncpy(aggParamBuf,  req->getParam("agg")->value().c_str(),  sizeof(aggParamBuf) - 1);  aggParamBuf[sizeof(aggParamBuf) - 1]   = '\0'; }
-    if (req->hasParam("mode")) { strncpy(modeParamBuf, req->getParam("mode")->value().c_str(), sizeof(modeParamBuf) - 1); modeParamBuf[sizeof(modeParamBuf) - 1] = '\0'; }
+    if (const String* v = queryArg(req, "agg"))  { strncpy(aggParamBuf,  v->c_str(),  sizeof(aggParamBuf) - 1);  aggParamBuf[sizeof(aggParamBuf) - 1]   = '\0'; }
+    if (const String* v = queryArg(req, "mode")) { strncpy(modeParamBuf, v->c_str(), sizeof(modeParamBuf) - 1); modeParamBuf[sizeof(modeParamBuf) - 1] = '\0'; }
     const char* aggParamStr  = aggParamBuf;
     const char* modeParamStr = modeParamBuf;
 
@@ -348,7 +350,7 @@ static void handleApiLatest(AsyncWebServerRequest* req) {
 
     delete[] raw;
     String out;
-    serializeJson(doc, out);
+    jsonToString(doc, out);
     req->send(200, "application/json", out);
 }
 
@@ -471,8 +473,8 @@ static void handleEspnowPair(AsyncWebServerRequest* req) {
     if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
 
     uint32_t seconds = ESPNOW_BOOT_PAIRING_S;
-    if (req->hasParam("seconds", true))
-        seconds = (uint32_t)req->getParam("seconds", true)->value().toInt();
+    if (const String* v = formArg(req, "seconds"))
+        seconds = (uint32_t)v->toInt();
     // Bounded at both ends. Zero would close the window the click opened, and
     // a window left open for an hour is an hour in which any node holding the
     // shared key can join.
@@ -513,8 +515,8 @@ static void handleEspnowNode(AsyncWebServerRequest* req) {
     char label[sizeof(found->id)];
     strncpy(label, found->id, sizeof(label) - 1);
     label[sizeof(label) - 1] = '\0';
-    if (req->hasParam("label", true)) {
-        const String v = req->getParam("label", true)->value();
+    if (const String* arg = formArg(req, "label")) {
+        const String& v = *arg;
         if (v.length() > 0) {
             strncpy(label, v.c_str(), sizeof(label) - 1);
             label[sizeof(label) - 1] = '\0';
@@ -522,8 +524,8 @@ static void handleEspnowNode(AsyncWebServerRequest* req) {
     }
 
     uint16_t interval = found->intervalS;
-    if (req->hasParam("interval", true)) {
-        const long v = req->getParam("interval", true)->value().toInt();
+    if (const String* arg = formArg(req, "interval")) {
+        const long v = arg->toInt();
         // 10 s is already an aggressive duty cycle for a cell; 18 hours is the
         // widest the 16-bit field on the wire can carry.
         if (v >= 10 && v <= 65535) interval = (uint16_t)v;
@@ -624,8 +626,8 @@ static void handleEspnowAdd(AsyncWebServerRequest* req) {
     const uint8_t id = (uint8_t)rawId;
 
     uint16_t interval = (uint16_t)ESPNOW_DEFAULT_INTERVAL_S;
-    if (req->hasParam("interval", true)) {
-        const long v = req->getParam("interval", true)->value().toInt();
+    if (const String* arg = formArg(req, "interval")) {
+        const long v = arg->toInt();
         if (v < 10 || v > 65535) {
             req->send(400, "application/json",
                       "{\"ok\":false,\"error\":\"interval must be 10..65535 s\"}");
@@ -638,8 +640,8 @@ static void handleEspnowAdd(AsyncWebServerRequest* req) {
     // does with a null. Passing "" would have been stored as an empty sensorId.
     const char* label = nullptr;
     String labelStr;
-    if (req->hasParam("label", true)) {
-        labelStr = req->getParam("label", true)->value();
+    if (const String* v = formArg(req, "label")) {
+        labelStr = *v;
         if (labelStr.length() > 0) label = labelStr.c_str();
     }
 
@@ -822,63 +824,8 @@ static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
 static void handleKindleConfigGet(AsyncWebServerRequest* req) {
     KindleConfig k = config.kindle;
     kdSkinClamp(k);
-
     JsonDocument doc;
-    doc["face"]          = k.face;
-    doc["face_custom"]   = k.faceCustom;
-    doc["bold"]          = k.boldZones;
-    doc["show"]          = k.showFlags;
-    doc["clock_style"]   = k.clockStyle;
-    doc["time_format"]   = k.timeFormat;
-    doc["date_format"]   = k.dateFormat;
-    doc["pressure_unit"] = k.pressureUnit;
-    doc["decimals"]      = k.tempDecimals;
-    // The stored value, not the resolved one: the page's select has an
-    // "as built" entry, and showing it resolved would silently turn that
-    // choice into a fixed one the next time somebody pressed Save.
-    doc["lang"]          = k.lang;
-    doc["lang_built"]    = kdLangResolve(KLANG_AUTO);
-
-    // Refresh cadence — runtime overrides of compile-time knobs.
-    // 0 / 0xFF means "use the built-in default", which the page shows.
-    doc["refresh_sec"]      = k.refreshSec ? k.refreshSec : KINDLE_REFRESH_SEC;
-    doc["follow_data"]      = (k.followData == 0xFF) ? KINDLE_FOLLOW_DATA : (int)k.followData;
-    doc["clock_pin_refresh"] = (k.clockPinRefresh == 0xFF) ? KINDLE_CLOCK_PIN_REFRESH : (int)k.clockPinRefresh;
-    doc["fbink_res_w"]      = k.fbinkResW;
-    // The stored choice, not the decision it leads to: "auto" is a setting in
-    // its own right and showing it resolved would turn it into a fixed one the
-    // next time somebody pressed Save — the same reason `lang` is sent raw.
-    doc["layout_mode"]      = k.layoutMode;
-    // The clock is a switch on the page like the chart and the week strip,
-    // but kept out of `show` — whose bits a settings page older than this one
-    // posts back without it, which would take the clock off on every Save.
-    doc["clock"]            = k.clockOff ? 0 : 1;
-    // Degrees, which is what the reader's own dash.conf and ?rot= say too.
-    doc["rotation"]         = (int)k.rotation * 90;
-    doc["page_rotation"]    = kdPageRotDeg(k);   // -1: the same as the panel
-    // Days between the reader setting its clock from this one; 0 never.
-    doc["clock_sync"]       = kdClockSyncDays(k);
-    // The week strip: how its cells are drawn (0 filled .. 3 minimal), and
-    // whether it holds the forecast instead of the calendar.
-    doc["week_style"]       = kdWeekStyle(k);
-    doc["week_forecast"]    = kdWeekForecast(k) ? 1 : 0;
-    // The dividing lines: weight 0..2 (1..3 px), ink 0..3 (light .. black),
-    // style 0..2 (solid, dashed, dotted).
-    doc["rule_weight"]      = kdRuleWeight(k);
-    doc["rule_ink"]         = kdRuleInk(k);
-    doc["rule_style"]       = kdRuleStyle(k);
-    // How large the readings are set, per cent of the most that fits:
-    // 100, 90, 80, 70 or 60.
-    doc["out_size"]         = kdOutSizePct(k);
-    doc["in_size"]          = kdInSizePct(k);
-    doc["outdoor_sensor"]   = (k.outdoorSensor[0] != '\0') ? k.outdoorSensor : KINDLE_OUTDOOR_SENSOR;
-    doc["indoor_sensor"]    = (k.indoorSensor[0] != '\0') ? k.indoorSensor : KINDLE_INDOOR_SENSOR;
-
-    // The page's own width, read-only. It is a build-time constant (every size
-    // in the stylesheet is derived from it), and the settings page shows it so
-    // that "the layout is wrong on my reader" has somewhere to start rather
-    // than looking like a setting somebody forgot to expose.
-    doc["page_w"]        = KINDLE_PAGE_W;
+    kdConfigToApi(k, doc.to<JsonObject>());
     sendJsonResponse(req, doc);
 }
 
@@ -886,76 +833,7 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
     if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
 
     KindleConfig k = config.kindle;
-
-    #define KD_PARAM(name, field) \
-        if (req->hasParam(name, true)) \
-            k.field = (decltype(k.field))req->getParam(name, true)->value().toInt()
-
-    KD_PARAM("face",          face);
-    KD_PARAM("bold",          boldZones);
-    KD_PARAM("show",          showFlags);
-    KD_PARAM("clock_style",   clockStyle);
-    KD_PARAM("time_format",   timeFormat);
-    KD_PARAM("date_format",   dateFormat);
-    KD_PARAM("pressure_unit", pressureUnit);
-    KD_PARAM("decimals",      tempDecimals);
-    KD_PARAM("lang",          lang);
-    KD_PARAM("refresh_sec",      refreshSec);
-    KD_PARAM("follow_data",      followData);
-    KD_PARAM("clock_pin_refresh", clockPinRefresh);
-    KD_PARAM("fbink_res_w",       fbinkResW);
-    KD_PARAM("layout_mode",       layoutMode);
-    #undef KD_PARAM
-    if (req->hasParam("clock", true))
-        k.clockOff = req->getParam("clock", true)->value().toInt() ? 0 : 1;
-    if (req->hasParam("rotation", true))
-        k.rotation = kdRotFromDeg(req->getParam("rotation", true)->value().toInt(),
-                                  k.rotation);
-    if (req->hasParam("page_rotation", true))
-        k.pageRot = kdPageRotFromDeg(req->getParam("page_rotation", true)->value().toInt(),
-                                     k.pageRot);
-    if (req->hasParam("clock_sync", true))
-        k.clockSync = kdClockSyncFromDays(req->getParam("clock_sync", true)->value().toInt(),
-                                          k.clockSync);
-
-    if (req->hasParam("week_style", true))
-        k.weekStyle = (uint8_t)((k.weekStyle & ~KWEEK_STYLE_MASK) |
-                      (req->getParam("week_style", true)->value().toInt() & KWEEK_STYLE_MASK));
-    if (req->hasParam("week_forecast", true)) {
-        if (req->getParam("week_forecast", true)->value().toInt()) k.weekStyle |= KWEEK_FORECAST;
-        else k.weekStyle &= (uint8_t)~KWEEK_FORECAST;
-    }
-    {
-        int w = kdRuleWeight(k), ink = kdRuleInk(k), st = kdRuleStyle(k);
-        if (req->hasParam("rule_weight", true)) w   = req->getParam("rule_weight", true)->value().toInt();
-        if (req->hasParam("rule_ink", true))    ink = req->getParam("rule_ink", true)->value().toInt();
-        if (req->hasParam("rule_style", true))  st  = req->getParam("rule_style", true)->value().toInt();
-        k.rules = kdRulesPack(w, ink, st);
-    }
-    {
-        int o = k.metricSize & 0x0F, i = k.metricSize >> 4;
-        if (req->hasParam("out_size", true))
-            o = kdSizeStepFromPct(req->getParam("out_size", true)->value().toInt());
-        if (req->hasParam("in_size", true))
-            i = kdSizeStepFromPct(req->getParam("in_size", true)->value().toInt());
-        k.metricSize = kdSizePack(o, i);
-    }
-
-    if (req->hasParam("face_custom", true)) {
-        const String v = req->getParam("face_custom", true)->value();
-        strncpy(k.faceCustom, v.c_str(), sizeof(k.faceCustom) - 1);
-        k.faceCustom[sizeof(k.faceCustom) - 1] = '\0';
-    }
-    if (req->hasParam("outdoor_sensor", true)) {
-        const String v = req->getParam("outdoor_sensor", true)->value();
-        strncpy(k.outdoorSensor, v.c_str(), sizeof(k.outdoorSensor) - 1);
-        k.outdoorSensor[sizeof(k.outdoorSensor) - 1] = '\0';
-    }
-    if (req->hasParam("indoor_sensor", true)) {
-        const String v = req->getParam("indoor_sensor", true)->value();
-        strncpy(k.indoorSensor, v.c_str(), sizeof(k.indoorSensor) - 1);
-        k.indoorSensor[sizeof(k.indoorSensor) - 1] = '\0';
-    }
+    kdConfigFromForm(k, formParam, req);
 
     // Clamped before it is stored, so an out-of-range value never reaches the
     // renderer even by way of a config.bin somebody edited by hand. This is
@@ -1460,7 +1338,7 @@ static void handleApiModulesIndex(AsyncWebServerRequest* req) {
     sendJsonResponse(req, doc);
 }
 
-// GET /api/modules/:id → {id,name,enabled,hasUI,config,schema?}
+// GET /api/modules/:id → {id,name,enabled,hasUI,config}
 // The :id is extracted from the URL by the dispatcher below.
 static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) {
     JsonDocument doc;
@@ -1470,6 +1348,27 @@ static void handleApiModuleDetail(AsyncWebServerRequest* req, const String& id) 
         return;
     }
     sendJsonResponse(req, doc);
+}
+
+// GET /api/modules/:id/schema → the form's {"fields":[…]}, sent as it is
+// stored: gzipped, with Content-Encoding: gzip, the way the failsafe page is.
+// The browser inflates it; the firmware never holds it uncompressed. Every
+// browser that can run the settings page accepts gzip, so there is no plain
+// fallback to keep in flash. 404 for a module without a form.
+static void handleApiModuleSchema(AsyncWebServerRequest* req, const String& id) {
+    IModule* mod = moduleRegistry.getById(id.c_str());
+    const ModuleSchema s = mod ? mod->schema() : ModuleSchema{nullptr, 0};
+    if (!s.gz) {
+        req->send(404, "application/json", "{\"ok\":false,\"error\":\"no form\"}");
+        return;
+    }
+    AsyncWebServerResponse* resp = req->beginResponse_P(200, "application/json", s.gz, s.len);
+    if (!resp) {
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
+        return;
+    }
+    resp->addHeader("Content-Encoding", "gzip");
+    req->send(resp);
 }
 
 // POST /api/modules/:id with JSON body → load() + persist.
@@ -1555,8 +1454,9 @@ static void handleApiModuleEnable(AsyncWebServerRequest* req, const String& id) 
         return;
     }
     bool on = true;
-    if (req->hasParam("on", true)) on = req->getParam("on", true)->value() == "1";
-    else if (req->hasParam("on")) on = req->getParam("on")->value() == "1";
+    const String* onArg = formArg(req, "on");
+    if (!onArg) onArg = queryArg(req, "on");
+    if (onArg) on = *onArg == "1";
     mod->setEnabled(on);
 
     // Try a hot (re)start first; modules that cannot hot-cycle return false
@@ -1806,6 +1706,14 @@ static void handleApiModulesDispatch(AsyncWebServerRequest* req) {
         return;
     }
     if (req->method() == HTTP_GET) {
+        // "/api/modules/<id>" also answers "/api/modules/<id>/…" (see the
+        // route-ordering note in registerApiRoutes), which is how the schema
+        // arrives here without a route of its own.
+        if (id.endsWith("/schema")) {
+            id.remove(id.length() - strlen("/schema"));
+            handleApiModuleSchema(req, id);
+            return;
+        }
         handleApiModuleDetail(req, id);
         return;
     }
@@ -1879,7 +1787,7 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
         // beyond that we'd risk OOM on the AsyncTCP worker.
         if (f.size() > 16 * 1024) { f.close(); return; }
         JsonVariant slot = parent[key].to<JsonVariant>();
-        if (deserializeJson(slot, f) != DeserializationError::Ok) {
+        if (deserializeJsonFile(slot, f) != DeserializationError::Ok) {
             parent.remove(key);
         }
         f.close();
@@ -1997,8 +1905,9 @@ static void handleApiI2cScan(AsyncWebServerRequest* req) {
     if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
 
     uint8_t bus = 0;
-    if (req->hasParam("bus", true))      bus = (uint8_t)req->getParam("bus", true)->value().toInt();
-    else if (req->hasParam("bus"))       bus = (uint8_t)req->getParam("bus")->value().toInt();
+    const String* busArg = formArg(req, "bus");
+    if (!busArg) busArg = queryArg(req, "bus");
+    if (busArg) bus = (uint8_t)busArg->toInt();
 
     // Safe to check without the lock: the controller count is a compile-time
     // property of the chip and never changes.
@@ -2228,7 +2137,8 @@ void registerApiRoutes(AsyncWebServer& server) {
             handleApiModuleRestart(r, id);
         });
 
-        // GET /api/modules/:id — detail object + PROGMEM schema (drives the form)
+        // GET /api/modules/:id — detail object; GET /api/modules/:id/schema —
+        // the gzipped form schema (both through the dispatcher)
         server.on(base.c_str(), HTTP_GET, handleApiModulesDispatch);
 
         // POST /api/modules/:id — save {enabled, config}. Body buffered via

@@ -4,7 +4,7 @@ check_flash_trims.py — the flash an image saved stays saved.
 
 WHY THIS EXISTS
 ---------------
-Four savings on the 4 MB C3 image (~53 KB with every feature on) leave no
+Six savings on the 4 MB C3 image (~70 KB with every feature on) leave no
 trace in the source a reviewer would notice going away. Each is undone by an
 ordinary-looking edit, and the only symptom is an image that grew:
 
@@ -21,25 +21,43 @@ ordinary-looking edit, and the only symptom is an image that grew:
      points, so libespcoredump (~12 KB) is never linked on a partition table
      that has nowhere to write a core dump.
 
-2 and 3 work because the linker only takes a member out of an archive for a
+  3b. LOGGER_TERSE_ESP_ERRORS: the same file defines esp_err_to_name() and
+     esp_err_to_name_r(), so the table of every ESP_ERR_* name
+     (esp_err_to_name.c, ~7.5 KB) is never linked for the two serial lines
+     that print one.
+
+2, 3 and 3b work because the linker only takes a member out of an archive for a
 symbol nobody has defined yet. Anything in the build that references another
 symbol from those members pulls them back in, and the definitions here then
 save nothing — without an error.
 
-  4. One copy of ArduinoJson's parser and one of its stream serialiser.
-     Both are templates on their input and output type, so every new type
-     passed to deserializeJson()/serializeJson() compiles the whole engine
-     again — seven parser copies and four serialiser copies cost ~12 KB
-     before they were folded. Memory input goes in as (const char*, length),
-     files as a File, and anything that prints goes out as a Print&.
+  4. One copy of ArduinoJson's parser and one of its serialiser. Both are
+     templates on their input and output type, so every new type passed to
+     deserializeJson()/serializeJson() compiles the whole engine again —
+     seven parser copies and four serialiser copies cost ~12 KB before they
+     were folded, and the File reader and the String/char[] writers another
+     ~6.8 KB after that. Memory goes in as (const char*, length); a file goes
+     through deserializeJsonFile() (src/utils/JsonIO.h), which reads it into
+     memory first; everything goes out through a Print — a stream as
+     static_cast<Print&>, a String through jsonToString(), a char buffer
+     through jsonToBuf(). measureJson() is the one other writer.
+
+  5. No table twice. A `static const` array in a header is compiled into
+     every file that includes it — KD_METRIC_STYLE was two copies of the same
+     540 bytes. A table a header shares goes in an inline function's static
+     local (one copy, however many files include it) or in a .cpp.
 
 So this reads the linked ELF, not the source:
   * remoteIngest / trendRing / readingCache, where linked, are .bss symbols
   * with LOGGER_TERSE_TLS_ERRORS in the env's flags, mbedtls_high_level_strerr
     (error.c's table walker) is absent
   * with LOGGER_NO_COREDUMP, esp_core_dump_write_elf (libespcoredump) is absent
+  * with LOGGER_TERSE_ESP_ERRORS, esp_err_msg_table (esp_err_to_name.c) is
+    absent
   * ArduinoJson's JsonDeserializer and JsonSerializer are instantiated only
     for the input and output types in JSON_READERS / JSON_WRITERS
+  * no local read-only object of DUP_MIN bytes or more is linked more than
+    once under the same name and size, except those in DUP_OK
 
 Usage:
     python3 tools/check_flash_trims.py --env xiao_esp32c3
@@ -67,20 +85,30 @@ TRIMS = {
                                 "mbedTLS error.c (~15.6 KB)"),
     "LOGGER_NO_COREDUMP":      ("esp_core_dump_write_elf",
                                 "libespcoredump (~11.9 KB)"),
+    "LOGGER_TERSE_ESP_ERRORS": ("esp_err_msg_table",
+                                "esp_err_to_name.c (~7.5 KB)"),
 }
 
 
 # The one type each kind of call should go through; see 4. above. A new one
-# means a call site passed something else — cast or convert it at the call
-# (a String as .c_str(), .length(); a stream as static_cast<Print&>) rather
-# than growing these lists.
-JSON_READERS = {"BoundedReader<char const*, void>", "Reader<fs::File, void>"}
-JSON_WRITERS = {"Writer<Print, void>", "Writer<String, void>",
-                "StaticStringWriter", "DummyWriter"}
+# means a call site passed something else — convert it at the call rather
+# than growing these lists: a String as .c_str(), .length(); a File through
+# deserializeJsonFile(); a stream as static_cast<Print&>; a String or char
+# buffer to write through jsonToString() / jsonToBuf().
+JSON_READERS = {"BoundedReader<char const*, void>"}
+JSON_WRITERS = {"Writer<Print, void>", "DummyWriter"}
 JSON_READER_RE = re.compile(r"JsonDeserializer<ArduinoJson::\w+::detail::"
                             r"((?:Bounded)?Reader<[^<>]*>)")
 JSON_WRITER_RE = re.compile(r"(?:JsonSerializer|TextFormatter)<ArduinoJson::"
                             r"\w+::detail::(Writer<[^<>]*>|\w+Writer)\s*>")
+
+# See 5. above. Local ('r'/'d') objects only: a header's `static const` table
+# is local to each file that includes it. 64 bytes keeps out the small
+# constants the C library and the IDF repeat on purpose.
+DUP_MIN = 64
+# Same name and size, different contents: ESP-IDF's per-driver esp_vfs_t
+# tables (UART, USB serial/JTAG, console), each `static` in its own file.
+DUP_OK = {"vfs"}
 
 
 def find_nm(chip: str) -> str:
@@ -116,6 +144,8 @@ def main() -> int:
                          capture_output=True, text=True).stdout
     demangled = subprocess.run([nm, "-C", elf], check=True,
                                capture_output=True, text=True).stdout
+    sized = subprocess.run([nm, "-S", "-C", elf], check=True,
+                           capture_output=True, text=True).stdout
     kind = {}
     for line in out.splitlines():
         parts = line.split()
@@ -141,10 +171,24 @@ def main() -> int:
     writers = set(JSON_WRITER_RE.findall(demangled))
     for t in sorted(readers - JSON_READERS):
         bad.append(f"ArduinoJson's parser is compiled for {t} too: pass "
-                   f"memory as (const char*, length) — see JSON_READERS")
+                   f"memory as (const char*, length), a file through "
+                   f"deserializeJsonFile() — see JSON_READERS")
     for t in sorted(writers - JSON_WRITERS):
         bad.append(f"ArduinoJson's serialiser is compiled for {t} too: pass "
-                   f"a stream as static_cast<Print&> — see JSON_WRITERS")
+                   f"a stream as static_cast<Print&>, a String or buffer "
+                   f"through jsonToString() / jsonToBuf() — see JSON_WRITERS")
+
+    copies = {}
+    for line in sized.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) == 4 and parts[2] in ("r", "d"):
+            key = (parts[3].strip(), int(parts[1], 16))
+            copies[key] = copies.get(key, 0) + 1
+    for (name, size), n in sorted(copies.items()):
+        if n > 1 and size >= DUP_MIN and name not in DUP_OK:
+            bad.append(f"{name} ({size} B) is linked {n} times: a table defined "
+                       f"`static` in a header — make it an inline function's "
+                       f"static local, or define it once in a .cpp")
 
     for b in bad:
         print(f"FAIL: {b}")

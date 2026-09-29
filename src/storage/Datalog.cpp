@@ -11,6 +11,7 @@
 #include <new>
 #include <string.h>
 #include <time.h>
+#include "../utils/JsonIO.h"
 
 // Every write in this file runs under fsMutex: datalogAppend() and
 // datalogColsSaveIfLearned() under the caller's, datalogColsFromJson()
@@ -242,7 +243,7 @@ void datalogColsBegin(fs::FS& fs) {
     File f = fs.open(COLS_PATH, "r");
     if (!f) return;                     // no file: auto, every metric
     JsonDocument doc;
-    DeserializationError e = deserializeJson(doc, f);
+    DeserializationError e = deserializeJsonFile(doc, f);
     f.close();
     ColsLock g;
     if (e || !parseCols(doc.as<JsonVariantConst>()))

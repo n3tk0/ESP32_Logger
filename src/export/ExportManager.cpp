@@ -3,6 +3,7 @@
 #include "../pipeline/DataPipeline.h"
 #include "../utils/MutexGuard.h"
 #include <string.h>
+#include "../utils/JsonIO.h"
 
 ExportManager exportManager;
 
@@ -33,7 +34,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     }
 
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, f);
+    DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
     if (err) {
         Serial.printf("[ExportManager] JSON error: %s\n", err.c_str());

@@ -2053,7 +2053,10 @@ function closePopup() {
 // enable/disable toggle) on the left, and the selected module's schema-driven
 // config form on the right.
 //   GET  /api/modules            → [{id,name,enabled,hasUI}, ...]
-//   GET  /api/modules/:id        → {id,name,enabled,hasUI,config,schema?}
+//   GET  /api/modules/:id        → {id,name,enabled,hasUI,config}
+//   GET  /api/modules/:id/schema → {fields:[…]}  (hasUI only; served gzipped.
+//                                   Older firmware put it in the detail as a
+//                                   JSON string instead — both are read.)
 //   POST /api/modules/:id?csrf=  → {enabled, config}      (save; CSRF in query)
 //   POST /api/modules/:id/enable?on=1                     (fast toggle)
 // Schema field types: string | password | int | float | ipv4 | bool | color |
@@ -2309,7 +2312,7 @@ var Modules = (function () {
       return;
     }
     var schema;
-    try { schema = JSON.parse(detail.schema); }
+    try { schema = typeof detail.schema === "string" ? JSON.parse(detail.schema) : detail.schema; }
     catch (e) { host.innerHTML = '<p class="hint">' + esc(t("settingsPages.modBadSchemaJson")) + '</p>'; return; }
 
     var fieldsHtml = "", lastGroup = null;
@@ -2585,7 +2588,31 @@ var Modules = (function () {
   }
 
   function loadList()     { return _getJson("/api/modules"); }
-  function loadDetail(id) { return _getJson("/api/modules/" + encodeURIComponent(id)); }
+  // The schema only changes with the firmware, so it is fetched once per
+  // module per page load and the detail (config, status) every time.
+  // When the index already says the module has a form, both requests go out
+  // together rather than one after the other. A schema that fails to load
+  // fails the whole detail (and is asked for again next time), so a module
+  // with a form is never drawn as one without.
+  var _schemas = {};
+  function loadDetail(id) {
+    var url = "/api/modules/" + encodeURIComponent(id);
+    function schemaFor() {
+      var s = _schemas[id];
+      if (!s) {
+        s = _schemas[id] = _getJson(url + "/schema");
+        s.catch(function () { if (_schemas[id] === s) delete _schemas[id]; });
+      }
+      return s;
+    }
+    var entry = _list.filter(function (m) { return m.id === id; })[0];
+    var early = entry && entry.hasUI ? schemaFor() : null;
+    if (early) early.catch(function () {});   // reported through the detail below
+    return _getJson(url).then(function (d) {
+      if (!d || !d.hasUI || d.schema) return d;   // no form, or an older firmware's inline one
+      return (early || schemaFor()).then(function (sc) { d.schema = sc; return d; });
+    });
+  }
   function save(id, body) {
     // POST /api/modules/:id is CSRF-gated and reads the token from the query
     // string only — postWithCsrf appends ?csrf=<token> and retries once on 403.

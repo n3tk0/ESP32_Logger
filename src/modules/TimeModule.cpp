@@ -1,37 +1,23 @@
 #include "TimeModule.h"
+#include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../core/Globals.h"
 #include "../core/Config.h"
 #include "../managers/RtcManager.h"   // applyTimeZone
 #include "../utils/PosixTz.h"
 #include <stdlib.h>                  // atoi
 
-namespace {
-
-// PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
-const char TIME_SCHEMA[] PROGMEM =
-    "{\"fields\":["
-      "{\"id\":\"ntpServer\",\"type\":\"string\",\"max\":64,\"label\":\"NTP server\",\"group\":\"NTP\","
-        "\"help\":\"Hostname queried at boot and on a manual sync (e.g. pool.ntp.org).\"},"
-      "{\"id\":\"timezone\",\"type\":\"int\",\"min\":-12,\"max\":14,\"label\":\"Timezone\",\"unit\":\"h\","
-        "\"help\":\"Hours from UTC. Timestamps are stored in UTC and displayed in this zone.\"},"
-      "{\"id\":\"dstRule\",\"type\":\"enum\",\"label\":\"Daylight saving\","
-        "\"options\":[{\"v\":0,\"l\":\"Automatic (EU)\"},{\"v\":1,\"l\":\"Automatic (US)\"},"
-                     "{\"v\":2,\"l\":\"Off\"},{\"v\":3,\"l\":\"Manual (always on)\"}]},"
-      "{\"id\":\"dstOffsetHours\",\"type\":\"int\",\"min\":1,\"max\":2,\"label\":\"DST offset\",\"unit\":\"h\","
-        "\"help\":\"Hours added all year under the manual rule.\",\"showIf\":{\"dstRule\":3}}"
-    "]}";
-
-} // namespace
-
 // ---------------------------------------------------------------------------
 bool TimeModule::load(JsonObjectConst cfg) {
     NetworkConfig& n = config.network;
     const char* ntp = cfg["ntpServer"] | (const char*)nullptr;
     if (ntp) strlcpy(n.ntpServer, ntp, sizeof(n.ntpServer));
-    n.timezone       = (int8_t)(cfg["timezone"]       | (int)n.timezone);
-    if (n.timezone < -12 || n.timezone > 14) n.timezone = 0;
-    n.dstOffsetHours = (int8_t)(cfg["dstOffsetHours"] | (int)n.dstOffsetHours);
-    if (n.dstOffsetHours < 0 || n.dstOffsetHours > 2) n.dstOffsetHours = 0;
+    // Checked as int before narrowing, so 250 is not read as -6. An hour
+    // out of range falls back to UTC+2, the default applyDefaults() and
+    // loadConfig() use.
+    const int tz  = cfg["timezone"]       | (int)n.timezone;
+    const int dst = cfg["dstOffsetHours"] | (int)n.dstOffsetHours;
+    n.timezone       = (tz < -12 || tz > 14) ? 2 : (int8_t)tz;
+    n.dstOffsetHours = (dst < 0 || dst > 2)  ? 0 : (int8_t)dst;
     // The module form posts an enum as the <select>'s string value ("2"),
     // which `| int` would silently ignore.
     JsonVariantConst rule = cfg["dstRule"];
@@ -62,8 +48,8 @@ bool TimeModule::start() {
 }
 
 // ---------------------------------------------------------------------------
-const char* TimeModule::schema() const {
-    return TIME_SCHEMA;
+ModuleSchema TimeModule::schema() const {
+    return {MODULE_SCHEMA_TIME_GZ, sizeof(MODULE_SCHEMA_TIME_GZ)};
 }
 
 // ---------------------------------------------------------------------------
