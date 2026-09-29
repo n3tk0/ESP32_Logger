@@ -1434,6 +1434,47 @@ check "$([ "$TX_TOP" -lt 200 ] && echo 0 || echo 1)" \
 check "$?" "every layout names its font's (ascent - descent) / em"
 RES_W=600; RES_H=800; load_layout
 
+# ── The face's own span, read from its file ──────────────────────────────────
+# 1160 in the layout was one guess for every face; a face whose span is taller
+# drew that much smaller than the browser page, the headline most of all. The
+# panel reads `hhea` and `head` itself now. Two synthetic fonts — just the
+# offset table and the two tables' fields that are read — so the check needs
+# no font installed: upm 1000, ascent 950, descent -300 (span 1250), and the
+# bold at upm 2048, 1901, -483 (span 1164, DejaVu Serif's numbers).
+mk_ttf() {
+    # $1=file  $2..$7 = upm hi/lo, ascent hi/lo, descent hi/lo (octal)
+    head -c 112 /dev/zero > "$1"
+    poke() { printf "$2" | dd of="$1" bs=1 seek="$3" conv=notrunc 2>/dev/null; }
+    poke "$1" '\000\001\000\000\000\002' 0          # version 1.0, two tables
+    poke "$1" 'head\000\000\000\000\000\000\000\054' 12   # at 44
+    poke "$1" 'hhea\000\000\000\000\000\000\000\144' 28   # at 100
+    poke "$1" "\\$2\\$3" 62                         # head + 18
+    poke "$1" "\\$4\\$5\\$6\\$7" 104                 # hhea + 4
+}
+mk_ttf "$WORK/span_reg.ttf"  003 350 003 266 376 324
+mk_ttf "$WORK/span_bold.ttf" 010 000 007 155 376 035
+font_metrics "$WORK/span_reg.ttf"
+check "$([ "$FM_SPAN" = 1250 ] && [ "$FM_ASC" = 950 ] && echo 0 || echo 1)" \
+      "the face's span and ascent are read from hhea over head ($FM_SPAN, $FM_ASC)"
+font_metrics "$WORK/fonts/Bookerly-Regular.ttf"
+check "$([ $? -ne 0 ] && [ -z "$FM_SPAN" ] && echo 0 || echo 1)" \
+      "  and a file that is not a font leaves the layout's number in charge"
+( FONT_REG="$WORK/span_reg.ttf"; FONT_BOLD="$WORK/span_bold.ttf"
+  USR_FONTS=/nonexistent SYS_FONTS=/nonexistent
+  font_metrics "$FONT_REG";  FONT_REG_SPAN="$FM_SPAN";  FONT_REG_ASC="$FM_ASC"
+  font_metrics "$FONT_BOLD"; FONT_BOLD_SPAN="$FM_SPAN"; FONT_BOLD_ASC="$FM_ASC"
+  RES_W=600; RES_H=800; load_layout
+  ok=0
+  [ "$TEXT_PX_MILLE" = 1250 ] || ok=1
+  [ "$BASELINE_MILLE" = 825 ] || ok=1             # 950 - (1250 - 1000) / 2
+  [ "$BASELINE_MILLE_BOLD" = 846 ] || ok=1        # 928 - (1164 - 1000) / 2
+  text_geom 200 100 "$FONT_REG";  [ "$TX_PX" = 125 ] || ok=1
+  text_geom 200 100 "$FONT_BOLD"; [ "$TX_PX" = 116 ] || ok=1
+  # A bold 88 and a regular 44 on one baseline: 200 + 88*.846 - 44*.825
+  [ "$(baseline_y 200 88 44 1 0)" = 238 ] || ok=1
+  exit $ok )
+check "$?" "  and each face is sized, and its baseline placed, by its own numbers"
+
 # ── TRACE writes down what was drawn, and changes nothing about it ───────────
 #
 # The panel is the one renderer nobody can watch: the tests drive it against a

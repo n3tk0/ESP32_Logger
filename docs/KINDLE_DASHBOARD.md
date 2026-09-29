@@ -1175,7 +1175,14 @@ checker still compares like with like; the box is also started half its own
 growth higher, so correcting the size does not drop every string down the
 screen away from the coordinates it was tuned to.
 
-It is the one number to turn if the type ends up a hair large or small.
+That number is now read from the face itself. `font_setup()` opens the
+regular and the bold file the panel draws with and reads what stb_truetype
+reads — `hhea` ascender and descender over `head` unitsPerEm — into
+`FONT_REG_SPAN`/`FONT_BOLD_SPAN` and their ascents. A single 1160 for every
+face left any face with a taller span drawing that much smaller than the page,
+the headline most visibly, and put its baseline where a different face's
+would be. The layout's `TEXT_PX_MILLE` is only the fallback for a file that
+cannot be read; `TRACE=1` logs the numbers each face gave.
 
 Two things that were tuned against the old geometry moved with it, and are
 derived now rather than written down: `baseline_mille` — where a baseline
