@@ -79,6 +79,9 @@ a shorter menu and no error at all.
   - Callback-based architecture for GUI/CLI integration
   - All HTTP, serial, and PlatformIO operations
 
+- **`remote_ota.py`** — Steps 13 and 14: firmware over WiFi through the
+  devices' own HTTP API (image checks, basic auth, CSRF, the node rollout)
+
 - **`deploy.py`** — CLI interface (refactored)
   - Interactive menu with color-coded output
   - Uses DeployManager for all operations
@@ -279,6 +282,11 @@ python3 tools/deploy.py --run
 10. **Erase node flash** — Full wipe of the satellite board (`pio run -d node… -t erase`)
 11. **Compile node firmware** — Build the satellite project
 12. **Flash node firmware** — Upload it, on the node's own port
+13. **Remote collector OTA** — Send the collector's firmware over WiFi (see
+    [Remote update](#remote-update-steps-13-and-14)). Runs **before** step 8
+    when both are ticked: the firmware first, then its web pages.
+14. **Remote node OTA** — Send a node's firmware over WiFi, through the
+    collector or straight to a WiFi node
 
 ## Presets
 
@@ -291,6 +299,7 @@ Quick configurations for common workflows:
 | **Quick flash** | 5,6 | Fast recompile & flash (no erase) |
 | **HTTP deploy** | 1,8 | Rebuild web + push to running device |
 | **Node flash** | 11,12 | The satellite node board, on its own port |
+| **Remote update** (`O`) | 1,5,13,8 | Compile, update the collector over WiFi, then its web UI |
 | **All steps** | 1-9 | Everything including serial monitor |
 
 The GUI shows the same one-line explanation when you hover a preset button, and
@@ -376,6 +385,21 @@ values you pinned survive the switch.
 - **features** — Optional compile-time features, by macro name. See below.
 - **espnow_lmk** — The 16-character key shared with an ESP-NOW battery node.
   Only used when `FEATURE_ESPNOW_INGEST` is selected.
+- **remote_fw_file**, **node_fw_file** — The .bin steps 13 and 14 send. Empty
+  means the last build (`.pio/build/<env>/firmware.bin`, or the node
+  project's); a path is any other image, such as one downloaded from the
+  Build OTA Firmware workflow.
+- **http_user** — The collector's basic-auth user, when it is built with
+  `WEB_BASIC_AUTH_ENABLED`.
+- **node_fw_route** — `collector` (default) or `direct` (WiFi node only).
+- **node_fw_targets** — `"all"` or a list of node keys (`e:3`, `w:balcony`).
+- **node_ip**, **node_http_user** — The WiFi node's address and basic-auth user,
+  for the direct route.
+- **node_fw_watch**, **node_fw_watch_min** — Follow the node rollout until
+  every node is done or failed (default off; 30 min limit).
+- **Passwords are never saved.** The GUI keeps them for the session; the CLI
+  asks under `[R]`; `deploy.py --run` reads `DEPLOY_HTTP_PASS` (collector) and
+  `DEPLOY_NODE_PASS` (WiFi node) from the environment. `save_cfg()` drops them.
 
 #### Build features
 
@@ -427,6 +451,38 @@ Steps **10** and **11** compile and flash a satellite board — `node_espnow/`
 is a different board on a different USB device and borrowing the collector's
 is the shortest path to flashing an ESP8266 image at an ESP32-C3. The `D`
 preset runs both steps.
+
+#### Remote update (steps 13 and 14)
+
+Firmware over WiFi, with no cable, through the HTTP API the devices already
+serve. Nothing on the device side is specific to the deploy tool: these are
+the calls the web UI makes.
+
+**Step 13 — the collector.** Checks the image first (an ESP32 app image, built
+for the selected env's chip, and not a node image), then posts it to
+`/do_update?sha256=…` at the **Device IP** with the CSRF token. The collector
+hashes what it receives and refuses a mismatch. The step waits for the
+restart, logs the version now running, and calls `/api/ota/confirm` when
+`/api/ota/status` says the image is pending — so a restart soon after cannot
+roll it back.
+
+**Step 14 — a node.** The image's `NODEFW1` marker says which kind it is
+(`esp8266` or `espnow-c3`, see `docs/NODE_OTA.md`).
+
+- *Through the collector* (default): the image goes to
+  `/api/nodes/fw/upload` (the collector needs an SD card for it), then
+  `/api/nodes/fw` starts the update for the picked nodes, or every node of
+  that kind. Each node fetches it the next time it wakes, so the step does not
+  wait unless *Follow the rollout* is ticked. An image the collector already
+  holds is not uploaded again: that would put nodes that are already done
+  back to pending.
+- *Directly to the WiFi node*: the ESP8266 node's own `/update`, with the
+  basic-auth login set on its setup page (its LAN server refuses updates
+  without one). ESP-NOW nodes always go through the collector.
+
+In the GUI these settings are in **Settings → Remote update**; *Load nodes
+from the collector* lists the nodes to pick from, and *Check devices* logs
+what each device runs now. In the CLI they are under `[R]`.
 
 #### The ESP-NOW key
 
@@ -707,6 +763,18 @@ pio --version
 - Ensure device is connected to WiFi with correct IP
 - Device must be reachable: `ping <device_ip>`
 - Run step 1 (Build web) first to ensure data/www/ exists
+
+### Remote update fails
+- **403** — the CSRF token was refused; run the step again (a restart makes a
+  new one) and check the Device IP is the collector
+- **"wants a login"** — the collector is built with basic auth; set the web
+  user and password (they are not saved)
+- **"OTA disabled in /api/modules/ota"** — enable the OTA module on the
+  collector's Modules page
+- **no SD card** — node images are kept on the collector's card; step 14's
+  collector route needs one
+- **404 from a WiFi node** — its firmware is older than local updates; flash
+  it over USB once (step 12)
 
 ### `EOFError: EOF when reading a line` during a step
 
