@@ -11,10 +11,13 @@ bool TimeModule::load(JsonObjectConst cfg) {
     NetworkConfig& n = config.network;
     const char* ntp = cfg["ntpServer"] | (const char*)nullptr;
     if (ntp) strlcpy(n.ntpServer, ntp, sizeof(n.ntpServer));
-    n.timezone       = (int8_t)(cfg["timezone"]       | (int)n.timezone);
-    if (n.timezone < -12 || n.timezone > 14) n.timezone = 0;
-    n.dstOffsetHours = (int8_t)(cfg["dstOffsetHours"] | (int)n.dstOffsetHours);
-    if (n.dstOffsetHours < 0 || n.dstOffsetHours > 2) n.dstOffsetHours = 0;
+    // Checked as int before narrowing, so 250 is not read as -6. An hour
+    // out of range falls back to UTC+2, the default applyDefaults() and
+    // loadConfig() use.
+    const int tz  = cfg["timezone"]       | (int)n.timezone;
+    const int dst = cfg["dstOffsetHours"] | (int)n.dstOffsetHours;
+    n.timezone       = (tz < -12 || tz > 14) ? 2 : (int8_t)tz;
+    n.dstOffsetHours = (dst < 0 || dst > 2)  ? 0 : (int8_t)dst;
     // The module form posts an enum as the <select>'s string value ("2"),
     // which `| int` would silently ignore.
     JsonVariantConst rule = cfg["dstRule"];

@@ -414,6 +414,27 @@ static void test_file_values_are_checked() {
     // A folder that only needs tidying is tidied, as the form does.
     CHECK(importFile("{\"datalog\":{\"folder\":\"logs2//\"}}"));
     CHECK_STREQ(config.datalog.folder, "/logs2");
+
+    // Names too long for the form are refused, not cut to fit.
+    CHECK(importFile("{\"datalog\":{\"folder\":\"/logs/station_north_greenhouse_2025\","
+                     "\"prefix\":\"a_prefix_that_is_longer_than_32_chars\"}}"));
+    CHECK_STREQ(config.datalog.folder, "/logs2");
+    CHECK_STREQ(config.datalog.prefix, "garden");
+
+    // Enums outside their values keep what was stored; debounce is clamped
+    // as the form clamps it; an hour off the clock falls back to UTC+2, the
+    // firmware default, and one that would wrap in an int8_t is not taken.
+    const DeviceConfig before = config;
+    CHECK(importFile("{\"network\":{\"wifiMode\":7,\"timezone\":20},"
+                     "\"hardware\":{\"storageType\":99,\"wakeupMode\":42,\"debounceMs\":5000}}"));
+    CHECK_EQ((int)config.network.wifiMode, (int)before.network.wifiMode);
+    CHECK_EQ((int)config.hardware.storageType, (int)before.hardware.storageType);
+    CHECK_EQ((int)config.hardware.wakeupMode, (int)before.hardware.wakeupMode);
+    CHECK_EQ(config.hardware.debounceMs, 500);
+    CHECK_EQ(config.network.timezone, 2);
+    CHECK(importFile("{\"network\":{\"timezone\":250},\"hardware\":{\"debounceMs\":1}}"));
+    CHECK_EQ(config.network.timezone, 2);
+    CHECK_EQ(config.hardware.debounceMs, 20);
 }
 
 int main() {

@@ -14,11 +14,11 @@ bool parseIPv4(const char* s, uint8_t out[4]) {
     return ipv4Parse(s, out);   // not sscanf: see Ipv4Parse.h
 }
 
+} // namespace
+
 void formatIPv4(const uint8_t in[4], char* out, size_t n) {
     snprintf(out, n, "%u.%u.%u.%u", in[0], in[1], in[2], in[3]);
 }
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 bool WiFiModule::load(JsonObjectConst cfg) {

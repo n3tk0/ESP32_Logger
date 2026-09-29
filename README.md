@@ -172,8 +172,8 @@ Current, `xiao_esp32c3`, `firmware.bin`:
 
 | build | image | free of 1,507,328 |
 |---|---:|---:|
-| default `src/setup.h` | 1,278,832 | 228,496 (84.8 %) |
-| every optional feature on | 1,471,616 | 35,712 (97.6 %) |
+| default `src/setup.h` | 1,278,688 | 228,640 (84.8 %) |
+| every optional feature on | 1,472,048 | 35,280 (97.7 %) |
 
 Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 

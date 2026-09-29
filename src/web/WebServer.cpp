@@ -2312,8 +2312,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
 
             settingsFromJson(doc.as<JsonObjectConst>());
             if (doc["logger"].is<JsonObjectConst>()) TaskManager::applyLoggerConfig();
-            saveConfig();
-            applyTimeZone();
+            saveConfig();   // the clock was re-applied by TimeModule::load()
             r->send(200, "text/plain", "OK");
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {

@@ -37,12 +37,27 @@ struct BufPrint : Print {
     }
 };
 
+// Print onto a String through a 32-byte buffer, as ArduinoJson's own String
+// writer does: the serialiser writes one character at a time, and growing
+// the String for each one reallocates far more often.
 struct StrPrint : Print {
     String& s;
+    char    buf[32];
+    size_t  n  = 0;
+    bool    ok = true;
     explicit StrPrint(String& out) : s(out) {}
-    size_t write(uint8_t c) override { return s.concat(static_cast<char>(c)) ? 1 : 0; }
+    void drain() {
+        if (n && !s.concat(buf, n)) ok = false;
+        n = 0;
+    }
+    size_t write(uint8_t c) override {
+        if (n == sizeof(buf)) drain();
+        buf[n++] = static_cast<char>(c);
+        return 1;
+    }
     size_t write(const uint8_t* p, size_t len) override {
-        return s.concat(reinterpret_cast<const char*>(p), len) ? len : 0;
+        for (size_t k = 0; k < len; k++) write(p[k]);
+        return len;
     }
 };
 
@@ -82,7 +97,9 @@ DeserializationError deserializeJsonFile(JsonDocument& doc, fs::File& f,
 
 size_t jsonToString(JsonVariantConst v, String& out) {
     StrPrint p(out);
-    return serializeJson(v, static_cast<Print&>(p));
+    const size_t n = serializeJson(v, static_cast<Print&>(p));
+    p.drain();
+    return p.ok ? n : 0;
 }
 
 size_t jsonToBuf(JsonVariantConst v, char* buf, size_t cap) {

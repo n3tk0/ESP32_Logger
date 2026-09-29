@@ -2590,15 +2590,27 @@ var Modules = (function () {
   function loadList()     { return _getJson("/api/modules"); }
   // The schema only changes with the firmware, so it is fetched once per
   // module per page load and the detail (config, status) every time.
+  // When the index already says the module has a form, both requests go out
+  // together rather than one after the other. A schema that fails to load
+  // fails the whole detail (and is asked for again next time), so a module
+  // with a form is never drawn as one without.
   var _schemas = {};
   function loadDetail(id) {
     var url = "/api/modules/" + encodeURIComponent(id);
+    function schemaFor() {
+      var s = _schemas[id];
+      if (!s) {
+        s = _schemas[id] = _getJson(url + "/schema");
+        s.catch(function () { if (_schemas[id] === s) delete _schemas[id]; });
+      }
+      return s;
+    }
+    var entry = _list.filter(function (m) { return m.id === id; })[0];
+    var early = entry && entry.hasUI ? schemaFor() : null;
+    if (early) early.catch(function () {});   // reported through the detail below
     return _getJson(url).then(function (d) {
       if (!d || !d.hasUI || d.schema) return d;   // no form, or an older firmware's inline one
-      var s = _schemas[id] || _getJson(url + "/schema");
-      _schemas[id] = s;
-      return s.then(function (sc) { d.schema = sc; return d; },
-                    function (e) { delete _schemas[id]; throw e; });
+      return (early || schemaFor()).then(function (sc) { d.schema = sc; return d; });
     });
   }
   function save(id, body) {

@@ -1,6 +1,10 @@
 #pragma once
 #include "../core/IModule.h"
 
+// Four address bytes as "a.b.c.d" (16 bytes of out is always enough). Also
+// used by the settings export.
+void formatIPv4(const uint8_t in[4], char* out, size_t n);
+
 // ============================================================================
 // WiFiModule — IModule adapter over config.network (Pass 5, phase 2).
 //

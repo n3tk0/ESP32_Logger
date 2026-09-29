@@ -82,6 +82,13 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     JsonDocument doc;
     DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
+    // Out of heap is not a bad file: the size was checked above, so NoMemory
+    // here means the read buffer or the document did not fit right now.
+    // Keep the file and run on defaults until the next boot.
+    if (err == DeserializationError::NoMemory) {
+        Serial.printf("[ModuleRegistry] %s: out of memory — file kept\n", path);
+        return false;
+    }
     if (err) {
         Serial.printf("[ModuleRegistry] parse error: %s — quarantining\n", err.c_str());
         quarantine(fs, path);

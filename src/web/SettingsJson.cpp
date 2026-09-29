@@ -15,7 +15,7 @@ namespace {
 
 void ipToJson(JsonObject o, const char* key, const uint8_t ip[4]) {
     char buf[16];
-    snprintf(buf, sizeof(buf), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+    formatIPv4(ip, buf, sizeof(buf));
     o[key] = buf;
 }
 
@@ -34,12 +34,20 @@ void copyIfString(JsonObjectConst o, const char* key, char* dst, size_t n) {
 void datalogFromJson(JsonObjectConst dl) {
     DatalogConfig& d = config.datalog;
     DatalogConfig before = d;
+    // load() cuts a string to fit, so the lengths are checked on the file's
+    // own text: a prefix or folder too long for the form is refused, not
+    // shortened into a name nobody chose.
+    const char* prefix = dl["prefix"] | (const char*)nullptr;
+    const char* folder = dl["folder"] | (const char*)nullptr;
     DataLogModule::instance().load(dl);
 
     memcpy(d.currentFile, before.currentFile, sizeof(d.currentFile));
-    if (!datalogPrefixOk(d.prefix, strlen(d.prefix)))
+    if ((prefix && !datalogPrefixOk(prefix, strlen(prefix))) ||
+        !datalogPrefixOk(d.prefix, strlen(d.prefix)))
         memcpy(d.prefix, before.prefix, sizeof(d.prefix));
-    if (d.folder[0]) {
+    if (folder && strlen(folder) >= sizeof(d.folder))
+        memcpy(d.folder, before.folder, sizeof(d.folder));
+    else if (d.folder[0]) {
         const String clean = sanitizePath(String(d.folder));
         if (clean.length() == 0 || clean.length() >= sizeof(d.folder))
             memcpy(d.folder, before.folder, sizeof(d.folder));
@@ -167,18 +175,26 @@ void settingsFromJson(JsonObjectConst doc) {
     // without them would point the device at a network it cannot join.
     JsonObjectConst net = doc["network"];
     if (net) {
-        TimeModule::instance().load(net);
-        if (net["wifiMode"].is<int>())     config.network.wifiMode    = (WiFiModeType)(int)net["wifiMode"];
+        TimeModule::instance().load(net);   // also re-applies the clock
+        const int mode = net["wifiMode"] | -1;
+        if (mode == WIFIMODE_AP || mode == WIFIMODE_CLIENT) config.network.wifiMode = (WiFiModeType)mode;
         if (net["useStaticIP"].is<bool>()) config.network.useStaticIP = net["useStaticIP"];
     }
 
     JsonObjectConst hw = doc["hardware"];
     if (hw) {
-        if (hw["storageType"].is<int>())        config.hardware.storageType        = (StorageType)(int)hw["storageType"];
-        if (hw["wakeupMode"].is<int>())         config.hardware.wakeupMode         = (WakeupMode)(int)hw["wakeupMode"];
+        // An enum outside its values keeps what was stored; debounce gets
+        // the form's 20..500 ms.
+        const int st = hw["storageType"] | -1;
+        const int wk = hw["wakeupMode"]  | -1;
+        if (st == STORAGE_LITTLEFS || st == STORAGE_SD_CARD)                config.hardware.storageType = (StorageType)st;
+        if (wk == WAKEUP_GPIO_ACTIVE_HIGH || wk == WAKEUP_GPIO_ACTIVE_LOW)  config.hardware.wakeupMode  = (WakeupMode)wk;
         if (hw["cpuFreqMHz"].is<int>())         config.hardware.cpuFreqMHz         = hw["cpuFreqMHz"];
         if (hw["defaultStorageView"].is<int>()) config.hardware.defaultStorageView = hw["defaultStorageView"];
-        if (hw["debounceMs"].is<int>())         config.hardware.debounceMs         = hw["debounceMs"];
+        if (hw["debounceMs"].is<int>()) {
+            const int v = hw["debounceMs"].as<int>();
+            config.hardware.debounceMs = v < 20 ? 20 : (v > 500 ? 500 : v);
+        }
         if (hw["debugMode"].is<bool>())         config.hardware.debugMode          = hw["debugMode"].as<bool>();
     }
 

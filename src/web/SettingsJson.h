@@ -12,7 +12,8 @@
 //
 // Pure configuration in, pure configuration out: no file system, no web
 // server. The handlers in WebServer.cpp top up defaults before exporting and
-// save, re-apply the time zone and restart the logger after importing.
+// save and restart the logger after importing; TimeModule::load() re-applies
+// the time zone.
 // tests/host/test_settings_json.cpp checks that export → import → export
 // gives back the same file.
 // ============================================================================

@@ -19,6 +19,9 @@
 // parse needs the file's size in free heap on top of the document for as
 // long as it runs. The files read this way are configuration (a few KB);
 // anything over maxBytes is refused with NoMemory rather than buffered.
+// NoMemory therefore means "too big or no heap", never a malformed file: a
+// caller that quarantines bad files checks the size itself and keeps the
+// file on NoMemory.
 // ============================================================================
 #pragma once
 
@@ -36,7 +39,8 @@ DeserializationError deserializeJsonFile(JsonDocument& doc, fs::File& f,
                                          const JsonDocument& filter,
                                          size_t maxBytes = JSON_FILE_MAX);
 
-// serializeJson(v, out) — appends to `out`. Returns the bytes written.
+// serializeJson(v, out) — appends to `out` (both callers pass an empty
+// String). Returns the bytes written, or 0 if the String could not grow.
 size_t jsonToString(JsonVariantConst v, String& out);
 
 // serializeJson(v, buf, cap) — at most cap-1 bytes and a terminator, and the
