@@ -18,11 +18,15 @@ and its SHA-256, for upload to a device that is already running: no cable, no
 toolchain, and no bootloader or filesystem in the file, because those are not
 things a running firmware can install into itself.
 
-The thirty checkboxes arrive there as one line of text (`default`, `all`,
-`bme280 kindle remote_nodes`, `all -sds011`), because a `workflow_dispatch`
-form takes at most ten inputs. `features.py --resolve` is what makes that line
-mean the same thing the checkboxes do, and `tests/tools/drive_feature_resolve.py`
-is what keeps it meaning it.
+The form there is dropdowns and checkboxes: a `workflow_dispatch` takes at
+most 25 inputs, so the sensors rarely fitted together share a dropdown (none or
+one of them) and every other feature is its own checkbox, defaulting to what
+`src/setup.h` ships. `tools/ota_form.py` says what each control turns on, and
+`tests/tools/drive_ota_form.py` fails when the form and setup.h drift apart.
+
+`features.py --resolve` still reads the same choice as one line of text
+(`default`, `all`, `bme280 kindle remote_nodes`, `all -sds011`) for scripts,
+and `tests/tools/drive_feature_resolve.py` keeps that meaning what it says.
 
 ## Architecture
 

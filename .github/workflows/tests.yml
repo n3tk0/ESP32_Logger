@@ -29,6 +29,7 @@ on:
       - 'tools/check_pio_envs.py'
       - 'tools/check_boards_json.py'
       - 'tools/features.py'
+      - 'tools/ota_form.py'
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
       - 'tools/check_node_portal_css.py'
@@ -72,6 +73,7 @@ on:
       - 'tools/check_pio_envs.py'
       - 'tools/check_boards_json.py'
       - 'tools/features.py'
+      - 'tools/ota_form.py'
       - 'tools/check_features.py'
       - 'tools/check_node_portal.py'
       - 'tools/check_node_portal_css.py'
@@ -1189,12 +1191,18 @@ jobs:
           rm /tmp/ota.orig
           echo "the check fails when the form loses a board, as it should"
 
-      - name: Check what the build form's text box means
-        # The OTA build workflow takes thirty checkboxes as one line of text.
+      - name: Check what the feature text line means
+        # features.py --resolve takes thirty checkboxes as one line of text.
         # A name that quietly matched nothing is a firmware missing exactly the
         # feature it was built for; one that matched the WRONG feature is
         # worse, and VEML6075 (UV) and VEML7700 (lux) are one character apart.
         run: python3 tests/tools/drive_feature_resolve.py
+
+      - name: Check the build form offers every feature, with setup.h's defaults
+        # The OTA form is dropdowns and checkboxes written by hand in YAML;
+        # tools/ota_form.py says what each one turns on. A feature missing from
+        # either, or a default that differs from setup.h, is silent otherwise.
+        run: python3 tests/tools/drive_ota_form.py
 
       - name: Check no module's status outlives its own stack frame
         # ArduinoJson 7 LINKS a const char* instead of copying it, so a string

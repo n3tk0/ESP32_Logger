@@ -5,11 +5,9 @@ what they think it means.
 
 WHY
 ---
-The deploy GUI offers thirty checkboxes. A GitHub Actions form cannot: there is
-a hard limit of ten inputs on a workflow_dispatch, and thirty booleans would be
-most of a phone screen even if there were room. So the same choice arrives as a
-line of text, and tools/features.py turns that line into the macro list the
-compiler gets.
+The deploy GUI and the GitHub Actions form offer checkboxes; scripts and the
+command line send the same choice as a line of text, and tools/features.py
+turns that line into the macro list the compiler gets.
 
 Every failure of that translation is silent and expensive. A name that quietly
 matched nothing is a firmware missing exactly the feature it was built for,
