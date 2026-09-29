@@ -663,7 +663,22 @@ The indoor row, upright:
   the upper one's. Only a panel script that asks for it with `?col=1` gets
   this layout: an older script would draw the column's two readings side by
   side in its width, so it gets the one line. When three readings are too
-  wide for the column, they stay on one line too.
+  wide for the column, they stay on one line too. The two in the column are
+  at six tenths of the first, or down to half of it when that is what lets
+  the first one grow: held at six tenths, their column decided how large the
+  first could be, and it stopped well short of the room it stands in.
+
+The first indoor reading is sized closer to what it prints, like the
+headline (`kdFlowFirstInAdvance()`): an indoor temperature there keeps room
+for two digits but not for the minus sign every other temperature on the page
+is given, because a room does not reach it. It is still not sized by the
+reading's sign, which would re-lay the row each time an unheated room crossed
+zero: -9.9 and 21.0 give one layout, and only below that is what it prints
+wider than the room kept for it. Any other metric in that place, such as a
+dew point, which a heated room takes below zero all winter, is measured as
+everywhere else. Together the two took the ordinary page's three-reading row
+from 62 to 72 px (111 to 129 on a 1072 × 1448 panel), and two readings from
+61 to 67.
 
 On the landscape page the indoor row is too short for two readings one above
 the other, and all three stay on one line.

@@ -1164,11 +1164,15 @@ static void kdSubLine(char* buf, size_t n, const KindleConfig& skin,
 /// tendency arrow if it is a place that draws one. The arrow counts whether or
 /// not there is a tendency yet: it appears three hours after a restart, and a
 /// layout that made room for it only then would shrink the grid at that hour.
+///
+/// `firstIn`: the indoor row's first place, which an indoor temperature sizes
+/// without the reserved minus — see kdFlowFirstInAdvance().
 static uint16_t kdPlaceAdvance(const KindleConfig& skin, const KindleSlot& sl,
-                               const KdResolved& r) {
+                               const KdResolved& r, bool firstIn = false) {
     const bool arrow = (sl.flags & KSLOTF_TREND) && (skin.showFlags & KSHOW_TENDENCY) &&
                        strcmp(sl.metric, "pressure") == 0;
-    return (uint16_t)kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow);
+    return (uint16_t)(firstIn ? kdFlowFirstInAdvance(sl.metric, r.text, r.unit, arrow)
+                              : kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow));
 }
 
 /// A headline value as it prints, with its unit and the arrow kdPlaceAdvance()
@@ -1223,8 +1227,10 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     uint8_t inUsed[KZ_INDOOR_COUNT];
     const int m = (skin.showFlags & KSHOW_INSIDE) ? kdIndoorUsed(zones, visible, inUsed) : 0;
     in.nIn = (uint8_t)m;
+    // The first by kdFlowFirstInAdvance(): closer to what it prints, like the
+    // headline across the rule.
     for (int i = 0; i < m; i++)
-        in.inAdv[i] = kdPlaceAdvance(skin, zones.z[inUsed[i]], res[inUsed[i]]);
+        in.inAdv[i] = kdPlaceAdvance(skin, zones.z[inUsed[i]], res[inUsed[i]], i == 0);
 
     return html ? kdFlowComputeHtml(in) : kdFlowCompute(in);
 }

@@ -53,6 +53,9 @@ PLACES = [
     ('battery_percent', '9', '%', 0), ('rain', '0.0', 'mm', 0),
     ('temperature', '+5.0', '°', 0), ('voltage', '3.71', 'V', 0),
     ('temperature', '21.5', '°C', 0), ('temperature', '70', '°F', 0),
+    # Around zero, where the indoor row's first place must not change size.
+    ('temperature', '-0.4', '°', 0), ('temperature', '0.4', '°', 0),
+    ('temperature', '-9.9', '°', 0), ('dew_point', '-1.2', '°', 0),
 ]
 
 PCTS = [(100, 100), (100, 100), (90, 60), (70, 80), (60, 100)]
@@ -106,6 +109,8 @@ def run(js_text):
         all_cases = list(cases())
         spec = ';'.join('%s:%s:%s:%d' % p for p in PLACES)
         c_adv = [int(x) for x in subprocess.check_output([exe, 'adv', spec], text=True).split()]
+        # And each as the indoor row's first place (kdFlowFirstInAdvance).
+        c_adv1 = [int(x) for x in subprocess.check_output([exe, 'adv1', spec], text=True).split()]
         c_out = []
         for c in all_cases:
             args = ['json', 'chart=%d' % c['chart'], 'fc=%d' % c['fc'],
@@ -121,6 +126,8 @@ def run(js_text):
 var input = JSON.parse(require("fs").readFileSync(0, "utf8"));
 var out = { adv: input.places.map(function (p) {
               return kdFlowWorstAdvance(p[0], p[1], p[2], !!p[3]); }),
+            adv1: input.places.map(function (p) {
+              return kdFlowFirstInAdvance(p[0], p[1], p[2], !!p[3]); }),
             flows: input.cases.map(function (c) {
               return kdFlowCompute({ chart: !!c.chart, forecast: !!c.fc, week: !!c.week,
                                      sub: !!c.sub, clock: !!c.clk, land: !!c.land,
@@ -141,6 +148,11 @@ process.stdout.write(JSON.stringify(out));
     for p, a, b in zip(PLACES, c_adv, js['adv']):
         if a != b:
             bad.append('worst width of %s %r %r: C %d, JS %d' % (p[0], p[1], p[2], a, b))
+    for p, a, b in zip(PLACES, c_adv1, js['adv1']):
+        if a != b:
+            bad.append('first indoor width of %s %r %r: C %d, JS %d' % (p[0], p[1], p[2], a, b))
+    if len(c_adv1) != len(PLACES):
+        bad.append('flow_dump adv1 measured %d of %d places' % (len(c_adv1), len(PLACES)))
     for c, a, b in zip(all_cases, c_out, js['flows']):
         for k in FIELDS:
             if a[k] != b.get(k):
@@ -156,7 +168,9 @@ def main():
         # A rule edited on one side only has to be caught: the headline's
         # growth cap, and the caption width the indoor row keeps.
         for old, new in (('GROW_MAX:1180', 'GROW_MAX:1190'), ('IN_CAP_W:66', 'IN_CAP_W:60'),
-                         ('w = c === 0xB0 ? 330', 'w = c === 0xB0 ? 340')):
+                         ('w = c === 0xB0 ? 330', 'w = c === 0xB0 ? 340'),
+                         ('if (metric !== "temperature") return kdFlowWorstAdvance',
+                          'if (metric !== "temperatureX") return kdFlowWorstAdvance')):
             if old not in js_text:
                 sys.exit('self-test: %r is not in kindle.js any more' % old)
             _, bad = run(js_text.replace(old, new, 1))

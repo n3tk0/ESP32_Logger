@@ -449,15 +449,26 @@ function kdFlowMinDigits(metric, unit) {
   return 0;
 }
 
-function kdFlowWorstAdvance(metric, text, unit, arrow) {
+// assumeSign === false: no sign reserved, not even the reading's own — see
+// kdFlowFirstInAdvance().
+function kdFlowWorstAdvance(metric, text, unit, arrow, assumeSign) {
   var p = String(text == null ? "" : text), neg = false, worst = "", k = 0;
   if (p[0] === "-" || p[0] === "+") { neg = p[0] === "-"; p = p.slice(1); }
   while (k < p.length && p.charCodeAt(k) >= 48 && p.charCodeAt(k) <= 57) k++;
   var need = Math.max(1, Math.max(k, kdFlowMinDigits(metric, unit)));
-  if (neg || metric === "temperature" || metric === "dew_point") worst = "-";
+  if (assumeSign !== false && (neg || metric === "temperature" || metric === "dew_point")) worst = "-";
   for (var i = 0; i < need; i++) worst += "0";
   worst += p.slice(k);
   return kdFlowFieldAdvance(worst, unit, arrow);
+}
+
+// The indoor row's first place — kdFlowFirstInAdvance() in KindleFlow.h: an
+// indoor temperature without the reserved minus, by what it prints only when
+// that is wider (below -9.9), so crossing zero does not re-lay the row.
+function kdFlowFirstInAdvance(metric, text, unit, arrow) {
+  if (metric !== "temperature") return kdFlowWorstAdvance(metric, text, unit, arrow);
+  return Math.max(kdFlowWorstAdvance(metric, text, unit, arrow, false),
+                  kdFlowFieldAdvance(text, unit, arrow));
 }
 
 // A value with its unit and arrow, each figure at KDF.FIG_SIZE — see
@@ -572,18 +583,26 @@ function kdFlowIndoor(inp, bot, f) {
   var top = f.inLabY + f.labSz + 18, ah = bot - top, cap = kdScaleG(88, f.grow);
   var a1 = inp.inAdv[0] || 1000, pct = kdPct(inp.inPct), s1, s, wR, stackH;
   var colTop = f.inLabY + f.labSz + 6;
-  var a2 = Math.max(inp.inAdv[1] || 1000, inp.inAdv[2] || 1000), c1 = 0, t;
+  var a2 = Math.max(inp.inAdv[1] || 1000, inp.inAdv[2] || 1000), c1 = 0, cs = 0, t;
+  // The two beside it give way first, from six tenths of it down to half —
+  // the largest the width and the column's height allow, worked out, then
+  // checked, as in KindleFlow.h.
   if (m === 3 && !f.land && inp.inColOk !== false) {
+    var room = bot - colTop, sH = kdQ(room - 6, 2) - f.labSz - 4, w1, sW;
     for (t = Math.min(cap, ah); t >= 20 && !c1; t--) {
-      s = kdQ(t * 6, 10);
-      wR = Math.max(kdQ(s * a2, 1000) + K.CELL_PAD, K.IN_CAP_W);
-      stackH = 2 * (f.labSz + 4 + s) + 6;
-      if (kdQ(t * a1, 1000) + K.CELL_PAD + wR <= W && stackH <= bot - colTop) c1 = t;
+      w1 = kdQ(t * a1, 1000) + K.CELL_PAD;
+      if (w1 + K.IN_CAP_W > W) continue;
+      sW = kdQ((W - w1 - K.CELL_PAD + 1) * 1000 - 1, a2);
+      s = Math.min(kdQ(t * 6, 10), sH, sW);
+      while (s >= kdQ(t, 2) &&
+             !(w1 + Math.max(kdQ(s * a2, 1000) + K.CELL_PAD, K.IN_CAP_W) <= W &&
+               2 * (f.labSz + 4 + s) + 6 <= room)) s--;
+      if (s >= kdQ(t, 2)) { c1 = t; cs = s; }
     }
   }
   if (c1) {
     s1 = Math.max(20, kdQ(c1 * pct, 100));
-    s = kdQ(s1 * 6, 10);
+    s = kdQ(cs * s1, c1);
     wR = Math.max(kdQ(s * a2, 1000) + K.CELL_PAD, K.IN_CAP_W);
     stackH = 2 * (f.labSz + 4 + s) + 6;
     f.inCol = true; f.inValSz1 = s1; f.inValSz = s;
@@ -754,11 +773,12 @@ function kdFlowInput(show) {
               clock:!!(show & 0x0100), land:rot === 90 || rot === 270,
               nGrid:0, gridAdv:[], nIn:0, inAdv:[], grid:[], inside:[],
               outPct:kdVal("kd-outsz", "100") | 0, inPct:kdVal("kd-insz", "100") | 0 };
-  function adv(key) {
+  function adv(key, firstIn) {
     var z = kdSlot(key), v = kdPvValue(z);
     if (v === "") return 0;
     var arrow = !!(z.flags & kdFlags.trend) && !!(show & 0x0004) && z.metric === "pressure";
-    return kdFlowWorstAdvance(z.metric, v, kdPvUnit(z), arrow);
+    return firstIn ? kdFlowFirstInAdvance(z.metric, v, kdPvUnit(z), arrow)
+                   : kdFlowWorstAdvance(z.metric, v, kdPvUnit(z), arrow);
   }
   // The headline and the value beside it by what they print, as the
   // collector measures them for kdFlowHeadFit().
@@ -778,7 +798,8 @@ function kdFlowInput(show) {
   }
   if (show & 0x0010) {
     for (i = 1; i <= 3; i++) {
-      if ((a = adv("in" + i))) { inp.inside.push("in" + i); inp.inAdv.push(a); }
+      // The first one in by kdFlowFirstInAdvance(), as the collector does.
+      if ((a = adv("in" + i, inp.inside.length === 0))) { inp.inside.push("in" + i); inp.inAdv.push(a); }
     }
   }
   inp.nGrid = inp.grid.length;

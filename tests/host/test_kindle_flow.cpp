@@ -31,6 +31,8 @@ static unsigned advPress() { return kdFlowWorstAdvance("pressure", "1008", "hPa"
 static unsigned advDew()   { return kdFlowWorstAdvance("dew_point", "3.1", "\xC2\xB0", false); }
 static unsigned advCo2()   { return kdFlowWorstAdvance("co2", "640", "ppm", false); }
 static unsigned advTemp()  { return kdFlowWorstAdvance("temperature", "21.0", "\xC2\xB0", false); }
+/// The indoor row's first place, as the collector measures it.
+static unsigned advTemp1() { return kdFlowFirstInAdvance("temperature", "21.0", "\xC2\xB0", false); }
 static unsigned advHum()   { return kdFlowWorstAdvance("humidity", "44", "%", false); }
 static unsigned advAqi()   { return kdFlowWorstAdvance("aqi", "42", "", false); }
 
@@ -42,7 +44,7 @@ static KdFlowIn defaultPage() {
     in.gridAdv[0] = (uint16_t)advPress();
     in.gridAdv[1] = (uint16_t)advDew();
     in.nIn = 3;
-    in.inAdv[0] = (uint16_t)advTemp();
+    in.inAdv[0] = (uint16_t)advTemp1();
     in.inAdv[1] = (uint16_t)advHum();
     in.inAdv[2] = (uint16_t)advAqi();
     return in;
@@ -54,7 +56,8 @@ static KdFlowIn defaultPage() {
 static void test_worst_advance_is_the_widest_it_gets() {
     // A temperature is sized for a sign and two digits whatever it reads, so
     // 9.8 and -12.4 give one layout and a warm afternoon does not shrink the
-    // grid on the next repaint.
+    // grid on the next repaint. (Everywhere but the indoor row's first place:
+    // see test_first_indoor_place.)
     CHECK_EQ(kdFlowWorstAdvance("temperature", "9.8", "\xC2\xB0", false),
              kdFlowWorstAdvance("temperature", "-12.4", "\xC2\xB0", false));
     // Pressure in hPa is sized for four digits: 999 and 1008 are one layout.
@@ -490,6 +493,83 @@ static void test_indoor_columns() {
     CHECK(kdFlowCompute(in).inValSz1 < full);
 }
 
+// The indoor row's first place: an indoor temperature without the reserved
+// minus, and still not by the reading's sign.
+static void test_first_indoor_place() {
+    const char* deg = "\xC2\xB0";
+    const unsigned warm = kdFlowFirstInAdvance("temperature", "21.0", deg, false);
+    // Narrower than everywhere else, by the sign.
+    CHECK(warm < kdFlowWorstAdvance("temperature", "21.0", deg, false));
+    // AND ONE LAYOUT ACROSS ZERO. An unheated room, a garage, a greenhouse:
+    // sized by the sign, the row would re-lay on every crossing.
+    const char* around[] = { "0.4", "-0.4", "-0.0", "0.0", "9.9", "-9.9", "5.0", "-5.0", "99.9" };
+    for (const char* t : around)
+        CHECK_EQ(kdFlowFirstInAdvance("temperature", t, deg, false), warm);
+    // Only below -9.9 is what it prints wider than the reservation, and then
+    // it is measured as every other temperature is.
+    CHECK_EQ(kdFlowFirstInAdvance("temperature", "-12.4", deg, false),
+             kdFlowWorstAdvance("temperature", "-12.4", deg, false));
+    // Any other metric there is measured as everywhere: a heated room's dew
+    // point is below zero all winter.
+    CHECK_EQ(kdFlowFirstInAdvance("dew_point", "-1.2", deg, false),
+             kdFlowWorstAdvance("dew_point", "-1.2", deg, false));
+    CHECK_EQ(kdFlowFirstInAdvance("dew_point", "1.2", deg, false),
+             kdFlowWorstAdvance("dew_point", "1.2", deg, false));
+    CHECK_EQ(kdFlowFirstInAdvance("humidity", "44", "%", false),
+             kdFlowWorstAdvance("humidity", "44", "%", false));
+
+    // What it buys on the ordinary page: the first reading as large as its
+    // room takes, the two beside it a little under six tenths of it.
+    const KdFlow f = kdFlowCompute(defaultPage());
+    CHECK(f.inCol);
+    CHECK_EQ(f.inValSz1, 72);
+    CHECK_EQ(f.inValSz, 36);
+    // Measured with the sign, the column giving way alone takes it to 65
+    // (held at six tenths it was 62): the rest is the sign.
+    KdFlowIn old = defaultPage();
+    old.inAdv[0] = (uint16_t)advTemp();
+    CHECK_EQ(kdFlowCompute(old).inValSz1, 65);
+}
+
+// The column's sizes are worked out, not searched for, because this runs for
+// every height the flow tries on every render. Held here to the search they
+// replace: the largest first field, and beside it the largest side size from
+// six tenths of it down to half, that the width and the column's height allow.
+static void test_indoor_column_sizes_are_the_search() {
+    const unsigned advs[] = { 900, 1200, 1500, 1860, 2196, 2232, 2562, 3000, 3600, 4200 };
+    const uint8_t pcts[] = { 100, 90, 60 };
+    int checked = 0;
+    for (int mask = 0; mask < 32; mask++)
+    for (unsigned a1 : advs) for (unsigned a2 : advs) for (unsigned a3 : advs)
+    for (uint8_t pct : pcts) {
+        KdFlowIn in = defaultPage();
+        in.chart = mask & 1; in.forecast = mask & 2; in.week = mask & 4;
+        in.sub = mask & 8; in.clock = !(mask & 16);
+        in.inAdv[0] = (uint16_t)a1; in.inAdv[1] = (uint16_t)a2; in.inAdv[2] = (uint16_t)a3;
+        in.inPct = pct;
+        const KdFlow f = kdFlowCompute(in);
+        const int bot = f.topBot - 8, colTop = f.inLabY + f.labSz + 6, W = f.inW - 12;
+        const int areaH = bot - (f.inLabY + f.labSz + 18);
+        const int cap = kdfScale(88, f.grow);
+        const int b = (int)(a2 > a3 ? a2 : a3);
+        int c1 = 0, cs = 0;
+        for (int t = kdfMin(cap, areaH); t >= 20 && !c1; t--)
+            for (int s = t * 6 / 10; s >= t / 2 && !c1; s--) {
+                const int wR = kdfMax(s * b / 1000 + KDF_CELL_PAD, KDF_IN_CAP_W);
+                if (t * (int)a1 / 1000 + KDF_CELL_PAD + wR <= W &&
+                    2 * (f.labSz + 4 + s) + 6 <= bot - colTop) { c1 = t; cs = s; }
+            }
+        CHECK_EQ(f.inCol, c1 != 0);
+        if (c1 && f.inCol) {
+            const int s1 = kdfMax(20, c1 * pct / 100);
+            CHECK_EQ(f.inValSz1, s1);
+            CHECK_EQ(f.inValSz, cs * s1 / c1);
+        }
+        checked++;
+    }
+    std::printf("  %d indoor rows held to the search\n", checked);
+}
+
 static void test_switching_a_section_off_never_shrinks_anything() {
     for (int mask = 0; mask < 8; mask++) {
         KdFlowIn in = defaultPage();
@@ -654,6 +734,8 @@ int main() {
     RUN(test_a_wide_reading_fits_its_column);
     RUN(test_every_combination);
     RUN(test_indoor_columns);
+    RUN(test_first_indoor_place);
+    RUN(test_indoor_column_sizes_are_the_search);
     RUN(test_switching_a_section_off_never_shrinks_anything);
     RUN(test_panel_keys);
     RUN(test_page_css);
