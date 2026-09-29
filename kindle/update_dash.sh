@@ -1843,6 +1843,75 @@ font_setup() {
         echo "Drop one into $USR_FONTS — text cannot be drawn without it." >&2
         return 1
     fi
+    # Each face's own proportions, read out of its file — see font_metrics().
+    font_metrics "$FONT_REG";  FONT_REG_SPAN="$FM_SPAN";  FONT_REG_ASC="$FM_ASC"
+    font_metrics "$FONT_BOLD"; FONT_BOLD_SPAN="$FM_SPAN"; FONT_BOLD_ASC="$FM_ASC"
+    [ "${TRACE:-0}" = "1" ] && \
+        printf 'font %s span %s asc %s; %s span %s asc %s\n' \
+            "$FONT_REG" "${FONT_REG_SPAN:-?}" "${FONT_REG_ASC:-?}" \
+            "$FONT_BOLD" "${FONT_BOLD_SPAN:-?}" "${FONT_BOLD_ASC:-?}" >&2
+    return 0
+}
+
+# ── How big FBInk will draw a face ───────────────────────────────────────────
+#
+# FBInk's `px` is the face's (ascent - descent), not its em — see text_geom().
+# That ratio is the face's own, and TEXT_PX_MILLE in the layout file was one
+# guess for all of them: 1160. A face whose span is larger than that came out
+# smaller than the browser page by the difference, the headline most visibly,
+# and every value placed after another by an advance moved with it. So it is
+# read from the file the panel actually draws with, the two numbers FBInk's
+# stb_truetype reads itself: `hhea` ascender and descender over `head`
+# unitsPerEm.
+#
+# Sets FM_SPAN ((ascent - descent) / em) and FM_ASC (ascent / em), both in
+# thousandths — or both empty when the file is not a TrueType/OpenType font it
+# can read, and the layout file's TEXT_PX_MILLE stands in as before.
+FM_SPAN=""; FM_ASC=""
+font_metrics() {
+    # $1=font file
+    FM_SPAN=""; FM_ASC=""
+    [ -s "$1" ] || return 1
+    command -v od >/dev/null 2>&1 || return 1
+    local f="$1" n head="" hhea="" upm asc desc
+    # The offset table: the version, then numTables.
+    set -- $(od -A n -t u1 -N 6 "$f" 2>/dev/null)
+    [ $# -eq 6 ] || return 1
+    case "$1 $2 $3 $4" in
+        '0 1 0 0'|'116 114 117 101'|'79 84 84 79') ;;   # 1.0, 'true', 'OTTO'
+        *) return 1 ;;
+    esac
+    n=$(( $5 * 256 + $6 ))
+    [ "$n" -ge 1 ] && [ "$n" -le 64 ] || return 1
+    # The table records, sixteen bytes each: the tag, a checksum, the offset.
+    set -- $(od -A n -t u1 -j 12 -N $(( n * 16 )) "$f" 2>/dev/null)
+    [ $# -eq $(( n * 16 )) ] || return 1
+    while [ $# -ge 16 ]; do
+        case "$1 $2 $3 $4" in
+            '104 101 97 100')  head=$(( (($9 * 256 + ${10}) * 256 + ${11}) * 256 + ${12} )) ;;
+            '104 104 101 97')  hhea=$(( (($9 * 256 + ${10}) * 256 + ${11}) * 256 + ${12} )) ;;
+        esac
+        shift 16
+    done
+    [ -n "$head" ] && [ -n "$hhea" ] || return 1
+    set -- $(od -A n -t u1 -j $(( head + 18 )) -N 2 "$f" 2>/dev/null)
+    [ $# -eq 2 ] || return 1
+    upm=$(( $1 * 256 + $2 ))
+    set -- $(od -A n -t u1 -j $(( hhea + 4 )) -N 4 "$f" 2>/dev/null)
+    [ $# -eq 4 ] || return 1
+    asc=$(( $1 * 256 + $2 ));  [ "$asc" -ge 32768 ]  && asc=$(( asc - 65536 ))
+    desc=$(( $3 * 256 + $4 )); [ "$desc" -ge 32768 ] && desc=$(( desc - 65536 ))
+    [ "$upm" -ge 16 ] && [ "$asc" -gt 0 ] || return 1
+    [ "$desc" -gt 0 ] && desc=$(( -desc ))      # a few faces store it unsigned
+    FM_SPAN=$(( (asc - desc) * 1000 / upm ))
+    FM_ASC=$(( asc * 1000 / upm ))
+    # Nothing a text face has; a number outside it is a file misread, and the
+    # layout's guess is the better one.
+    if [ "$FM_SPAN" -lt 900 ] || [ "$FM_SPAN" -gt 1800 ] ||
+       [ "$FM_ASC" -lt 500 ] || [ "$FM_ASC" -ge "$FM_SPAN" ]; then
+        FM_SPAN=""; FM_ASC=""
+        return 1
+    fi
     return 0
 }
 
@@ -2625,8 +2694,17 @@ load_layout() {
     fi
     # Derived once here rather than per string: both depend only on the layout,
     # and a fork per draw is a fork this script has spent years avoiding.
-    TEXT_PX_MILLE="${TEXT_PX_MILLE:-1160}"
-    BASELINE_MILLE=$(( 800 * TEXT_PX_MILLE / 1000 - (TEXT_PX_MILLE - 1000) / 2 ))
+    #
+    # THE FACE'S OWN NUMBERS WHEN font_setup() COULD READ THEM, the layout
+    # file's guess only when it could not: the guess was 1160 for every face,
+    # and a face with a taller span drew that much smaller than the page.
+    TEXT_PX_MILLE="${FONT_REG_SPAN:-${TEXT_PX_MILLE:-1160}}"
+    BASELINE_MILLE=$(( ${FONT_REG_ASC:-$(( 800 * TEXT_PX_MILLE / 1000 ))} - (TEXT_PX_MILLE - 1000) / 2 ))
+    if [ -n "${FONT_BOLD_SPAN:-}" ] && [ -n "${FONT_BOLD_ASC:-}" ]; then
+        BASELINE_MILLE_BOLD=$(( FONT_BOLD_ASC - (FONT_BOLD_SPAN - 1000) / 2 ))
+    else
+        BASELINE_MILLE_BOLD="$BASELINE_MILLE"
+    fi
     zones_derive
 }
 
@@ -2733,10 +2811,10 @@ fb() {
 # into the divider and clipped. Correcting the size corrects the arithmetic
 # with it: past here, one design pixel is one em pixel again.
 #
-# TEXT_PX_MILLE is (ascent - descent) / unitsPerEm for the panel's font, in
-# thousandths — the number to turn if the type ends up a hair large or small,
-# and the only one. It lives in the layout file because the fonts a Kindle
-# carries differ by model.
+# That ratio, (ascent - descent) / unitsPerEm in thousandths, is read from
+# each face's own file by font_metrics() into FONT_REG_SPAN / FONT_BOLD_SPAN.
+# TEXT_PX_MILLE in the layout file is only the fallback for a file it cannot
+# read: as the one number for every face it drew a taller-spanned face small.
 # NO SUBSHELL, because this is called for every string on the panel and the
 # clock tier redraws every minute. `echo` in `$( )` is a fork, and three of
 # them per string is ~180 forks a redraw on a ten-year-old ARM — in a file
@@ -2748,8 +2826,11 @@ fb() {
 #               the layout put it (FBInk grows the box downward from `top`, so
 #               half the growth comes back off the top)
 text_geom() {
-    # $1=design top  $2=design size
-    TX_PX=$(( $2 * ${TEXT_PX_MILLE:-1160} / 1000 ))
+    # $1=design top  $2=design size  [$3=font file — the bold face's own span
+    # when it is FONT_BOLD; the regular one's otherwise]
+    local m="${FONT_REG_SPAN:-${TEXT_PX_MILLE:-1160}}"
+    [ -n "${3:-}" ] && [ "$3" = "${FONT_BOLD:-}" ] && m="${FONT_BOLD_SPAN:-$m}"
+    TX_PX=$(( $2 * m / 1000 ))
     TX_TOP=$(( $1 - (TX_PX - $2) / 2 ))
     [ "$TX_TOP" -lt 0 ] && TX_TOP=0
 }
@@ -2759,7 +2840,7 @@ text_geom() {
 # layout tuned its top — the week strip centres its two rows in the cell.
 box_top() {
     # $1=wanted box top  $2=design size
-    BOX_TOP=$(( $1 + ($2 * ${TEXT_PX_MILLE:-1160} / 1000 - $2) / 2 ))
+    BOX_TOP=$(( $1 + ($2 * ${FONT_REG_SPAN:-${TEXT_PX_MILLE:-1160}} / 1000 - $2) / 2 ))
 }
 
 draw_text() {
@@ -2802,7 +2883,7 @@ draw_text() {
     case "$txt" in
         *'→'*|*'←'*) txt=$(printf '%s' "$txt" | sed 's/→/>/g; s/←/</g') ;;
     esac
-    text_geom "$2" "$3"
+    text_geom "$2" "$3" "$4"
     if [ -n "$7" ]; then
         fb -q -b -h -C BLACK -B WHITE -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$txt"
     else
@@ -3147,7 +3228,7 @@ draw_clock() {
                 # TEXT_PX_MILLE tall and starts half the growth higher, so it
                 # ends at top + px - (px - sz)/2 — past CL_Y + sz, which ate
                 # the whole of CL_DATE_GAP and left the two rows touching.
-                text_geom "$CL_Y" "$sz"
+                text_geom "$CL_Y" "$sz" "$FONT_BOLD"
                 draw_text_reg "$CL_X" "$(( TX_TOP + TX_PX + ${CL_DATE_GAP:-6} ))" \
                     "${CL_DATE_SZ:-14}" "GRAY4" "$DATE"
             fi
@@ -3208,7 +3289,7 @@ draw_field() {
             # where at a third of the size it reads as a lower-case o.
             draw_text_reg "$ux" "$y" "$usz" "GRAY4" "$unit"
         else
-            draw_text_reg "$ux" "$(baseline_y "$y" "$sz" "$usz")" "$usz" "GRAY4" "$unit"
+            draw_text_reg "$ux" "$(baseline_y "$y" "$sz" "$usz" "$bold" 0)" "$usz" "GRAY4" "$unit"
         fi
         ux=$(( ux + usz * uadv / 1000 ))
     fi
@@ -3216,7 +3297,9 @@ draw_field() {
     if [ -n "$arrow" ]; then
         asz=$(( sz * 50 / 100 ))
         [ "$asz" -lt 10 ] && asz=10
-        draw_arrow "$(( ux + sz / 10 ))" "$(( y + sz * ${BASELINE_MILLE:-848} / 1000 ))" \
+        local vb="${BASELINE_MILLE:-848}"
+        [ "$bold" = "1" ] && vb="${BASELINE_MILLE_BOLD:-$vb}"
+        draw_arrow "$(( ux + sz / 10 ))" "$(( y + sz * vb / 1000 ))" \
                    "$asz" "$arrow" "GRAY4"
     fi
 }
@@ -3332,7 +3415,12 @@ draw_arrow() {
 # one nobody would think to. Computed once by load_layout, into BASELINE_MILLE.
 baseline_y() {
     # $1=row top  $2=largest size in the row  $3=this size
-    echo $(( $1 + ($2 - $3) * ${BASELINE_MILLE:-848} / 1000 ))
+    # [$4=1 when the larger is bold  $5=1 when this one is] — the two faces'
+    # baselines are not quite at one fraction of the size.
+    local bl="${BASELINE_MILLE:-848}" bs="${BASELINE_MILLE:-848}"
+    [ "${4:-0}" = "1" ] && bl="${BASELINE_MILLE_BOLD:-$bl}"
+    [ "${5:-0}" = "1" ] && bs="${BASELINE_MILLE_BOLD:-$bs}"
+    echo $(( $1 + ($2 * bl - $3 * bs) / 1000 ))
 }
 
 # Where something `w` pixels wide starts if it is to be centred in a cell that
@@ -3412,8 +3500,11 @@ draw_zones() {
         local big_sz="${BIG_SZ:-44}"
         local hw=$(( hero_sz * ${Z_HERO_ADVW:-0} / 1000 ))
         local sx=$(( lx + hw + ${HEAD_GAP:-8} ))
-        y=$(baseline_y "$hero_y" "$hero_sz" "$big_sz")
-        draw_text_reg "$sx" "$y" "$big_sz" "GRAYA" "/"
+        # The slash is always the regular face, the value may be bold: each
+        # on the headline's baseline by its own face's numbers.
+        draw_text_reg "$sx" "$(baseline_y "$hero_y" "$hero_sz" "$big_sz" "${Z_HERO_BOLD:-0}" 0)" \
+                      "$big_sz" "GRAYA" "/"
+        y=$(baseline_y "$hero_y" "$hero_sz" "$big_sz" "${Z_HERO_BOLD:-0}" "${Z_BIG_BOLD:-0}")
         draw_field "$(( sx + ${SLASH_W:-22} ))" "$y" "$big_sz" "${Z_BIG_BOLD:-0}" \
                    "$Z_BIG_VALUE" "$Z_BIG_UNIT" "$Z_BIG_ARROW" \
                    "${Z_BIG_VADVW:-0}" "${Z_BIG_UADVW:-0}" "${Z_BIG_INK:-BLACK}"
