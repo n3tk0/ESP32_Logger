@@ -395,11 +395,13 @@ struct NetworkConfig {
     uint8_t dns[4];
     char ntpServer[65];
     int8_t timezone;
-    int8_t dstOffsetHours;     // DST offset in hours (0 or 1 typically)
+    int8_t dstOffsetHours;     // hours added all year under DST_RULE_MANUAL (1 or 2)
     uint8_t apIP[4];
     uint8_t apGateway[4];
     uint8_t apSubnet[4];
-    uint8_t reserved[17]; // Reserved for alignment (one byte used for dstOffsetHours)
+    uint8_t dstRule;      // DST_RULE_* (utils/PosixTz.h); 0 = EU, which is what a
+                          // config from before this byte (reserved, zero) reads as
+    uint8_t reserved[16]; // Reserved for alignment
 };
 
 // KindleConfig — how GET /kindle is drawn (v14).

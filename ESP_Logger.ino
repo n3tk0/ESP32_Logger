@@ -615,6 +615,7 @@ void setup() {
     DBGF("Early GPIO bitmask: 0x%08X\n", earlyGPIO_bitmask);
 
     loadConfig();
+    applyTimeZone();   // local time from here on, NTP or not
 
     initStorage();
 

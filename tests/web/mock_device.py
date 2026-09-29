@@ -90,8 +90,11 @@ MODULE_SCHEMA = {
          "group": "NTP", "help": "Hostname queried at boot."},
         {"id": "timezone", "type": "int", "min": -12, "max": 14,
          "label": "Timezone", "unit": "h"},
-        {"id": "dstOffsetHours", "type": "int", "min": 0, "max": 2,
-         "label": "DST offset", "unit": "h"},
+        {"id": "dstRule", "type": "enum", "label": "Daylight saving",
+         "options": [{"v": 0, "l": "Automatic (EU)"}, {"v": 1, "l": "Automatic (US)"},
+                     {"v": 2, "l": "Off"}, {"v": 3, "l": "Manual (always on)"}]},
+        {"id": "dstOffsetHours", "type": "int", "min": 1, "max": 2,
+         "label": "DST offset", "unit": "h", "showIf": {"dstRule": 3}},
     ]}),
     "forecast": json.dumps({"fields": [
         {"id": "lat", "type": "float", "label": "Latitude"},
@@ -112,7 +115,7 @@ FORECAST = {"asked": False, "polls": 0, "left": 0, "offline": False}
 
 MODULE_CONFIG = {
     "forecast": {"provider": "open-meteo", "lat": 42.7, "lon": 23.3, "interval_min": 30},
-    "time": {"ntpServer": "pool.ntp.org", "timezone": 2, "dstOffsetHours": 1},
+    "time": {"ntpServer": "pool.ntp.org", "timezone": 2, "dstRule": 0, "dstOffsetHours": 1},
     "wifi": {"ssid": "MonkeyNet", "useStatic": False, "ip": "192.168.1.214"},
 }
 

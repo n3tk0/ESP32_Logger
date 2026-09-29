@@ -1,6 +1,8 @@
 #include "TimeModule.h"
 #include "../core/Globals.h"
 #include "../core/Config.h"
+#include "../managers/RtcManager.h"   // applyTimeZone
+#include "../utils/PosixTz.h"
 
 namespace {
 
@@ -11,8 +13,11 @@ const char TIME_SCHEMA[] PROGMEM =
         "\"help\":\"Hostname queried at boot and on a manual sync (e.g. pool.ntp.org).\"},"
       "{\"id\":\"timezone\",\"type\":\"int\",\"min\":-12,\"max\":14,\"label\":\"Timezone\",\"unit\":\"h\","
         "\"help\":\"Hours from UTC. Timestamps are stored in UTC and displayed in this zone.\"},"
-      "{\"id\":\"dstOffsetHours\",\"type\":\"int\",\"min\":0,\"max\":2,\"label\":\"DST offset\",\"unit\":\"h\","
-        "\"help\":\"Extra hours added while daylight saving is in effect.\"}"
+      "{\"id\":\"dstRule\",\"type\":\"enum\",\"label\":\"Daylight saving\","
+        "\"options\":[{\"v\":0,\"l\":\"Automatic (EU)\"},{\"v\":1,\"l\":\"Automatic (US)\"},"
+                     "{\"v\":2,\"l\":\"Off\"},{\"v\":3,\"l\":\"Manual (always on)\"}]},"
+      "{\"id\":\"dstOffsetHours\",\"type\":\"int\",\"min\":1,\"max\":2,\"label\":\"DST offset\",\"unit\":\"h\","
+        "\"help\":\"Hours added all year under the manual rule.\",\"showIf\":{\"dstRule\":3}}"
     "]}";
 
 } // namespace
@@ -26,6 +31,8 @@ bool TimeModule::load(JsonObjectConst cfg) {
     if (n.timezone < -12 || n.timezone > 14) n.timezone = 0;
     n.dstOffsetHours = (int8_t)(cfg["dstOffsetHours"] | (int)n.dstOffsetHours);
     if (n.dstOffsetHours < 0 || n.dstOffsetHours > 2) n.dstOffsetHours = 0;
+    n.dstRule        = dstRuleClamp((uint8_t)(cfg["dstRule"] | (int)n.dstRule));
+    applyTimeZone();
     return true;
 }
 
@@ -35,6 +42,7 @@ bool TimeModule::save(JsonObject cfg) const {
     cfg["ntpServer"]      = n.ntpServer;
     cfg["timezone"]       = (int)n.timezone;
     cfg["dstOffsetHours"] = (int)n.dstOffsetHours;
+    cfg["dstRule"]        = (int)n.dstRule;
     return true;
 }
 

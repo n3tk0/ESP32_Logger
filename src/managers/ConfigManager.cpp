@@ -4,6 +4,7 @@
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include "../web/DashboardStrings.h"    // KLANG_AUTO — the dashboard's language
 #include "../utils/MutexGuard.h"
+#include "../utils/PosixTz.h"       // dstRuleClamp, DST_RULE_EU
 #include <LittleFS.h>
 #include "esp_mac.h"
 #include <math.h>
@@ -59,6 +60,7 @@ static void applyDefaults() {
     // real-world range rather than treating 0 as "unset".
     if (config.network.timezone < -12 || config.network.timezone > 14) config.network.timezone = 2;
     if (config.network.dstOffsetHours < 0 || config.network.dstOffsetHours > 2) config.network.dstOffsetHours = 0;
+    config.network.dstRule = dstRuleClamp(config.network.dstRule);
 
     if (!config.network.apIP[0]) {
         config.network.apIP[0]=192; config.network.apIP[1]=168;
@@ -303,6 +305,7 @@ void loadDefaultConfig() {
     SAFE_STRCPY(config.network.apPassword, DEFAULT_AP_PASSWORD);
     SAFE_STRCPY(config.network.ntpServer,  DEFAULT_NTP_SERVER);
     config.network.timezone     = 2;
+    config.network.dstRule      = DST_RULE_EU;
     config.network.useStaticIP  = false;
     config.network.staticIP[0]  = 192; config.network.staticIP[1]  = 168;
     config.network.staticIP[2]  = 4;   config.network.staticIP[3]  = 100;

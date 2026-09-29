@@ -40,9 +40,19 @@
             </div>
             <div class="field">
               <label class="field-label" for="time-tz" data-i18n="settingsPages.timeTimezone">Timezone (UTC+)</label>
-              <input type="number" name="timezone" id="time-tz" min="-12" max="14" class="input" value="2">
+              <input type="number" name="timezone" id="time-tz" min="-12" max="14" class="input" value="2" data-change="timeDstPreview">
+            </div>
+            <div class="field">
+              <label class="field-label" for="time-dst" data-i18n="settingsPages.timeDst">Daylight saving time</label>
+              <select name="dstRule" id="time-dst" class="input" data-change="timeDstPreview">
+                <option value="0" data-i18n="settingsPages.timeDstEu">Automatic (EU)</option>
+                <option value="1" data-i18n="settingsPages.timeDstUs">Automatic (US)</option>
+                <option value="2" data-i18n="settingsPages.timeDstOff">Off</option>
+                <option value="3" data-i18n="settingsPages.timeDstManual">Manual (+1 h all year)</option>
+              </select>
             </div>
           </div>
+          <p class="hint" id="time-dst-info"></p>
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
             <button type="submit" class="btn primary"><span data-icon="save"></span> <span data-i18n="settingsPages.timeSaveNtp">Save NTP Settings</span></button>
             <button type="submit" form="ntpForm" class="btn" id="ntpBtn"><span data-icon="refresh-cw"></span> <span data-i18n="settingsPages.timeSyncNow">NTP Sync Now</span></button>
