@@ -62,7 +62,7 @@ constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
 // which is a factory reset, written straight back to flash. v15 grew
 // KindleConfig by 33 bytes and would have done exactly that to every v14
 // device.
-#define CONFIG_VERSION       15
+#define CONFIG_VERSION       16
 
 // DS1302 RAM addresses for bootcount backup
 #define RTC_RAM_BOOTCOUNT_ADDR  0

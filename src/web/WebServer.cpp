@@ -1290,8 +1290,9 @@ static void h_post_save_time(AsyncWebServerRequest* r) {
     }
     if (r->hasParam("dstRule", true))
         config.network.dstRule = dstRuleClamp((uint8_t)r->getParam("dstRule", true)->value().toInt());
-    if (config.network.dstRule == DST_RULE_MANUAL && config.network.dstOffsetHours == 0)
-        config.network.dstOffsetHours = 1;
+    // The page offers the manual rule as "+1 h all year" and has no field for
+    // the hours, so saving it here means exactly that.
+    if (config.network.dstRule == DST_RULE_MANUAL) config.network.dstOffsetHours = 1;
     saveConfig();
     applyTimeZone();   // now, not at the next NTP sync
     r->send(200, "application/json", "{\"ok\":true}");
@@ -1331,11 +1332,12 @@ static void h_post_set_time(AsyncWebServerRequest* r) {
         struct tm ti = {};
         ti.tm_year = yr - 1900; ti.tm_mon = mo - 1; ti.tm_mday = dy;
         ti.tm_hour = hr; ti.tm_min = mi; ti.tm_sec = 0;
-        const char* prevTz = getenv("TZ");
+        // The zone is put back from the config, not from a saved getenv()
+        // pointer: newlib's setenv() writes a shorter value over the old one
+        // in place, so that pointer would read "UTC0" by the time it is used.
         setenv("TZ", "UTC0", 1); tzset();
         time_t epoch = mktime(&ti);
-        if (prevTz) setenv("TZ", prevTz, 1); else unsetenv("TZ");
-        tzset();
+        applyTimeZone();
         struct timeval tv = { epoch, 0 };
         settimeofday(&tv, nullptr);
         rtcValid = true;

@@ -1013,6 +1013,17 @@ function timeInit() {
       setVal("time-tz", net.timezone !== undefined ? net.timezone : 0);
       setVal("time-dst", net.dstRule !== undefined ? net.dstRule : 0);
       timeDstPreview();
+      // The "Now:" line comes from /api/status, so refresh it once the
+      // device has applied a newly saved zone or rule.
+      var f = document.querySelector('form[data-save-url="/save_time"]');
+      if (f && !f._dstHooked) {
+        f._dstHooked = true;
+        f.addEventListener("submit", function () {
+          setTimeout(function () {
+            getStatus({ maxAgeMs: 0 }).then(function (d) { ST = d; timeDstPreview(); });
+          }, 1500);
+        });
+      }
     });
 }
 
@@ -1032,8 +1043,11 @@ function timeDstNext(rule, tz, now) {
   var out = [];
   for (var y = now.getUTCFullYear(); y <= now.getUTCFullYear() + 1; y++) {
     if (rule === 0) {
-      out.push({ at: Date.UTC(y, 2, nthSunday(y, 2, -1), 1), summer: true });
-      out.push({ at: Date.UTC(y, 9, nthSunday(y, 9, -1), 1), summer: false });
+      // 01:00 UTC, i.e. local 1+tz / 2+tz; the firmware holds those at 00:00
+      // local for zones west of UTC-1 (PosixTz.h), and so does this.
+      var on = Math.max(0, 1 + tz), off = Math.max(0, 2 + tz);
+      out.push({ at: Date.UTC(y, 2, nthSunday(y, 2, -1), on - tz), summer: true });
+      out.push({ at: Date.UTC(y, 9, nthSunday(y, 9, -1), off - tz - 1), summer: false });
     } else if (rule === 1) {
       out.push({ at: Date.UTC(y, 2, nthSunday(y, 2, 2), 2 - tz), summer: true });
       out.push({ at: Date.UTC(y, 10, nthSunday(y, 10, 1), 1 - tz), summer: false });

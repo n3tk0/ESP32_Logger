@@ -56,6 +56,13 @@ static void test_eu_transitions() {
     CHECK_EQ(tzOffsetAt(start - 1), 3600);
     CHECK_EQ(tzOffsetAt(start),     7200);
     CHECK_EQ(tzOffsetAt(end),       3600);
+    // West of UTC-1 the rule times are held at 00:00 local (newlib reads
+    // them unsigned); the settings page's preview uses the same instants.
+    useTz(-5, DST_RULE_EU);
+    CHECK_EQ(tzOffsetAt(1774760400 - 1), -18000);  // 2026-03-29 05:00 UTC
+    CHECK_EQ(tzOffsetAt(1774760400),     -14400);
+    CHECK_EQ(tzOffsetAt(1792900800 - 1), -14400);  // 2026-10-25 04:00 UTC
+    CHECK_EQ(tzOffsetAt(1792900800),     -18000);
 }
 
 static void test_us_transitions() {

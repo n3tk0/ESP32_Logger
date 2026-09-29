@@ -3,6 +3,7 @@
 #include "../core/Config.h"
 #include "../managers/RtcManager.h"   // applyTimeZone
 #include "../utils/PosixTz.h"
+#include <stdlib.h>                  // atoi
 
 namespace {
 
@@ -31,7 +32,11 @@ bool TimeModule::load(JsonObjectConst cfg) {
     if (n.timezone < -12 || n.timezone > 14) n.timezone = 0;
     n.dstOffsetHours = (int8_t)(cfg["dstOffsetHours"] | (int)n.dstOffsetHours);
     if (n.dstOffsetHours < 0 || n.dstOffsetHours > 2) n.dstOffsetHours = 0;
-    n.dstRule        = dstRuleClamp((uint8_t)(cfg["dstRule"] | (int)n.dstRule));
+    // The module form posts an enum as the <select>'s string value ("2"),
+    // which `| int` would silently ignore.
+    JsonVariantConst rule = cfg["dstRule"];
+    if (rule.is<int>())              n.dstRule = dstRuleClamp((uint8_t)rule.as<int>());
+    else if (rule.is<const char*>()) n.dstRule = dstRuleClamp((uint8_t)atoi(rule.as<const char*>()));
     applyTimeZone();
     return true;
 }

@@ -435,6 +435,14 @@ void migrateConfig(uint8_t fromVersion) {
         // cadence they set once, instead of every earlier device silently
         // stopping following its data.
     }
+    if (fromVersion < 16) {
+        // NetworkConfig::dstRule came out of reserved[], so it reads 0 (EU)
+        // on every older file. The EU rule is right for the zones that keep
+        // it (UTC+0..+2); anywhere else it would move a clock that never
+        // moved before, so those start with it off.
+        const int8_t tz = config.network.timezone;
+        config.network.dstRule = (tz >= 0 && tz <= 2) ? DST_RULE_EU : DST_RULE_OFF;
+    }
     config.version = CONFIG_VERSION;
     config.hardware.version = CONFIG_VERSION;
     // migrate must run pre-task-init: fsMutex is nullptr here; saveConfig is safe but not locked.
