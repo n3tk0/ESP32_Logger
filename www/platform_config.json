@@ -371,10 +371,8 @@
   },
 
   "storage": {
-    "log_dir": "/logs",
-    "rotate_daily": true,
-    "max_file_size_kb": 512,
-    "cloud_only": false
+    "_comment": "primary | mirror (write the data log to SD and LittleFS both). The log's file, rotation and retention are in Settings / Data log.",
+    "mode": "primary"
   },
 
   "sleep": {

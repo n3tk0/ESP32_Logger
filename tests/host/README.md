@@ -32,6 +32,7 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_espnow_nodetable.cpp` | the three decisions the collector makes about an arriving frame |
 | `test_remote_ingest.cpp` | the mailbox and the separate historical queue it grew |
 | `test_battery_model.cpp` | that the remaining-life model **refuses** to answer when it cannot |
+| `test_datalog_format.cpp` | `src/storage/DatalogFormat.cpp` — the original data_log row byte for byte in every format, the header line and field positions, sensor columns with empty fields and the empty tail cut off |
 | `test_kindle_skin.cpp` | `KindleSkin.h` — the override CSS, the time/date/pressure formats, and the clamp that stands between a stored byte and a stylesheet |
 
 Fuzz targets (random-input property checks):

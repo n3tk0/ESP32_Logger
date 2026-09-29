@@ -753,45 +753,15 @@
           </div>
         </div>
 
-        <!-- Wide-CSV pipeline (moved from Data Log) -->
-        <form data-submit="settingsSaveForm" data-save-url="/save_sensorlog"
-              style="margin-top:1rem" novalidate>
-          <div id="sl-msg"></div>
-          <div class="card">
-            <div class="card-head">
-              <div class="card-title"><span data-icon="line-chart"></span> <span data-i18n="sensorsPage.csvTitle">Sensor CSV logging</span></div>
-            </div>
-            <div class="card-body">
-              <p class="hint" style="margin-bottom:1rem" data-i18n="sensorsPage.csvHint">
-                Wide-CSV stores sensor readings as one row per aggregation
-                window with one column per active sensor metric. The header
-                is rebuilt dynamically when sensors are added or removed;
-                the per-day file rotates automatically on schema change.
-                Independent of the flow-meter event log on the Data Log page.
-              </p>
-              <div class="field">
-                <label class="field-label">
-                  <input type="checkbox" name="csvLoggingEnabled" id="sl-csvEnabled" value="1">
-                  <span data-i18n="sensorsPage.csvEnable">Enable CSV logging</span>
-                </label>
-                <p class="hint" data-i18n="sensorsPage.csvEnableHint">Master switch. When off, sensor readings are still
-                  streamed to the live UI but never written to flash/SD.</p>
-              </div>
-              <div class="form-grid">
-                <div class="field">
-                  <label class="field-label">
-                    <span data-i18n="sensorsPage.csvAggInterval">Aggregation interval (seconds)</span>
-                    <span class="help-tip" tabindex="0" role="note" data-i18n-aria-label="sensorsPage.csvAggIntervalTip" aria-label="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files." data-i18n-title="sensorsPage.csvAggIntervalTip" data-tip="How often the RAM aggregator flushes one row to CSV. Lower = more rows, higher resolution; higher = smaller files.">i</span>
-                  </label>
-                  <input type="number" name="aggregationIntervalSec" id="sl-aggSec" class="input"
-                    min="5" max="3600" step="5" value="60">
-                  <p class="hint" data-i18n="sensorsPage.csvAggIntervalHint">Default 60 s. Range 5–3600 s.</p>
-                </div>
-              </div>
-              <button type="submit" class="btn primary"><span data-icon="save"></span> <span data-i18n="common.save">Save</span></button>
-            </div>
+        <!-- Sensor logging lives on the Data log page (one file, one format). -->
+        <div class="card" style="margin-top:1rem">
+          <div class="card-body">
+            <a href="#settings_datalog" class="hub-row" data-click="showSubpage" data-args='["settings_datalog"]'>
+              <span data-icon="file-text"></span>
+              <span data-i18n="sensorsPage.logMoved">Sensor readings are logged in the data log: Settings / Data log.</span>
+            </a>
           </div>
-        </form>
+        </div>
       </section>
 
     </main><!-- /.main -->

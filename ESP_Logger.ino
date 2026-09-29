@@ -88,6 +88,7 @@
 #include "src/managers/RtcManager.h"
 #include "src/managers/WiFiManager.h"
 #include "src/managers/DataLogger.h"
+#include "src/storage/Datalog.h"      // datalogColsBegin, datalogFlushAndWait
 #include "src/managers/OtaManager.h"
 #include "src/web/WebServer.h"    // setupWebServer()
 #include "src/utils/Utils.h"
@@ -617,6 +618,8 @@ void setup() {
     loadConfig();
 
     initStorage();
+    // The data log's sensor columns, before anything writes a row.
+    datalogColsBegin(LittleFS);
 
     // R12 / AUDIT 1.7: with formatOnFail=false, a corrupt LittleFS leaves
     // littleFsAvailable=false. Trip safe mode so we boot AP-only with the
@@ -911,6 +914,7 @@ void setup() {
         uint32_t windowEnd = millis() + g_hybridActiveMs;
         while (millis() < windowEnd) {
             if (shouldRestart) {
+                datalogFlushAndWait(3000);   // the rows not written yet
 #ifdef FEATURE_KINDLE_DASHBOARD
                 // The hour in progress, before the power goes — see the sleep
                 // path below and the restart path in loop().
@@ -1188,6 +1192,10 @@ void loop() {
     if (shouldRestart && millis() - restartTimer > 2000) {
         DBGLN("Restarting...");
         Serial.flush();
+
+        // The data log's rows still in RAM — the legacy buffer and
+        // StorageTask's batch — before the power goes.
+        datalogFlushAndWait(3000);
 
 #ifdef FEATURE_KINDLE_DASHBOARD
         // THE HOUR IN PROGRESS, before the power goes. trendStoreTick() only

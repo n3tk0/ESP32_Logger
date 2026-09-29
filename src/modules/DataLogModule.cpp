@@ -1,11 +1,21 @@
 #include "DataLogModule.h"
 #include "../core/Globals.h"
 #include "../core/Config.h"
+#include <stdlib.h>
 
 namespace {
 
 void copyStr(char* dst, size_t n, const char* src) {
     if (src) strlcpy(dst, src, n);
+}
+
+// An enum field as a number. The module form has posted a <select>'s value
+// as a string ("2"), and web files on LittleFS can be older than the
+// firmware, so both spellings count; anything else keeps `def`.
+int enumOr(JsonVariantConst v, int def) {
+    if (v.is<int>()) return v.as<int>();
+    const char* s = v.as<const char*>();
+    return (s && *s >= '0' && *s <= '9') ? atoi(s) : def;
 }
 
 // PROGMEM schema — drives Form.bind() in the new Settings UI (phase 4).
@@ -62,7 +72,7 @@ bool DataLogModule::load(JsonObjectConst cfg) {
     copyStr(d.folder,       sizeof(d.folder),       cfg["folder"]      | (const char*)nullptr);
     copyStr(d.currentFile,  sizeof(d.currentFile),  cfg["currentFile"] | (const char*)nullptr);
 
-    d.rotation              = (DatalogRotation)(cfg["rotation"] | (int)d.rotation);
+    d.rotation              = (DatalogRotation)enumOr(cfg["rotation"], (int)d.rotation);
     if ((int)d.rotation < 0 || (int)d.rotation > 4) d.rotation = (DatalogRotation)0;
     if (cfg["maxSizeKB"].is<int>()) {
         int v = cfg["maxSizeKB"].as<int>();
@@ -76,13 +86,13 @@ bool DataLogModule::load(JsonObjectConst cfg) {
     d.includeDeviceId       = cfg["includeDeviceId"]     | d.includeDeviceId;
     d.includeBootCount      = cfg["includeBootCount"]    | d.includeBootCount;
     d.includeExtraPresses   = cfg["includeExtraPresses"] | d.includeExtraPresses;
-    d.dateFormat            = (uint8_t)(cfg["dateFormat"]   | (int)d.dateFormat);
+    d.dateFormat            = (uint8_t)enumOr(cfg["dateFormat"], (int)d.dateFormat);
     if (d.dateFormat > 4) d.dateFormat = 0;
-    d.timeFormat            = (uint8_t)(cfg["timeFormat"]   | (int)d.timeFormat);
+    d.timeFormat            = (uint8_t)enumOr(cfg["timeFormat"], (int)d.timeFormat);
     if (d.timeFormat > 2) d.timeFormat = 0;
-    d.endFormat             = (uint8_t)(cfg["endFormat"]    | (int)d.endFormat);
+    d.endFormat             = (uint8_t)enumOr(cfg["endFormat"], (int)d.endFormat);
     if (d.endFormat > 2) d.endFormat = 0;
-    d.volumeFormat          = (uint8_t)(cfg["volumeFormat"] | (int)d.volumeFormat);
+    d.volumeFormat          = (uint8_t)enumOr(cfg["volumeFormat"], (int)d.volumeFormat);
     if (d.volumeFormat > 3) d.volumeFormat = 0;
     if (cfg["manualPressThresholdMs"].is<int>()) {
         int v = cfg["manualPressThresholdMs"].as<int>();

@@ -1,129 +1,55 @@
 #pragma once
 #include <Arduino.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
 #include "../core/SensorTypes.h"
+#include "../storage/Datalog.h"      // DL_MAX_COLS
 
 // ============================================================================
-// LiveAggregator — thread-safe RAM accumulator for wide-CSV logging.
+// LiveAggregator — RAM averages for the data log's sensor columns.
 //
-// Per (sensorType, metric) pair, accumulates running sum + count.  Every
-// `intervalSec` seconds (default 60), `buildRowIfDue()` emits a single
-// wide-CSV row with one cell per registered column (empty if no samples
-// arrived this window) and resets the accumulators.
+// StorageTask resolves each reading to its data log column
+// (datalogColsLearn) and feeds it here; every `intervalSec` seconds take()
+// hands back one average per column (NAN where nothing arrived) and starts a
+// new window. The row itself is formatted by DatalogFormat.
 //
 // Optional SDS011 humidity correction (k-Köhler theory) is applied at
-// feed-time using the most recent BME280 humidity reading:
+// feed-time using the most recent humidity reading:
 //     factor = 1 + kappa * (RH / (100 - RH))
 //     corrected_pm = raw_pm / factor
 //
-// Thread-safety: feed() / buildRowIfDue() / columns() all take an internal
-// mutex.  Producer is StorageTask.  Web UI introspection is read-only and
-// blocks for at most a few microseconds.
-//
-// Memory: fixed pool, no heap allocation after construction.  All CSV
-// formatting uses snprintf into caller-supplied buffers (no Arduino String).
+// Owned by StorageTask alone, so it has no lock. Fixed arrays, no heap.
 // ============================================================================
 class LiveAggregator {
 public:
-    static constexpr uint8_t  MAX_COLUMNS    = 24;
-    static constexpr uint8_t  COL_KEY_LEN    = 28;   // sensorType + '_' + metric
-    static constexpr uint8_t  COL_HEADER_LEN = 28;
-    // Worst-case header is timestamp + MAX_COLUMNS * (1 comma + COL_HEADER_LEN-1)
-    // characters + NUL — 9 + 24*28 = 681 bytes today.
-    static constexpr size_t   ROW_BUF_BYTES  = 1024;
+    static constexpr uint8_t MAX_COLUMNS = DL_MAX_COLS;
 
-    // ASSERTED, not promised. The comment here used to say 1 KB leaves room
-    // for "a future bump to 32 columns or 32-char names", and it does not:
-    // 9 + 32*33 = 1065. Overflowing is not loud either — buildHeader() and
-    // _writeRow() return -1, StorageTask skips the row, and the CSV simply
-    // stops growing. So the arithmetic is a build-time check.
-    static_assert(sizeof("timestamp") + (size_t)MAX_COLUMNS * COL_HEADER_LEN
-                      < ROW_BUF_BYTES,
-                  "ROW_BUF_BYTES too small for MAX_COLUMNS x COL_HEADER_LEN — "
-                  "raise it or the CSV row silently stops being written");
-
-    LiveAggregator();
-    ~LiveAggregator();
-
-    // No copy/move — owns a FreeRTOS semaphore.
-    LiveAggregator(const LiveAggregator&)            = delete;
-    LiveAggregator& operator=(const LiveAggregator&) = delete;
-
-    // Configure flush cadence and SDS011 humidity correction.
     void setIntervalSec(uint16_t sec)            { _intervalSec = sec ? sec : 60; }
     void setHumidityCorrection(bool en, float k) { _humCorr = en; _kappa = (k > 0 ? k : 0.35f); }
 
-    // Feed a single sensor reading.  Bad / NaN values are silently dropped.
-    void feed(const SensorReading& r);
+    // Adds a reading to column `col`. Bad / NaN values are dropped; the
+    // humidity is remembered for the SDS011 correction whatever `col` is.
+    void feed(const SensorReading& r, int col);
 
-    // Format the current schema as a CSV header line (`timestamp,col1,col2,...`).
-    // Returns the number of bytes written (excluding NUL), or -1 on overflow.
-    int  buildHeader(char* buf, size_t bufLen);
+    // When the window is due, or `force` and it holds any sample: fills
+    // vals[MAX_COLUMNS] with the averages, *windowStart with when the window
+    // began, starts the next window and returns true. The first call only
+    // sets the window's start.
+    bool take(uint32_t nowEpoch, bool force, float* vals, uint32_t* windowStart);
 
-    // If `nowEpoch - lastFlushEpoch >= intervalSec`, build the CSV row, reset
-    // accumulators and return true.  On the very first call simply primes the
-    // baseline epoch and returns false.  `outRowEpoch` receives the row's
-    // timestamp (== nowEpoch) on success.
-    bool buildRowIfDue(uint32_t nowEpoch, char* buf, size_t bufLen,
-                       uint32_t* outRowEpoch);
-
-    // Force-build a row regardless of cadence (used at shutdown).  Returns
-    // false if no columns have any samples.
-    bool flushNow(uint32_t nowEpoch, char* buf, size_t bufLen,
-                  uint32_t* outRowEpoch);
-
-    // Read-only column introspection for the web UI.  `keys` and `hdrs` are
-    // caller-allocated arrays of fixed-width char rows.  Returns the number of
-    // columns copied (capped by maxCols).
-    size_t columns(char keys[][COL_KEY_LEN],
-                   char hdrs[][COL_HEADER_LEN],
-                   size_t maxCols) const;
-
-    // Number of registered columns (for sizing UI).
-    size_t columnCount() const;
+    // Throws the window away (the columns were renumbered).
+    void reset();
 
     uint16_t intervalSec()        const { return _intervalSec; }
     bool     humidityCorrection() const { return _humCorr; }
     float    humidityKappa()      const { return _kappa; }
 
 private:
-    struct Col {
-        char     header[COL_HEADER_LEN]; // CSV column name, e.g. "bme280_temperature"
-        char     sensorType[12];
-        char     metric[16];
-        char     unit[12];
-        char     ownerId[17];            // sensorId of the first contributor
-        double   sum;
-        uint32_t count;
-        bool     used;                   // false until first feed()
-    };
-
-    Col      _cols[MAX_COLUMNS];
-    uint8_t  _nCols       = 0;
-    uint16_t _intervalSec = 60;
-    bool     _humCorr     = false;
-    float    _kappa       = 0.35f;
+    double   _sum[MAX_COLUMNS]   = {};
+    uint32_t _count[MAX_COLUMNS] = {};
+    uint16_t _intervalSec    = 60;
+    bool     _humCorr        = false;
+    float    _kappa          = 0.35f;
     uint32_t _lastFlushEpoch = 0;
-    float    _lastHumidity   = NAN;     // most-recent BME-family humidity
-
-    mutable SemaphoreHandle_t _mutex = nullptr;
-
-    // Locates an existing column for (sensorType, metric, ownerId) or creates a
-    // new one.  Returns -1 if the column pool is full.  Must be called with
-    // `_mutex` already held.
-    int  _findOrCreateCol(const char* id,
-                          const char* sensorType,
-                          const char* metric,
-                          const char* unit);
-
-    static void  _buildColumnHeader(char* dst, size_t dstLen,
-                                    const char* sensorType,
-                                    const char* metric);
+    float    _lastHumidity   = NAN;
 
     static float _kappaCorrect(float rawPm, float humidity, float kappa);
-
-    // Build the CSV row text from current accumulators.  Caller holds _mutex.
-    int  _writeRow(uint32_t epoch, char* buf, size_t bufLen);
-    void _resetAccumulators();
 };

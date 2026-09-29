@@ -482,8 +482,12 @@ function dbProcessData(data) {
     if (myVersion !== _dbProcessVersion) return; // superseded; bail silently
     var end = Math.min(idx + CHUNK_SIZE, lines.length);
     for (; idx < end; idx++) {
-      var p = lines[idx].split("|");
+      var p = lines[idx].replace(/\r$/, "").split("|");
       if (p.length < 2) continue;
+      // The header line (no digit in its first field) and the sensor rows
+      // (trigger TIMER) share the file; this view is the water events.
+      if (!/\d/.test(p[0])) continue;
+      if (p.indexOf("TIMER") >= 0) continue;
       var dateStr = "",
         timeStr = "",
         endStr = "",
@@ -516,7 +520,8 @@ function dbProcessData(data) {
       }
       if (
         p[i] &&
-        (p[i].indexOf("FF") >= 0 || p[i].indexOf("PF") >= 0 || p[i] === "IDLE")
+        (p[i].indexOf("FF") >= 0 || p[i].indexOf("PF") >= 0 || p[i] === "IDLE" ||
+         p[i] === "FLOW")
       ) {
         reason = p[i];
         i++;

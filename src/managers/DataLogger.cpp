@@ -3,240 +3,70 @@
 #if PLATFORM_LEGACY_BUILD
 
 #include "../core/Globals.h"
-#include "../utils/AtomicWrite.h"
+#include "../storage/Datalog.h"
 #include "../utils/MutexGuard.h"
 #include "../pipeline/DataPipeline.h"
 #include "StorageManager.h"
 #include "RtcManager.h"
-#include <LittleFS.h>
 #include <math.h>
-#include <string.h>   // memchr
+#include <memory>
+#include <new>
+#include <string.h>
 
-// Count newlines in a file (= number of log entries).
-//
-// Read in blocks, not a byte at a time. Every flush calls this while holding
-// fsMutex, and at the default cap of 10 000 entries the datalog is around
-// 600 KB — that many single-byte File::read() calls is roughly a second of
-// the mutex held against the sensor and export paths, for a number that a
-// memchr scan produces in a few milliseconds.
-static int countFileLines(fs::FS* fs, const String& path) {
-    File f = fs->open(path, "r");
-    if (!f) return 0;
-    int count = 0;
-    uint8_t buf[256];
-    for (;;) {
-        int n = f.read(buf, sizeof(buf));
-        if (n <= 0) break;
-        for (const uint8_t* p = buf; ; ) {
-            const uint8_t* nl = (const uint8_t*)memchr(p, '\n', (size_t)(buf + n - p));
-            if (!nl) break;
-            count++;
-            p = nl + 1;
-            if (p >= buf + n) break;
-        }
-    }
-    f.close();
-    return count;
-}
-
-// Trim oldest entries from the file to stay within maxEntries limit
-static bool trimLogFile(fs::FS* fs, const String& path, int maxEntries, int currentLines, int newEntries) {
-    int totalAfterAppend = currentLines + newEntries;
-    if (maxEntries <= 0 || totalAfterAppend <= maxEntries) return true;
-
-    int linesToSkip = totalAfterAppend - maxEntries;
-    if (linesToSkip <= 0) return true;
-
-    // Caller (flushLogBufferToFS) already holds fsMutex — pass nullptr to
-    // avoid self-deadlock on the non-recursive mutex.
-    bool ok = atomicWrite(*fs, path.c_str(), [&](File& dst) -> bool {
-        File src = fs->open(path, "r");
-        if (!src) return false;
-        int skipped = 0;
-        while (src.available() && skipped < linesToSkip) {
-            char c = src.read();
-            if (c == '\n') skipped++;
-        }
-        uint8_t buf[256];
-        while (src.available()) {
-            size_t n = src.read(buf, sizeof(buf));
-            if (n > 0 && dst.write(buf, n) != n) { src.close(); return false; }
-        }
-        src.close();
-        return true;
-    }, nullptr);
-    if (ok) DBGF("Trimmed %d old entries from %s\n", linesToSkip, path.c_str());
-    return ok;
-}
-
+// One row per wake, in the data log's shared format (storage/Datalog.h):
+// the columns of the file are the same whichever writer adds a row, and
+// datalogAppend() rotates, checks the header and trims.
 void flushLogBufferToFS() {
     if (logBufferCount == 0 || !fsAvailable || !activeFS) return;
+
+    char header[768];
+    if (datalogHeader(header, sizeof(header)) < 0) return;
+    const DatalogLayout layout = datalogLayout();
+
+    // CRLF-terminated rows, the line ending this log has always had.
+    constexpr size_t ROW_MAX = 128;
+    std::unique_ptr<char[]> lines(new (std::nothrow) char[LOG_BATCH_SIZE * ROW_MAX]);
+    if (!lines) { Serial.println("ERR: datalog - out of memory"); return; }
+    size_t len = 0;
+    int n = 0;
+    for (int i = 0; i < logBufferCount; i++) {
+        const LogEntry& e = logBuffer[i];
+        DatalogRow r = {};
+        r.start  = e.wakeTimestamp;
+        r.end    = e.sleepTimestamp;
+        r.boot   = e.bootCount;
+        r.volume = e.volumeLiters;
+        r.ff     = (int16_t)e.ffCount;
+        r.pf     = (int16_t)e.pfCount;
+        strlcpy(r.trigger, e.wakeupReason, sizeof(r.trigger));
+        int w = dlFormatRow(lines.get() + len, ROW_MAX - 2, layout, r, nullptr, 0);
+        if (w < 0) continue;
+        len += w;
+        lines[len++] = '\r'; lines[len++] = '\n'; lines[len] = '\0';
+        n++;
+    }
 
     MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !g.isLocked()) return;  // mutex exists but timed out — skip this flush
 
-    String logFile = getActiveDatalogFile();
-
-    // Create folder if needed
-    if (strlen(config.datalog.folder) > 0) {
-        String folder = String(config.datalog.folder);
-        if (!folder.startsWith("/")) folder = "/" + folder;
-        if (!activeFS->exists(folder)) activeFS->mkdir(folder);
-    }
-
-    // Enforce maxEntries: trim oldest lines before appending new ones
-    if (config.datalog.maxEntries > 0) {
-        int existingLines = countFileLines(activeFS, logFile);
-        if (!trimLogFile(activeFS, logFile, config.datalog.maxEntries, existingLines,
-                         logBufferCount)) {
-            // SKIPPING THE APPEND, NOT DELETING THE FILE.
-            //
-            // Deleting it was the wrong end of the problem. trimLogFile() goes
-            // through atomicWrite(), which needs room for a temporary copy — so
-            // the commonest reason it fails is a filesystem with no space left,
-            // in which case the existing log is intact and holds up to
-            // maxEntries rows of the user's history. Throwing all of it away
-            // frees space, certainly, but it is the data the device exists to
-            // collect, and it does not fix the full disk.
-            //
-            // What must not happen is the file growing while the trim cannot
-            // run, and not appending achieves that exactly. The rows in the
-            // buffer are lost either way; the ones already on disk need not be.
-            Serial.println("[datalog] trim failed — skipping this flush so the "
-                           "file cannot grow past maxEntries (log left intact)");
-            logBufferCount = 0;
-            return;
-        }
-    }
-
-    File f = activeFS->open(logFile, FILE_APPEND);
-    if (!f) { Serial.println("ERR: Can't open datalog"); return; }
-
-    int writtenCount = 0;
-    for (int i = 0; i < logBufferCount; i++) {
-        // Convert UTC epochs to local time for display in log entries.
-        struct tm wakeTm = {0}, sleepTm = {0};
-        {
-            time_t wt = (time_t)logBuffer[i].wakeTimestamp;
-            time_t st = (time_t)logBuffer[i].sleepTimestamp;
-            if (wt > 0) localtime_r(&wt, &wakeTm);
-            if (st > 0) localtime_r(&st, &sleepTm);
-        }
-
-        String line;
-        line.reserve(120);
-
-        // Date
-        if (config.datalog.dateFormat != DATE_OFF) {
-            char dateBuf[12];
-            switch (config.datalog.dateFormat) {
-                case DATE_DDMMYYYY:
-                    snprintf(dateBuf, 12, "%02d/%02d/%04d", wakeTm.tm_mday, wakeTm.tm_mon + 1, wakeTm.tm_year + 1900); break;
-                case DATE_MMDDYYYY:
-                    snprintf(dateBuf, 12, "%02d/%02d/%04d", wakeTm.tm_mon + 1, wakeTm.tm_mday, wakeTm.tm_year + 1900); break;
-                case DATE_YYYYMMDD:
-                    snprintf(dateBuf, 12, "%04d-%02d-%02d", wakeTm.tm_year + 1900, wakeTm.tm_mon + 1, wakeTm.tm_mday); break;
-                case DATE_DDMMYYYY_DOT:
-                    snprintf(dateBuf, 12, "%02d.%02d.%04d", wakeTm.tm_mday, wakeTm.tm_mon + 1, wakeTm.tm_year + 1900); break;
-                default: dateBuf[0] = 0;
-            }
-            line += dateBuf;
-        }
-
-        // Start time
-        char timeBuf[12];
-        switch (config.datalog.timeFormat) {
-            case TIME_HHMMSS:
-                snprintf(timeBuf, 12, "%02d:%02d:%02d", wakeTm.tm_hour, wakeTm.tm_min, wakeTm.tm_sec); break;
-            case TIME_HHMM:
-                snprintf(timeBuf, 12, "%02d:%02d", wakeTm.tm_hour, wakeTm.tm_min); break;
-            case TIME_12H: {
-                int h = wakeTm.tm_hour % 12; if (!h) h = 12;
-                snprintf(timeBuf, 12, "%d:%02d:%02d%s", h, wakeTm.tm_min, wakeTm.tm_sec,
-                         wakeTm.tm_hour < 12 ? "AM" : "PM");
-                break;
-            }
-        }
-        if (line.length() > 0) line += "|";
-        line += timeBuf;
-
-        // End
-        if (config.datalog.endFormat != END_OFF) {
-            line += "|";
-            if (config.datalog.endFormat == END_TIME) {
-                switch (config.datalog.timeFormat) {
-                    case TIME_HHMMSS:
-                        snprintf(timeBuf, 12, "%02d:%02d:%02d", sleepTm.tm_hour, sleepTm.tm_min, sleepTm.tm_sec); break;
-                    case TIME_HHMM:
-                        snprintf(timeBuf, 12, "%02d:%02d", sleepTm.tm_hour, sleepTm.tm_min); break;
-                    case TIME_12H: {
-                        int h = sleepTm.tm_hour % 12; if (!h) h = 12;
-                        snprintf(timeBuf, 12, "%d:%02d:%02d%s", h, sleepTm.tm_min, sleepTm.tm_sec,
-                                 sleepTm.tm_hour < 12 ? "AM" : "PM");
-                        break;
-                    }
-                }
-                line += timeBuf;
-            } else {
-                uint32_t dur = 0;
-                if (logBuffer[i].sleepTimestamp > logBuffer[i].wakeTimestamp) {
-                    dur = logBuffer[i].sleepTimestamp - logBuffer[i].wakeTimestamp;
-                }
-                line += String(dur) + "s";
-            }
-        }
-
-        if (config.datalog.includeBootCount) { line += "|#:"; line += logBuffer[i].bootCount; }
-
-        // Trigger
-        line += "|"; line += logBuffer[i].wakeupReason;
-
-        // Volume
-        if (config.datalog.volumeFormat != VOL_OFF) {
-            line += "|";
-            String volStr = String(logBuffer[i].volumeLiters, 2);
-            switch (config.datalog.volumeFormat) {
-                case VOL_L_COMMA: volStr.replace('.', ','); line += "L:" + volStr; break;
-                case VOL_L_DOT:   line += "L:" + volStr; break;
-                default:          line += volStr;
-            }
-        }
-
-        // Extra presses
-        if (config.datalog.includeExtraPresses) {
-            line += "|FF" + String(logBuffer[i].ffCount);
-            line += "|PF" + String(logBuffer[i].pfCount);
-        }
-
-        // println appends CRLF; a short write means the FS is full/failing.
-        // Stop at the first failure so we don't re-write already-persisted
-        // lines on retry (which would duplicate entries in the log file).
-        if (f.println(line) != line.length() + 2) break;
-        writtenCount++;
-    }
-
-    f.close();
-    int cnt = writtenCount;
-    // Clear the buffer only if every entry made it to disk.  On a partial
-    // write, shift the unwritten remainder to the front and keep it for the
-    // next flush — so failed entries are retried without duplicating the ones
-    // that already landed.
-    if (writtenCount == logBufferCount) {
+    const uint32_t newest = logBuffer[logBufferCount - 1].wakeTimestamp;
+    int written = datalogAppend(*activeFS, header, lines.get(), n, newest);
+    if (written < 0) return;
+    // Clear the buffer only if every entry made it to disk. On a partial
+    // write, keep the unwritten remainder for the next flush — so failed
+    // entries are retried without duplicating the ones that already landed.
+    if (written >= logBufferCount) {
         logBufferCount = 0;
     } else {
-        if (writtenCount > 0) {
-            for (int i = writtenCount; i < logBufferCount; i++) {
-                logBuffer[i - writtenCount] = logBuffer[i];
-            }
-            logBufferCount -= writtenCount;
-        }
+        for (int i = written; i < logBufferCount; i++) logBuffer[i - written] = logBuffer[i];
+        logBufferCount -= written;
         Serial.println("ERR: datalog write failed — retaining remaining buffer for retry");
     }
     // backupBootCount() re-acquires fsMutex internally; release ours first so we
     // don't self-deadlock on the non-recursive mutex (H3 discipline).
     g.release();
     backupBootCount();
-    DBGF("Flushed %d entries to %s\n", cnt, logFile.c_str());
+    DBGF("Flushed %d entries\n", written);
 }
 
 void addLogEntry(uint32_t capturedPulses) {

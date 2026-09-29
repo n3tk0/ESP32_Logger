@@ -103,9 +103,6 @@ static StorageTaskParam storageParam;
 // Mirror storage param (dual-write when SD + LittleFS both available)
 static StorageTaskParam mirrorParam;
 
-// Persistent storage for logDir string (must outlive storageParam)
-static char s_logDir[48] = "/logs";
-
 // ---------------------------------------------------------------------------
 // R12: Clean up partially-built task/queue state so a failed init() doesn't
 // leak FreeRTOS objects.  Idempotent.
@@ -167,6 +164,14 @@ void TaskManager::refreshStorageFromPlatform(fs::FS& fs) {
     storageParam.humidityCorrectionEnabled = humEnabled;   // enable flag set LAST
 }
 
+// The sensor-row switch and interval, from config.logger. StorageTask reads
+// them from storageParam on every pass, so a settings save applies at once.
+void TaskManager::applyLoggerConfig() {
+    storageParam.aggregationIntervalSec = config.logger.aggregationIntervalSec
+                                              ? config.logger.aggregationIntervalSec : 60;
+    storageParam.csvLoggingEnabled      = config.logger.csvLoggingEnabled;
+}
+
 bool TaskManager::init(fs::FS& fs) {
     // AUDIT 2.3: do NOT set running=true here. Tasks + queues + mutexes are
     // built below; if any step fails, half-built state would have left
@@ -218,39 +223,16 @@ bool TaskManager::init(fs::FS& fs) {
         return false;
     }
 
-    // Parse storage config from platform_config.json (#8).  Storage knobs
-    // (log_dir / max_size_kb / rotate_daily) are read-once at boot; SDS011
-    // humidity correction is refactored into refreshStorageFromPlatform()
-    // so /api/config/platform can re-apply it live.
-    {
-        File cfgFile = fs.open("/platform_config.json", FILE_READ);
-        if (cfgFile) {
-            JsonDocument doc;
-            if (deserializeJson(doc, cfgFile) == DeserializationError::Ok) {
-                JsonObjectConst st = doc["storage"];
-                if (!st.isNull()) {
-                    const char* dir = st["log_dir"] | "/logs";
-                    strncpy(s_logDir, dir, sizeof(s_logDir) - 1);
-                    storageParam.maxSizeKB   = st["max_size_kb"]   | 512;
-                    storageParam.rotateDaily = st["rotate_daily"]  | true;
-                }
-            }
-            cfgFile.close();
-        }
-    }
+    // SDS011 humidity correction from platform_config.json. The data log's
+    // file, rotation and retention come from config.datalog (Datalog.h), no
+    // longer from the "storage" block there.
     refreshStorageFromPlatform(fs);
-    storageParam.fs     = &fs;
-    storageParam.logDir = s_logDir;
-
-    // Wide-CSV pipeline knobs sourced from DeviceConfig (set via web UI).
-    storageParam.csvLoggingEnabled         = config.logger.csvLoggingEnabled;
-    storageParam.aggregationIntervalSec    = config.logger.aggregationIntervalSec
-                                                ? config.logger.aggregationIntervalSec : 60;
+    storageParam.fs = &fs;
+    applyLoggerConfig();
 
     // FlowRunLogger: per-fill flowmeter logging.  Active in PLATFORM_HYBRID
     // only — PLATFORM_LEGACY uses DataLogger.cpp's run logger and
-    // PLATFORM_CONTINUOUS streams flow readings through the wide-CSV
-    // pipeline.  Compile-time gated by SENSOR_WATERFLOW_ENABLED so non-
+    // PLATFORM_CONTINUOUS logs the flow metrics as sensor columns.  Compile-time gated by SENSOR_WATERFLOW_ENABLED so non-
     // flowmeter builds DCE the class entirely.
 #if defined(SENSOR_WATERFLOW_ENABLED)
     storageParam.enableFlowRunLogger = (g_platformMode == PLATFORM_HYBRID);

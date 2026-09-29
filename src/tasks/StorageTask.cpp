@@ -3,24 +3,108 @@
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/LiveAggregator.h"
 #include "../pipeline/FlowRunLogger.h"
-#include "../storage/CsvLogger.h"
-#include "../core/Globals.h"   // Rtc for epoch fallback
+#include "../storage/Datalog.h"
+#include "../core/Globals.h"   // bootCount, littleFsAvailable
 #include "../utils/MutexGuard.h"
-#include <time.h>
+#include <LittleFS.h>
+#include <string.h>
 
 namespace {
 
-// ---------------------------------------------------------------------------
-// Best-effort current epoch — now the pipeline's shared one.
-//
-// This used to ask the DS1302 first and the system clock second, which is the
-// opposite of what SensorTask stamps readings with and of what
-// readingIsBackfilled() judges them against. With a drifting RTC that put a
-// different clock on the CSV rows than on the dashboard, and moved the
-// aggregator's flush baseline whenever the chosen source changed. See
-// pipelineNowEpoch() in TaskManager.h.
-// ---------------------------------------------------------------------------
+// Best-effort current epoch — the pipeline's shared one; see
+// pipelineNowEpoch() in TaskManager.h for why every task asks the same clock.
 inline uint32_t nowEpochSafe() { return pipelineNowEpoch(); }
+
+constexpr size_t HDR_BYTES  = 768;    // > the widest header (Datalog.cpp)
+constexpr size_t ROW_BYTES  = 512;    // base fields + DL_MAX_COLS values
+constexpr size_t PEND_BYTES = 2048;   // DL_BATCH_ROWS rows of ~250 B; longer rows flush sooner
+
+// The batch of rows not yet written, with the header they were formatted
+// under: a row goes to a file with the same header, so a new header writes
+// the batch first.
+struct Batch {
+    fs::FS*  fs      = nullptr;
+    fs::FS*  mirror  = nullptr;
+    char*    buf     = nullptr;      // PEND_BYTES, CRLF-terminated rows
+    char*    hdr     = nullptr;      // HDR_BYTES
+    char*    tmpHdr  = nullptr;      // HDR_BYTES
+    char*    row     = nullptr;      // ROW_BYTES
+    size_t   len     = 0;
+    int      rows    = 0;
+    uint32_t epoch   = 0;
+
+    bool alloc() {
+        char* m = (char*)malloc(PEND_BYTES + 2 * HDR_BYTES + ROW_BYTES);
+        if (!m) return false;
+        buf = m; hdr = m + PEND_BYTES; tmpHdr = hdr + HDR_BYTES; row = tmpHdr + HDR_BYTES;
+        buf[0] = hdr[0] = '\0';
+        return true;
+    }
+
+    // A ROW LOST TO THE MUTEX IS STILL A ROW LOST: counted in g_queueDrops
+    // and said on the console, like every other way a row can disappear.
+    void flush() {
+        if (!rows || !fs) return;
+        {
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+            if (fsMutex && !g.isLocked()) {
+                Serial.printf("[StorageTask] %d row(s) LOST (fsMutex timeout)\n", rows);
+                g_queueDrops += rows;
+            } else {
+                int w = datalogAppend(*fs, hdr, buf, rows, epoch);
+                if (w < rows) {
+                    Serial.printf("[StorageTask] %d of %d row(s) LOST\n", rows - (w > 0 ? w : 0), rows);
+                    g_queueDrops += rows - (w > 0 ? w : 0);
+                }
+                if (littleFsAvailable) datalogColsSaveIfLearned(LittleFS);
+            }
+        }
+        // Released between the two so a slow SD write does not hold the
+        // mutex for the whole dual write. (AUDIT 2.16)
+        if (mirror) {
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+            if ((!fsMutex || g.isLocked()) && datalogAppend(*mirror, hdr, buf, rows, epoch) < rows)
+                Serial.println("[StorageTask] mirror rows LOST");
+        }
+        len = 0; rows = 0; buf[0] = '\0';
+    }
+
+    void add(const DatalogRow& r, const float* vals, int nVals) {
+        if (!buf) return;
+        if (datalogHeader(tmpHdr, HDR_BYTES) < 0) {
+            Serial.println("[StorageTask] row dropped - header did not fit");
+            g_queueDrops++;
+            return;
+        }
+        if (rows && strcmp(tmpHdr, hdr) != 0) flush();
+        const int n = dlFormatRow(row, ROW_BYTES, datalogLayout(), r, vals, nVals);
+        if (n < 0) {
+            Serial.println("[StorageTask] row dropped - did not fit");
+            g_queueDrops++;
+            return;
+        }
+        if (len + n + 3 > PEND_BYTES) flush();
+        if (!rows) strlcpy(hdr, tmpHdr, HDR_BYTES);
+        memcpy(buf + len, row, n);
+        len += n;
+        buf[len++] = '\r'; buf[len++] = '\n'; buf[len] = '\0';
+        rows++;
+        epoch = r.end ? r.end : r.start;
+        if (rows >= DL_BATCH_ROWS) flush();
+    }
+};
+
+// The averages of the window just closed, as a TIMER row.
+void addSensorRow(Batch& b, const float* vals, uint32_t start, uint32_t end) {
+    DatalogRow r = {};
+    r.start  = start;
+    r.end    = end;
+    r.boot   = (uint16_t)(bootCount & 0xFFFF);
+    r.volume = NAN;
+    r.ff = r.pf = -1;
+    strlcpy(r.trigger, DL_TRIGGER_TIMER, sizeof(r.trigger));
+    b.add(r, vals, datalogColsCopy(nullptr, DL_MAX_COLS));
+}
 
 }  // namespace
 
@@ -40,208 +124,94 @@ void storageTaskFunc(void* param) {
     agg.setHumidityCorrection(cfg.humidityCorrectionEnabled,
                               cfg.humidityCorrectionKappa);
 
-    CsvLogger primary;
-    CsvLogger mirror;
-    bool      mirrorActive  = false;
-    bool      writingEnabled = cfg.csvLoggingEnabled && (cfg.fs != nullptr);
+    Batch batch;
+    batch.fs     = cfg.fs;
+    batch.mirror = cfg.mirrorFS;
+    if (cfg.fs && !batch.alloc()) {
+        Serial.println("[StorageTask] no memory for the row batch - nothing will be logged");
+        batch.fs = nullptr;
+    }
 
     FlowRunLogger flowRunLog;
-    bool          flowRunActive = cfg.enableFlowRunLogger && (cfg.fs != nullptr);
+    bool          flowRunActive = cfg.enableFlowRunLogger && (batch.fs != nullptr);
     if (flowRunActive) {
         flowRunLog.setIdleTimeoutSec(cfg.flowRunIdleTimeoutSec);
         flowRunLog.setStartThreshold(cfg.flowRunStartThreshold);
-        flowRunLog.begin(*cfg.fs,
-                         cfg.flowRunLogDir ? cfg.flowRunLogDir : "/runs",
-                         256);
     }
 
-    if (writingEnabled) {
-        // CM-1: begin() now reports whether the log directory is usable.  If
-        // mkdir failed (full / read-only / corrupt FS) stop pretending to log
-        // and fall through to drain-only mode instead of silently dropping rows.
-        if (!primary.begin(*cfg.fs,
-                           cfg.logDir    ? cfg.logDir    : "/logs",
-                           cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024)) {
-            writingEnabled = false;
-            Serial.println("[StorageTask] primary log dir unavailable — drain-only mode");
-        } else if (cfg.mirrorFS) {
-            if (mirror.begin(*cfg.mirrorFS,
-                             cfg.logDir    ? cfg.logDir    : "/logs",
-                             cfg.maxSizeKB > 0 ? cfg.maxSizeKB : 1024)) {
-                mirrorActive = true;
-                Serial.println("[StorageTask] Mirror write active");
-            } else {
-                Serial.println("[StorageTask] mirror log dir unavailable — mirror disabled");
-            }
-        }
-    } else if (!cfg.csvLoggingEnabled) {
-        Serial.println("[StorageTask] CSV logging disabled — drain-only mode");
-    } else {
-        Serial.println("[StorageTask] No filesystem — drain-only mode");
-    }
+    uint32_t colsRev = datalogColsRev();
+    float    vals[LiveAggregator::MAX_COLUMNS];
+    bool     writing = false;
 
-    // Tracks whether primary.begin() has succeeded.  Mirrors writingEnabled at
-    // boot, but is needed separately so a runtime enable (below) can lazily
-    // initialise the logger exactly once without re-running begin() every loop.
-    bool primaryReady  = writingEnabled;
-    // Previous value of wantWrite, so the loop can detect the off→on edge and
-    // attempt (re)initialisation only on the transition — not every iteration.
-    bool lastWantWrite = writingEnabled;
-
-    Serial.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f writing=%d runLog=%d\n",
+    Serial.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f sensors=%d runLog=%d\n",
                   (unsigned)agg.intervalSec(),
                   agg.humidityCorrection() ? 1 : 0,
                   agg.humidityKappa(),
-                  writingEnabled ? 1 : 0,
-                  flowRunActive  ? 1 : 0);
-
-    char headerBuf[LiveAggregator::ROW_BUF_BYTES];
-    char rowBuf   [LiveAggregator::ROW_BUF_BYTES];
+                  (cfg.csvLoggingEnabled && batch.fs) ? 1 : 0,
+                  flowRunActive ? 1 : 0);
 
     SensorReading r;
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_STORAGE] = millis();
 
-        // Re-read live config knobs from *p so a /api/config/platform reload
-        // propagates without a task restart.  (AUDIT 11.5)
+        // Re-read live config knobs from *p so a settings save or a
+        // /api/config/platform reload applies without a task restart.
+        // (AUDIT 11.5)
         if (p) {
             agg.setIntervalSec(p->aggregationIntervalSec
                                    ? p->aggregationIntervalSec : 60);
             agg.setHumidityCorrection(p->humidityCorrectionEnabled,
                                        p->humidityCorrectionKappa > 0.0f
                                            ? p->humidityCorrectionKappa : 0.35f);
-
-            bool wantWrite = p->csvLoggingEnabled && (p->fs != nullptr);
-            bool offToOn   = wantWrite && !lastWantWrite;
-            lastWantWrite  = wantWrite;
-            // Lazy init: CSV logging can be toggled on at runtime even though it
-            // started disabled (begin() was never called at boot, so _fs is
-            // still null).  Without this, appendRow() would fail silently — the
-            // same silent-failure class as CM-1.  Trigger only on the off→on
-            // edge so a failed begin() (missing/corrupt FS) is not retried every
-            // loop iteration; the user can retry by toggling the setting again.
-            if (offToOn && !primary.isInitialized()) {
-                // Use the LIVE config (p->), not the boot snapshot (cfg), so a
-                // runtime change to logDir/maxSizeKB/mirrorFS is honoured when
-                // logging is toggled on.  These reads are intentionally
-                // lock-free, matching the other p-> reads above.
-                primaryReady = primary.begin(*p->fs,
-                                             p->logDir    ? p->logDir    : "/logs",
-                                             p->maxSizeKB > 0 ? p->maxSizeKB : 1024);
-                if (primaryReady) {
-                    Serial.println("[StorageTask] CSV logging enabled at runtime");
-                    if (p->mirrorFS && mirror.begin(*p->mirrorFS,
-                                                     p->logDir    ? p->logDir    : "/logs",
-                                                     p->maxSizeKB > 0 ? p->maxSizeKB : 1024)) {
-                        mirrorActive = true;
-                    }
-                } else {
-                    Serial.println("[StorageTask] runtime log dir unavailable — drain-only mode");
-                }
-            }
-            writingEnabled = wantWrite && primaryReady;
+            const bool want = p->csvLoggingEnabled && batch.fs != nullptr;
+            if (want != writing) agg.reset();
+            writing = want;
         }
+        // The column list was replaced: the window's sums belong to columns
+        // that may now be numbered differently.
+        const uint32_t rev = datalogColsRev();
+        if (rev != colsRev) { agg.reset(); colsRev = rev; }
 
-        // Drain available readings into the aggregator (and the run logger
-        // when active).  The 100 ms wait keeps the heartbeat fresh while
-        // still draining bursts.  When CSV writing is disabled the
-        // aggregator must be skipped — it would otherwise accumulate sum/
-        // count forever (no flush ever resets them in drain-only mode).
-        // R14 / AUDIT 11.6: cap inner drain at 32 readings per outer
-        // iteration so the heartbeat refresh at line 85 happens at least
-        // every 32 × 100 ms = 3.2 s worst-case. Under sustained sensor
-        // burst the old unbounded loop could spin for the full 30-s
-        // watchdog window without ever updating g_taskHeartbeat.
+        // Drain available readings. R14 / AUDIT 11.6: at most 32 per outer
+        // iteration so the heartbeat above is refreshed every 3.2 s even
+        // under a sustained burst.
         int drained = 0;
         while (drained++ < 32 &&
                xQueueReceive(storageQueue, &r, pdMS_TO_TICKS(100)) == pdTRUE) {
-            if (writingEnabled) agg.feed(r);
-            // Use the reading's own timestamp for FlowRunLogger duration
-            // accounting; fall back to nowEpochSafe() only when ts is absent.
-            // (AUDIT 11.7)
-            if (flowRunActive) {
-                uint32_t feedTs = (r.timestamp > 0) ? r.timestamp : nowEpochSafe();
-                flowRunLog.feed(r, feedTs);
-            }
+            if (writing) agg.feed(r, datalogColsLearn(r.sensorId, r.metric));
+            // The reading's own timestamp for the run's duration; now only
+            // when it has none. (AUDIT 11.7)
+            if (flowRunActive)
+                flowRunLog.feed(r, r.timestamp > 0 ? r.timestamp : nowEpochSafe());
         }
 
-        uint32_t epoch = nowEpochSafe();
+        const uint32_t epoch = nowEpochSafe();
         if (flowRunActive) {
-            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-            if (g.isLocked()) flowRunLog.tick(epoch);
+            flowRunLog.tick(epoch);
+            DatalogRow run;
+            if (flowRunLog.takeRun(run)) {
+                run.boot = (uint16_t)(bootCount & 0xFFFF);
+                batch.add(run, nullptr, 0);
+            }
         }
 
-        if (!writingEnabled) continue;
-
-        uint32_t rowTs = 0;
-        if (agg.buildRowIfDue(epoch, rowBuf, sizeof(rowBuf), &rowTs)) {
-            if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
-                // Release fsMutex between primary and mirror so a slow SD write
-                // (50-100 ms) doesn't block the mutex for the full dual-write
-                // window.  (AUDIT 2.16)
-                //
-                // A ROW LOST TO THE MUTEX IS STILL A ROW LOST. These used to
-                // read `if (g.isLocked() && !appendRow(...))`, so a 2-second
-                // fsMutex timeout skipped the write and every branch that says
-                // so: no log line, no g_queueDrops, an aggregation interval
-                // gone from the CSV with nothing anywhere to show it.
-                {
-                    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                    if (!g.isLocked()) {
-                        Serial.printf("[StorageTask] primary row LOST ts=%lu (fsMutex timeout)\n",
-                                      (unsigned long)rowTs);
-                        g_queueDrops++;
-                    } else if (!primary.appendRow(rowTs, headerBuf, rowBuf)) {
-                        Serial.printf("[StorageTask] primary row LOST ts=%lu\n", (unsigned long)rowTs);
-                        g_queueDrops++;
-                    }
-                }
-                if (mirrorActive) {
-                    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                    if (!g.isLocked()) {
-                        Serial.printf("[StorageTask] mirror row LOST ts=%lu (fsMutex timeout)\n",
-                                      (unsigned long)rowTs);
-                        g_queueDrops++;
-                    } else if (!mirror.appendRow(rowTs, headerBuf, rowBuf)) {
-                        Serial.printf("[StorageTask] mirror row LOST ts=%lu\n", (unsigned long)rowTs);
-                        g_queueDrops++;
-                    }
-                }
-            } else {
-                // The other way a row disappears: a header too wide for
-                // ROW_BUF_BYTES. LiveAggregator.h static_asserts the worst
-                // case, so this needs a runtime column count to happen — and
-                // it would otherwise be as silent as the case above.
-                Serial.printf("[StorageTask] row ts=%lu dropped — header did not fit %u B\n",
-                              (unsigned long)rowTs, (unsigned)sizeof(headerBuf));
-                g_queueDrops++;
-            }
+        uint32_t start = 0;
+        const bool flushReq = datalogFlushRequested();
+        if (writing && agg.take(epoch, flushReq, vals, &start))
+            addSensorRow(batch, vals, start, epoch);
+        if (flushReq) {
+            batch.flush();
+            datalogFlushDone();
         }
     }
 
-    // Final flush on shutdown (best-effort).
-    if (writingEnabled) {
-        uint32_t rowTs = 0;
-        if (agg.flushNow(nowEpochSafe(), rowBuf, sizeof(rowBuf), &rowTs)) {
-            if (agg.buildHeader(headerBuf, sizeof(headerBuf)) > 0) {
-                MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-                if (!g.isLocked()) {
-                    Serial.printf("[StorageTask] final row LOST ts=%lu (fsMutex timeout)\n",
-                                  (unsigned long)rowTs);
-                    g_queueDrops++;
-                } else {
-                    if (!primary.appendRow(rowTs, headerBuf, rowBuf)) {
-                        Serial.printf("[StorageTask] final primary row LOST ts=%lu\n", (unsigned long)rowTs);
-                        g_queueDrops++;
-                    }
-                    if (mirrorActive && !mirror.appendRow(rowTs, headerBuf, rowBuf)) {
-                        Serial.printf("[StorageTask] final mirror row LOST ts=%lu\n", (unsigned long)rowTs);
-                        g_queueDrops++;
-                    }
-                }
-            }
-        }
-    }
+    // Exit (deep sleep, shutdown): the window in progress and the batch.
+    uint32_t start = 0;
+    const uint32_t epoch = nowEpochSafe();
+    if (writing && agg.take(epoch, true, vals, &start))
+        addSensorRow(batch, vals, start, epoch);
+    batch.flush();
+    datalogFlushDone();
 
     Serial.println("[StorageTask] stopped");
     vTaskDelete(nullptr);
