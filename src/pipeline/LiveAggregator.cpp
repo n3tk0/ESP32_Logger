@@ -25,18 +25,22 @@ void LiveAggregator::feed(const SensorReading& r, int col) {
     {
         val = _kappaCorrect(val, _lastHumidity, _kappa);
     }
+    if (!_count[col] || val < _min[col]) _min[col] = val;
+    if (!_count[col] || val > _max[col]) _max[col] = val;
+    _last[col] = val;
     _sum[col] += (double)val;
     _count[col]++;
 }
 
 void LiveAggregator::reset() {
+    // min, max and last are read only where the count says a reading arrived.
     memset(_sum, 0, sizeof(_sum));
     memset(_count, 0, sizeof(_count));
     _lastFlushEpoch = 0;   // the next window starts at the next take()
 }
 
 bool LiveAggregator::take(uint32_t nowEpoch, bool force, float* vals,
-                          uint32_t* windowStart) {
+                          uint32_t* windowStart, const uint8_t* modes, int nModes) {
     // First call, or the clock went backwards (an NTP correction): start the
     // window here rather than wait for the old baseline to come round again.
     if (_lastFlushEpoch == 0 || nowEpoch < _lastFlushEpoch) {
@@ -47,8 +51,15 @@ bool LiveAggregator::take(uint32_t nowEpoch, bool force, float* vals,
 
     bool any = false;
     for (uint8_t i = 0; i < MAX_COLUMNS; i++) {
-        vals[i] = _count[i] ? (float)(_sum[i] / (double)_count[i]) : NAN;
-        if (_count[i]) any = true;
+        if (!_count[i]) { vals[i] = NAN; continue; }
+        any = true;
+        switch ((modes && i < nModes) ? modes[i] : (uint8_t)DL_AGG_AVG) {
+            case DL_AGG_MIN:  vals[i] = _min[i];  break;
+            case DL_AGG_MAX:  vals[i] = _max[i];  break;
+            case DL_AGG_LAST: vals[i] = _last[i]; break;
+            case DL_AGG_SUM:  vals[i] = (float)_sum[i]; break;
+            default:          vals[i] = (float)(_sum[i] / (double)_count[i]); break;
+        }
     }
     if (windowStart) *windowStart = _lastFlushEpoch;
     reset();

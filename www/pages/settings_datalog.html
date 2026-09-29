@@ -145,11 +145,12 @@
       </div>
 
       <!-- Sensor columns (formerly "Sensor CSV logging" on the Sensors page):
-           one TIMER row per interval with the averages, in the same file. -->
+           one TIMER row per interval, each column by its own aggregation
+           (avg/min/max/last/sum), in the same file. -->
       <div class="card" id="dl-sensCard">
         <div class="card-head"><div class="card-title"><span data-icon="line-chart"></span> <span data-i18n="settingsPages.dlSensors">Sensor readings</span></div></div>
         <div class="card-body">
-          <p class="hint" style="margin-bottom:.75rem" data-i18n="settingsPages.dlSensorsHint">One row per interval with the average of each selected metric, in the same file as the events (trigger TIMER).</p>
+          <p class="hint" style="margin-bottom:.75rem" data-i18n="settingsPages.dlSensorsHint">One row per interval with a value for each selected metric, in the same file as the events (trigger TIMER). How each metric's readings in the interval are combined is chosen beside it: average, lowest, highest, last or sum.</p>
           <div class="field">
             <label class="field-label"><input type="checkbox" name="csvLoggingEnabled" id="dl-sensOn" value="1" data-change="dlUpdatePreview">
               <span data-i18n="settingsPages.dlSensorsOn">Log sensor readings</span></label>

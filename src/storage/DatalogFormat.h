@@ -59,8 +59,13 @@ struct DatalogFieldIdx {
 DatalogFieldIdx dlFieldIndex(const DatalogLayout& l);
 
 // Header line (no newline). Returns its length, or -1 when it did not fit.
+// `aggs` (a DatalogAgg per label, or null): a column that is not averaged
+// gets its mode after its label, "Gust[max]" — the file's own record of how
+// its rows were combined. An averaged one, as every column used to be, is
+// its label alone, so a file written before modes existed reads the same.
 int dlFormatHeader(char* buf, size_t cap, const DatalogLayout& l,
-                   const char* const* labels, int nLabels);
+                   const char* const* labels, int nLabels,
+                   const uint8_t* aggs = nullptr);
 
 // Data row (no newline). `vals` may be null; a NAN value is an empty field.
 // Returns its length, or -1 when it did not fit.
@@ -73,3 +78,13 @@ bool dlIsHeaderLine(const char* line);
 
 // A value as the log writes it: at most two decimals, no trailing zeros.
 int dlFormatValue(char* buf, size_t cap, float v);
+
+// How a sensor column's readings in one interval become its value — the
+// column's "a" in /datalog_cols.json (Datalog.h). AVG is 0: a column saved
+// before this existed is averaged, as every column used to be.
+enum DatalogAgg : uint8_t { DL_AGG_AVG = 0, DL_AGG_MIN, DL_AGG_MAX, DL_AGG_LAST, DL_AGG_SUM,
+                            DL_AGG_COUNT };
+// "avg", "min", "max", "last", "sum"; anything else is "avg".
+const char* datalogAggName(uint8_t agg);
+// The name back; DL_AGG_AVG for an empty, unknown or missing one.
+uint8_t     datalogAggFromName(const char* name);

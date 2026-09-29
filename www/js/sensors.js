@@ -489,7 +489,7 @@ function _scClock(s) {
 
 // The header label a column gets, as the firmware writes it.
 function _scLabel(s) {
-  return String(s).substring(0, SC_LABEL_MAX).replace(/[|\x00-\x1f]/g, "_");
+  return String(s).substring(0, SC_LABEL_MAX).replace(/[|\[\]\x00-\x1f]/g, "_");
 }
 
 // Points {ts, v} of one sensor metric in one data log file's text.
@@ -504,6 +504,13 @@ function _scParseLog(text, want, from, to, dateFormat, winSec, stats) {
   var iTrig = head.indexOf("Trigger");
   var nBase = 0;
   while (nBase < head.length && SC_BASE_FIELDS.indexOf(head[nBase]) >= 0) nBase++;
+  // A column that is not averaged carries its mode after its label,
+  // "Gust[max]" — how THIS file's rows were combined (dlFormatHeader).
+  var modes = head.map(function () { return "avg"; });
+  for (var h = nBase; h < head.length; h++) {
+    var mm = /^(.*)\[(avg|min|max|last|sum)\]$/.exec(head[h]);
+    if (mm) { head[h] = mm[1]; modes[h] = mm[2]; }
+  }
   // The column: at its position when the label there matches (labels need
   // not be unique), else the one column carrying the label.
   var col = -1;
@@ -516,6 +523,10 @@ function _scParseLog(text, want, from, to, dateFormat, winSec, stats) {
     }
   }
   if (col < 0 || iStart < 0) return [];
+  // Rows combined another way than the series is — the column's mode was
+  // changed since this file was written — are not the same kind of number,
+  // and are left out rather than drawn as if they were.
+  if (modes[col] !== want.mode) { stats.otherMode = true; return []; }
   if (iDate < 0) { stats.noDate = true; return []; }
   var pts = [];
   for (var i = 1; i < lines.length; i++) {
@@ -543,21 +554,43 @@ function _scParseLog(text, want, from, to, dateFormat, winSec, stats) {
   return pts;
 }
 
-function _scLogHistory(sid, metric, from, to) {
+// The data log column of one sensor metric, from the settings: the labels it
+// may carry, its position among the logged columns (-1 = not logged), and
+// how it is combined — the logged column's mode, or, for a column switched
+// off, the mode it was listed with, which is what its files were written by.
+// Known without reading any file, so a series has its mode even when the
+// history cannot be read.
+function _scColumn(sid, metric) {
   var dl = (window.CFG && CFG.datalog) || {};
   var cols = (dl.sensorCols && dl.sensorCols.cols) || [];
-  var want = { labels: [], index: -1 }, n = 0;
+  var want = { labels: [], index: -1, mode: "avg" }, n = 0, listed = null;
   cols.forEach(function (c) {
     var mine = c.s === sid && c.m === metric;
-    if (mine) want.labels.push(_scLabel(c.l || (c.s + "_" + c.m)));
-    if (!c.off) { if (mine) want.index = n; n++; }
+    if (mine) {
+      want.labels.push(_scLabel(c.l || (c.s + "_" + c.m)));
+      if (listed === null) listed = DATALOG_AGGS.indexOf(c.a) >= 0 ? c.a : "avg";
+    }
+    if (!c.off) {
+      if (mine && want.index < 0) {
+        want.index = n;
+        want.mode = DATALOG_AGGS.indexOf(c.a) >= 0 ? c.a : "avg";
+      }
+      n++;
+    }
   });
+  if (want.index < 0 && listed !== null) want.mode = listed;
   var dflt = _scLabel(sid + "_" + metric);          // the label a column gets by default
   if (want.labels.indexOf(dflt) < 0) want.labels.push(dflt);
+  return want;
+}
+
+function _scLogHistory(sid, metric, from, to) {
+  var dl = (window.CFG && CFG.datalog) || {};
+  var want = _scColumn(sid, metric);
   var dateFormat = +dl.dateFormat;
   var lg = (window.CFG && CFG.logger) || {};
   var winSec = +lg.aggregationIntervalSec || 60;
-  var stats = { noDate: false };
+  var stats = { noDate: false, otherMode: false };
   return _scLogFiles(from).then(function (files) {
     return Promise.all(files.map(function (f) {
       return _scLogText(f.path, f.size, f.storage).then(function (t) {
@@ -567,7 +600,7 @@ function _scLogHistory(sid, metric, from, to) {
   }).then(function (lists) {
     var all = [].concat.apply([], lists);
     all.sort(function (a, b) { return a.ts - b.ts; });
-    return { pts: all, noDate: stats.noDate };
+    return { pts: all, noDate: stats.noDate, otherMode: stats.otherMode };
   });
 }
 
@@ -583,8 +616,14 @@ function _scBucketName(sec) {
   return (sec / 60) + "m";
 }
 
-// Largest-Triangle-Three-Buckets down to `n` points, as the firmware's
-// AggregationEngine does for mode "lttb".
+// How the data log combined each interval's readings for a column ("a" in
+// its sensorCols entry; DATALOG_AGGS in core.js). The chart combines its
+// buckets the same way, so a column logged as the highest of each minute is
+// charted as the highest of each hour — not as the average of the highs.
+
+// Largest-Triangle-Three-Buckets down to `n` points: what "raw" is drawn
+// with when there are too many points, so a short spike is kept rather than
+// averaged into a wider bucket.
 function _scLttb(pts, n) {
   if (pts.length <= n || n < 3) return pts;
   var out = [pts[0]], every = (pts.length - 2) / (n - 2), a = 0;
@@ -607,8 +646,8 @@ function _scLttb(pts, n) {
 }
 
 // Buckets the points by `sec` (0 = as they are) on the device's local
-// clock, so 1d is the device's day; one value per bucket by `mode` (avg for
-// lttb). Returns { pts, sec } with the width actually used.
+// clock, so 1d is the device's day; one value per bucket by `mode`, the
+// column's own. Returns { pts, sec } with the width actually used.
 function _scAggregate(pts, sec, mode) {
   if (sec > 0 && pts.length) {
     var off = _scDeviceOffset(pts[pts.length - 1].ts) || 0;
@@ -616,20 +655,24 @@ function _scAggregate(pts, sec, mode) {
     pts.forEach(function (p) {
       var b = Math.floor((p.ts + off) / sec) * sec - off;
       if (!cur || cur.ts !== b) {
-        cur = { ts: b, sum: 0, n: 0, min: Infinity, max: -Infinity };
+        cur = { ts: b, sum: 0, n: 0, min: Infinity, max: -Infinity, last: 0 };
         out.push(cur);
       }
       cur.sum += p.v; cur.n++;
       if (p.v < cur.min) cur.min = p.v;
       if (p.v > cur.max) cur.max = p.v;
+      cur.last = p.v;
     });
     pts = out.map(function (c) {
-      var v = mode === "min" ? c.min : mode === "max" ? c.max : c.sum / c.n;
+      var v = mode === "min" ? c.min : mode === "max" ? c.max :
+              mode === "last" ? c.last : mode === "sum" ? c.sum : c.sum / c.n;
       return { ts: c.ts, v: Math.round(v * 100) / 100 };
     });
   }
   if (pts.length > SC_MAX_POINTS) {
-    if (mode === "lttb") return { pts: _scLttb(pts, SC_MAX_POINTS), sec: sec };
+    // Not for a sum: LTTB keeps some points and drops the rest, and a
+    // dropped interval's total would vanish. A sum widens its buckets.
+    if (!sec && mode !== "sum") return { pts: _scLttb(pts, SC_MAX_POINTS), sec: 0 };
     var wider = SC_BUCKET_LADDER.filter(function (w) { return w > sec; })[0];
     if (wider) return _scAggregate(pts, wider, mode);
     pts = pts.slice(pts.length - SC_MAX_POINTS);
@@ -637,8 +680,24 @@ function _scAggregate(pts, sec, mode) {
   return { pts: pts, sec: sec };
 }
 
-// One chart series: data log history, then the ring's readings after it.
-function _scSeries(sid, metric, from, to, agg, mode) {
+// The data log's rows, then the ring's readings after them.
+//
+// A SUM COLUMN'S ROWS ARE TOTALS and the ring's readings are single ones: the
+// ring holds only its newest minutes, and a total made from part of an
+// interval, joined to the rows, would dip wherever the two meet. So a sum
+// column is drawn from its rows alone. Every other mode joins the ring's
+// readings from where the ring starts: a highest, lowest, last or average of
+// single readings is the same kind of number as the rows'.
+function _scJoin(log, ring, mode) {
+  if (mode === "sum") return log;
+  var firstRing = ring.length ? ring[0].ts : Infinity;
+  return log.filter(function (p) { return p.ts < firstRing; }).concat(ring);
+}
+
+// One chart series: data log history, then the ring's readings after it,
+// bucketed by the column's own aggregation.
+function _scSeries(sid, metric, from, to, agg) {
+  var mode = _scColumn(sid, metric).mode;
   var ringUrl = "/api/data?sensor=" + encodeURIComponent(sid) +
     "&metric=" + encodeURIComponent(metric) +
     "&from=" + from + "&to=" + to + "&agg=raw&mode=raw&limit=300";
@@ -646,7 +705,7 @@ function _scSeries(sid, metric, from, to, agg, mode) {
     .then(function (r) { return r.ok ? r.json() : null; })
     .catch(function () { return null; });
   var hist = _scLogHistory(sid, metric, from, to)
-    .catch(function () { return { pts: [], noDate: false }; });
+    .catch(function () { return { pts: [], noDate: false, otherMode: false }; });
   return Promise.all([ring, hist]).then(function (res) {
     var rd = (res[0] && res[0].data) || [];
     var unit = rd.length ? (rd[0].unit || "") : "";
@@ -655,12 +714,11 @@ function _scSeries(sid, metric, from, to, agg, mode) {
       var lv = s && s.last_values && s.last_values[metric];
       if (lv && typeof lv === "object") unit = lv.u || "";
     }
-    var firstRing = rd.length ? rd[0].ts : Infinity;
-    var pts = res[1].pts.filter(function (p) { return p.ts < firstRing; })
-      .concat(rd.map(function (p) { return { ts: p.ts, v: p.v }; }));
+    var pts = _scJoin(res[1].pts, rd.map(function (p) { return { ts: p.ts, v: p.v }; }), mode);
     var a = _scAggregate(pts, SC_BUCKET_SEC[agg] || 0, mode);
     return {
       agg: _scBucketName(a.sec), mode: mode, count: a.pts.length, noDate: res[1].noDate,
+      otherMode: res[1].otherMode,
       data: a.pts.map(function (p) { return { ts: p.ts, v: p.v, unit: unit }; }),
     };
   });
@@ -672,7 +730,6 @@ function sensorChartLoad() {
   var sid = (document.getElementById("sc-sensor") || {}).value;
   var metric = (document.getElementById("sc-metric") || {}).value;
   var agg = (document.getElementById("sc-agg") || {}).value || "5m";
-  var mode = (document.getElementById("sc-mode") || {}).value || "lttb";
   var range = parseInt(
     (document.getElementById("sc-range") || {}).value || "86400",
     10,
@@ -699,8 +756,8 @@ function sensorChartLoad() {
 
   // Primary (and optionally secondary) series: data log history + ring.
   var myLoad = ++_scLoadSeq;
-  var fetches = [_scSeries(sid, metric, from, now, agg, mode)];
-  if (sid2 && metric2) fetches.push(_scSeries(sid2, metric2, from, now, agg, mode));
+  var fetches = [_scSeries(sid, metric, from, now, agg)];
+  if (sid2 && metric2) fetches.push(_scSeries(sid2, metric2, from, now, agg));
 
   Promise.all(fetches)
     .then(function (results) {
@@ -769,8 +826,16 @@ function sensorChartLoad() {
       if (elMax) elMax.textContent = maxVal !== -Infinity ? fmt(maxVal) : "—";
       if (elPts) elPts.textContent = d1.count !== undefined ? d1.count : "—";
 
-      var infoStr = d1.agg + " · " + d1.mode;
-      if (hasDual) infoStr += spT("plusOverlay", " + overlay");
+      // The bucket and how it was combined — the data log column's own
+      // choice (Settings → Data log), which is where it is changed.
+      var infoStr = d1.agg + " · " + datalogAggLabel(d1.mode).toLowerCase();
+      if (hasDual) {
+        infoStr += spT("plusOverlay", " + overlay");
+        // The overlay is combined by ITS column's mode, which can differ.
+        if (d2.mode !== d1.mode) infoStr += " (" + datalogAggLabel(d2.mode).toLowerCase() + ")";
+      }
+      if (d1.otherMode || (d2 && d2.otherMode))
+        infoStr += " · " + spT("historyOtherMode", "Rows logged with another aggregation are not shown.");
       if (d1.noDate) infoStr += " · " + spT("historyNeedsDate", "History needs the Date field in the data log.");
       if (msg) msg.textContent = infoStr;
 

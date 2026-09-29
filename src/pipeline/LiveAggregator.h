@@ -4,12 +4,16 @@
 #include "../storage/Datalog.h"      // DL_MAX_COLS
 
 // ============================================================================
-// LiveAggregator — RAM averages for the data log's sensor columns.
+// LiveAggregator — one value per data log sensor column and interval.
 //
 // StorageTask resolves each reading to its data log column
 // (datalogColsLearn) and feeds it here; every `intervalSec` seconds take()
-// hands back one average per column (NAN where nothing arrived) and starts a
+// hands back one value per column (NAN where nothing arrived) and starts a
 // new window. The row itself is formatted by DatalogFormat.
+//
+// Each column's value is its DatalogAgg — the average, lowest, highest, last
+// or sum of what arrived. All five are kept while the window is open and the
+// column's mode, passed to take(), picks one when it closes.
 //
 // Optional SDS011 humidity correction (k-Köhler theory) is applied at
 // feed-time using the most recent humidity reading:
@@ -30,10 +34,12 @@ public:
     void feed(const SensorReading& r, int col);
 
     // When the window is due, or `force` and it holds any sample: fills
-    // vals[MAX_COLUMNS] with the averages, *windowStart with when the window
-    // began, starts the next window and returns true. The first call only
-    // sets the window's start.
-    bool take(uint32_t nowEpoch, bool force, float* vals, uint32_t* windowStart);
+    // vals[MAX_COLUMNS] with each column's value by modes[col] (a DatalogAgg;
+    // average for a column past nModes, or with modes null), *windowStart
+    // with when the window began, starts the next window and returns true.
+    // The first call only sets the window's start.
+    bool take(uint32_t nowEpoch, bool force, float* vals, uint32_t* windowStart,
+              const uint8_t* modes = nullptr, int nModes = 0);
 
     // Throws the window away (the columns were renumbered).
     void reset();
@@ -45,6 +51,9 @@ public:
 private:
     double   _sum[MAX_COLUMNS]   = {};
     uint32_t _count[MAX_COLUMNS] = {};
+    float    _min[MAX_COLUMNS]   = {};
+    float    _max[MAX_COLUMNS]   = {};
+    float    _last[MAX_COLUMNS]  = {};
     uint16_t _intervalSec    = 60;
     bool     _humCorr        = false;
     float    _kappa          = 0.35f;

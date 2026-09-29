@@ -860,7 +860,7 @@ the number came from rather than hunting for a control that does not exist.
 | POST | `/save_network` | CSRF | Wi-Fi / AP / hostname |
 | POST | `/save_time` | CSRF | NTP / timezone / DST |
 | POST | `/save_theme` | CSRF | Theme / accent / density / chart source |
-| POST | `/save_datalog` | CSRF | Data log: file, rotation, retention, format, sensor rows and columns |
+| POST | `/save_datalog` | CSRF | Data log: file, rotation, retention, format, sensor rows and columns (each with how its interval is combined: `avg`/`min`/`max`/`last`/`sum`) |
 | POST | `/api/next-id` | CSRF | Generate a device id from the MAC |
 | POST | `/api/regen-id` | CSRF | Legacy alias of `/api/next-id` |
 | GET | `/export_settings` | read | Download all settings as JSON |

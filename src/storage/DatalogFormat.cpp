@@ -19,8 +19,10 @@ bool put(char* buf, size_t cap, int* n, const char* s) {
 // A header label must not break the line into more fields or lines.
 bool putLabel(char* buf, size_t cap, int* n, const char* s) {
     if (!put(buf, cap, n, s ? s : "")) return false;
+    // '[' and ']' too: a column's mode follows its label as "[max]", and a
+    // label of its own ending like that would read as one.
     for (char* p = buf + *n - strlen(s ? s : ""); *p; p++)
-        if (*p == '|' || (unsigned char)*p < 0x20) *p = '_';
+        if (*p == '|' || *p == '[' || *p == ']' || (unsigned char)*p < 0x20) *p = '_';
     return true;
 }
 
@@ -59,7 +61,7 @@ DatalogFieldIdx dlFieldIndex(const DatalogLayout& l) {
 
 // ---------------------------------------------------------------------------
 int dlFormatHeader(char* buf, size_t cap, const DatalogLayout& l,
-                   const char* const* labels, int nLabels) {
+                   const char* const* labels, int nLabels, const uint8_t* aggs) {
     if (!buf || cap == 0) return -1;
     buf[0] = '\0';
     int n = 0;
@@ -72,8 +74,12 @@ int dlFormatHeader(char* buf, size_t cap, const DatalogLayout& l,
     if (l.volume) ok = ok && put(buf, cap, &n, "|Volume");
     if (l.ff)     ok = ok && put(buf, cap, &n, "|FF");
     if (l.pf)     ok = ok && put(buf, cap, &n, "|PF");
-    for (int i = 0; ok && i < nLabels; i++)
+    for (int i = 0; ok && i < nLabels; i++) {
         ok = put(buf, cap, &n, "|") && putLabel(buf, cap, &n, labels[i]);
+        if (ok && aggs && aggs[i] != DL_AGG_AVG && aggs[i] < DL_AGG_COUNT)
+            ok = put(buf, cap, &n, "[") && put(buf, cap, &n, datalogAggName(aggs[i])) &&
+                 put(buf, cap, &n, "]");
+    }
     return ok ? n : -1;
 }
 
@@ -183,4 +189,18 @@ bool dlIsHeaderLine(const char* line) {
     for (const char* p = line; *p && *p != '|' && *p != '\r' && *p != '\n'; p++)
         if (*p >= '0' && *p <= '9') return false;
     return true;
+}
+
+// ── Aggregation names ───────────────────────────────────────────────────────
+static const char* const kAggNames[DL_AGG_COUNT] = { "avg", "min", "max", "last", "sum" };
+
+const char* datalogAggName(uint8_t agg) {
+    return agg < DL_AGG_COUNT ? kAggNames[agg] : kAggNames[DL_AGG_AVG];
+}
+
+uint8_t datalogAggFromName(const char* name) {
+    if (!name) return DL_AGG_AVG;
+    for (uint8_t i = 0; i < DL_AGG_COUNT; i++)
+        if (strcmp(name, kAggNames[i]) == 0) return i;
+    return DL_AGG_AVG;
 }
