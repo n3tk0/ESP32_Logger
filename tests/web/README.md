@@ -14,6 +14,7 @@ python3 tests/web/mock_device.py 8765 &
 python3 tests/web/drive_nodes_page.py
 python3 tests/web/drive_kindle_page.py
 python3 tests/web/drive_sensors_page.py
+python3 tests/web/drive_sensor_chart.py
 python3 tests/web/drive_modules_page.py
 ```
 
@@ -23,6 +24,7 @@ python3 tests/web/drive_modules_page.py
 | [`drive_nodes_page.py`](drive_nodes_page.py) | drives `#settings_nodes` (ESP-NOW + WiFi remote, merged, with node firmware updates) in Chromium |
 | [`drive_kindle_page.py`](drive_kindle_page.py) | drives `#settings_kindle` in Chromium |
 | [`drive_sensors_page.py`](drive_sensors_page.py) | drives the Sensors page's remote-sensor editor in Chromium |
+| [`drive_sensor_chart.py`](drive_sensor_chart.py) | the Sensors page's cards after Refresh, and the Sensor chart reading the data log's history |
 | [`drive_modules_page.py`](drive_modules_page.py) | drives `#settings_modules`, including what it says when the reply will not parse |
 | [`mock_node.py`](mock_node.py) | a sensor node's setup API (docs/NODE_CONFIG.md §6, and the firmware upload of docs/NODE_OTA.md §5), WiFi or ESP-NOW, serving the committed `src/nodecfg/NodePortalPage.h` |
 | [`drive_node_portal.py`](drive_node_portal.py) | walks the node's own setup wizard for both transports at 360 px |

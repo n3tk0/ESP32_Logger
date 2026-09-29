@@ -313,6 +313,361 @@ function sensorsFilter() {
   });
 }
 
+// ── Sensor chart history from the data log ───────────────────────────────
+// /api/data serves the in-memory ring only, and a request sees just its
+// newest 300 readings across every sensor: a few minutes. Anything older is
+// in the data log, one TIMER row per aggregation interval with a column per
+// logged metric (src/storage/DatalogFormat.h). So the chart reads the active
+// log file, and the files rotation moved aside that can still hold rows of
+// the range, and puts the ring's readings after them.
+
+var _scLogCache = {};                   // storage|path -> { size, text }
+var _scLogInflight = {};                // storage|path -> Promise<text>
+var _scDlQueue = [], _scDlActive = 0;
+var SC_DL_PARALLEL = 2;                 // the web server's connection pool is tiny
+var SC_MAX_ARCHIVED = 12;               // older files read at most per load
+var SC_LABEL_MAX = 23;                  // DatalogCol::label is char[24]
+var SC_BASE_FIELDS = ["Date", "Start", "End", "Duration", "Boot", "Trigger", "Volume", "FF", "PF"];
+
+function _scDlNext() {
+  while (_scDlActive < SC_DL_PARALLEL && _scDlQueue.length) {
+    var job = _scDlQueue.shift();
+    _scDlActive++;
+    job().finally(function () { _scDlActive--; _scDlNext(); });
+  }
+}
+
+// A file's text; "" when it cannot be read. Only a successful read is
+// cached (by size: a rotated file never changes, the active one grows), and
+// a file already on its way is not asked for twice.
+function _scLogText(path, size, storage) {
+  var key = storage + "|" + path;
+  var c = _scLogCache[key];
+  if (c && c.size === size) return Promise.resolve(c.text);
+  if (_scLogInflight[key]) return _scLogInflight[key];
+  var p = new Promise(function (resolve) {
+    _scDlQueue.push(function () {
+      return fetchWithTimeout("/download?file=" + encodeURIComponent(path) +
+                              "&storage=" + encodeURIComponent(storage), {}, 30000)
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.text();
+        })
+        .then(function (t) { _scLogCache[key] = { size: size, text: t }; resolve(t); })
+        .catch(function () { resolve(""); })
+        .finally(function () { delete _scLogInflight[key]; });
+    });
+    _scDlNext();
+  });
+  _scLogInflight[key] = p;
+  return p;
+}
+
+// ── The device's clock ──
+// Rows carry the device's local time. Its zone is in the settings (a whole
+// hour offset and a summer time rule, src/utils/PosixTz.h), so a row is
+// turned into an epoch the way the device turned the epoch into the row,
+// whatever zone the browser is in.
+function _scNthSunday(y, mon, n) {           // n = -1: the last one
+  if (n < 0) {
+    var last = new Date(Date.UTC(y, mon + 1, 0));
+    return last.getUTCDate() - last.getUTCDay();
+  }
+  var first = new Date(Date.UTC(y, mon, 1)).getUTCDay();
+  return 1 + ((7 - first) % 7) + 7 * (n - 1);
+}
+
+// Seconds east of UTC at `epoch`; null when the settings do not say.
+function _scDeviceOffset(epoch) {
+  var net = (window.CFG && CFG.network) || null;
+  if (!net || net.timezone === undefined) {
+    return (window.ST && ST.utcOffset !== undefined) ? +ST.utcOffset : null;
+  }
+  var std = (+net.timezone || 0) * 3600, rule = +net.dstRule || 0;
+  if (rule === 2) return std;
+  if (rule === 3) return std + (+net.dstOffsetHours || 1) * 3600;
+  var y = new Date(epoch * 1000).getUTCFullYear(), on, off;
+  if (rule === 1) {
+    on  = Date.UTC(y, 2,  _scNthSunday(y, 2, 2), 2) / 1000 - std;
+    off = Date.UTC(y, 10, _scNthSunday(y, 10, 1), 2) / 1000 - std - 3600;
+  } else {
+    on  = Date.UTC(y, 2, _scNthSunday(y, 2, -1), 1) / 1000;
+    off = Date.UTC(y, 9, _scNthSunday(y, 9, -1), 1) / 1000;
+  }
+  return std + (epoch >= on && epoch < off ? 3600 : 0);
+}
+
+// Device-local wall time -> epoch.
+function _scLocalToEpoch(y, mo, d, h, mi, s) {
+  var naive = Date.UTC(y, mo - 1, d, h, mi, s) / 1000;
+  var off = _scDeviceOffset(naive);
+  if (off === null) return Math.floor(new Date(y, mo - 1, d, h, mi, s).getTime() / 1000);
+  // The offset depends on the instant; one refinement settles it.
+  return naive - _scDeviceOffset(naive - off);
+}
+
+// The last moment a file moved aside can hold, from the suffix archive()
+// gave it: _YYYY-MM-DD (daily/weekly), _YYYY-MM (monthly), or
+// _YYYYMMDD-HHMMSS (size or header change, the time of the row that did
+// not fit). null = not one of those.
+function _scArchiveEnd(suffix) {
+  var m = suffix.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
+  if (m) return _scLocalToEpoch(+m[1], +m[2], +m[3], +m[4], +m[5], +m[6]);
+  m = suffix.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?/);
+  if (!m) return null;
+  var y = +m[1], mo = +m[2];
+  return m[3] ? _scLocalToEpoch(y, mo, +m[3] + 1, 0, 0, 0)
+              : _scLocalToEpoch(y, mo + 1, 1, 0, 0, 0);
+}
+
+function _scDirOf(path) {
+  var i = path.lastIndexOf("/");
+  return i > 0 ? path.substring(0, i) : "/";
+}
+
+// The data log files that can hold rows at or after `from`, newest first.
+// Only the log's own folder is listed: a recursive listing walks the whole
+// card and stops at its entry limit.
+function _scLogFiles(from) {
+  var hw = (window.CFG && CFG.hardware) || {};
+  var storage = +hw.storageType === 1 ? "sdcard" : "internal";
+  var known = (window.ST && ST.currentFile) ||
+              (window.CFG && CFG.datalog && CFG.datalog.currentFile) || "";
+  var url = "/api/filelist?filter=log&storage=" + storage +
+            (known ? "&dir=" + encodeURIComponent(_scDirOf(known)) : "&recursive=1");
+  return fetchWithTimeout(url, {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var active = (d && d.currentFile) || "";
+      if (!d || !d.files || !active) return [];
+      var dir = _scDirOf(active);
+      var base = active.substring(active.lastIndexOf("/") + 1);
+      var dot = base.lastIndexOf(".");
+      var stem = dot > 0 ? base.substring(0, dot) : base;
+      var ext = dot > 0 ? base.substring(dot) : "";
+      var out = [], archived = [];
+      d.files.forEach(function (f) {
+        if (f.isDir || _scDirOf(f.path) !== dir) return;
+        var name = f.path.substring(f.path.lastIndexOf("/") + 1);
+        if (f.path === active) { out.push({ path: f.path, size: f.size }); return; }
+        if (name.indexOf(stem + "_") !== 0 || (ext && name.slice(-ext.length) !== ext)) return;
+        var end = _scArchiveEnd(name.substring(stem.length + 1, name.length - ext.length));
+        if (end !== null && end >= from) archived.push({ path: f.path, size: f.size, end: end });
+      });
+      archived.sort(function (a, b) { return b.end - a.end; });
+      return out.concat(archived.slice(0, SC_MAX_ARCHIVED)).map(function (f) {
+        f.storage = storage;
+        return f;
+      });
+    })
+    .catch(function () { return []; });
+}
+
+// A row's Date field as [y, m, d], or null. The row's own separators decide
+// where they can (YYYY-MM-DD, DD.MM.YYYY); for d/m/y vs m/d/y the setting
+// does, unless the row cannot be read that way — the setting may have been
+// changed since the row was written, and the header does not record it.
+function _scRowDate(s, dateFormat) {
+  var m;
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/))) return [+m[1], +m[2], +m[3]];
+  if ((m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/))) return [+m[3], +m[2], +m[1]];
+  if (!(m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/))) return null;
+  var a = +m[1], b = +m[2], y = +m[3];
+  var dmy = [y, b, a], mdy = [y, a, b];
+  var pick = dateFormat === 2 ? mdy : dmy, alt = dateFormat === 2 ? dmy : mdy;
+  if (pick[1] >= 1 && pick[1] <= 12) return pick;
+  return alt[1] >= 1 && alt[1] <= 12 ? alt : null;
+}
+
+function _scClock(s) {
+  var t = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!t) return null;
+  var h = +t[1];
+  if (t[4]) h = (h % 12) + (t[4].toUpperCase() === "PM" ? 12 : 0);
+  return [h, +t[2], +(t[3] || 0)];
+}
+
+// The header label a column gets, as the firmware writes it.
+function _scLabel(s) {
+  return String(s).substring(0, SC_LABEL_MAX).replace(/[|\x00-\x1f]/g, "_");
+}
+
+// Points {ts, v} of one sensor metric in one data log file's text.
+// `want` = { labels, index }: the labels the column may carry, and its
+// position among the logged columns (-1 = unknown).
+function _scParseLog(text, want, from, to, dateFormat, winSec, stats) {
+  var lines = text.split("\n");
+  var head = (lines[0] || "").replace(/\r$/, "").split("|");
+  if (/\d/.test(head[0] || "")) return [];          // no header: no sensor columns
+  var iDate = head.indexOf("Date"), iStart = head.indexOf("Start");
+  var iEnd = head.indexOf("End"), iDur = head.indexOf("Duration");
+  var iTrig = head.indexOf("Trigger");
+  var nBase = 0;
+  while (nBase < head.length && SC_BASE_FIELDS.indexOf(head[nBase]) >= 0) nBase++;
+  // The column: at its position when the label there matches (labels need
+  // not be unique), else the one column carrying the label.
+  var col = -1;
+  if (want.index >= 0 && want.labels.indexOf(head[nBase + want.index]) >= 0) {
+    col = nBase + want.index;
+  } else {
+    for (var k = 0; k < want.labels.length && col < 0; k++) {
+      var first = head.indexOf(want.labels[k], nBase);
+      if (first >= 0 && head.indexOf(want.labels[k], first + 1) < 0) col = first;
+    }
+  }
+  if (col < 0 || iStart < 0) return [];
+  if (iDate < 0) { stats.noDate = true; return []; }
+  var pts = [];
+  for (var i = 1; i < lines.length; i++) {
+    var p = lines[i].replace(/\r$/, "").split("|");
+    if (p.length <= col || p[col] === "") continue;
+    var v = parseFloat(p[col]);
+    if (!isFinite(v)) continue;
+    var dt = _scRowDate(p[iDate], dateFormat), cl = _scClock(p[iStart]);
+    if (!dt || !cl) continue;
+    var ts = _scLocalToEpoch(dt[0], dt[1], dt[2], cl[0], cl[1], cl[2]);
+    // A TIMER row's time is the start of the window it averages: place it
+    // in the middle, by the row's own End or Duration when it has one.
+    if (iTrig >= 0 && p[iTrig] === "TIMER") {
+      var win = winSec, e;
+      if (iEnd >= 0 && (e = _scClock(p[iEnd] || ""))) {
+        win = ((e[0] - cl[0]) * 3600 + (e[1] - cl[1]) * 60 + (e[2] - cl[2]) + 86400) % 86400;
+      } else if (iDur >= 0 && /^\d+s$/.test(p[iDur] || "")) {
+        win = parseInt(p[iDur], 10);
+      }
+      ts += Math.floor(win / 2);
+    }
+    if (ts < from || ts > to) continue;
+    pts.push({ ts: ts, v: v });
+  }
+  return pts;
+}
+
+function _scLogHistory(sid, metric, from, to) {
+  var dl = (window.CFG && CFG.datalog) || {};
+  var cols = (dl.sensorCols && dl.sensorCols.cols) || [];
+  var want = { labels: [], index: -1 }, n = 0;
+  cols.forEach(function (c) {
+    var mine = c.s === sid && c.m === metric;
+    if (mine) want.labels.push(_scLabel(c.l || (c.s + "_" + c.m)));
+    if (!c.off) { if (mine) want.index = n; n++; }
+  });
+  var dflt = _scLabel(sid + "_" + metric);          // the label a column gets by default
+  if (want.labels.indexOf(dflt) < 0) want.labels.push(dflt);
+  var dateFormat = +dl.dateFormat;
+  var lg = (window.CFG && CFG.logger) || {};
+  var winSec = +lg.aggregationIntervalSec || 60;
+  var stats = { noDate: false };
+  return _scLogFiles(from).then(function (files) {
+    return Promise.all(files.map(function (f) {
+      return _scLogText(f.path, f.size, f.storage).then(function (t) {
+        return _scParseLog(t, want, from, to, dateFormat, winSec, stats);
+      });
+    }));
+  }).then(function (lists) {
+    var all = [].concat.apply([], lists);
+    all.sort(function (a, b) { return a.ts - b.ts; });
+    return { pts: all, noDate: stats.noDate };
+  });
+}
+
+var SC_BUCKET_SEC = { "5m": 300, "1h": 3600, "1d": 86400, raw: 0 };
+// Wider buckets when the chosen one gives more than SC_MAX_POINTS.
+var SC_BUCKET_LADDER = [300, 900, 1800, 3600, 10800, 21600, 43200, 86400];
+var SC_MAX_POINTS = 250;
+
+function _scBucketName(sec) {
+  if (!sec) return "raw";
+  if (sec % 86400 === 0) return (sec / 86400) + "d";
+  if (sec % 3600 === 0) return (sec / 3600) + "h";
+  return (sec / 60) + "m";
+}
+
+// Largest-Triangle-Three-Buckets down to `n` points, as the firmware's
+// AggregationEngine does for mode "lttb".
+function _scLttb(pts, n) {
+  if (pts.length <= n || n < 3) return pts;
+  var out = [pts[0]], every = (pts.length - 2) / (n - 2), a = 0;
+  for (var i = 0; i < n - 2; i++) {
+    var s = Math.floor((i + 1) * every) + 1, e = Math.min(Math.floor((i + 2) * every) + 1, pts.length);
+    var ax = 0, ay = 0;
+    for (var j = s; j < e; j++) { ax += pts[j].ts; ay += pts[j].v; }
+    ax /= (e - s) || 1; ay /= (e - s) || 1;
+    var rs = Math.floor(i * every) + 1, re = Math.floor((i + 1) * every) + 1, best = -1, pick = rs;
+    for (var r = rs; r < re; r++) {
+      var area = Math.abs((pts[a].ts - ax) * (pts[r].v - pts[a].v) -
+                          (pts[a].ts - pts[r].ts) * (ay - pts[a].v));
+      if (area > best) { best = area; pick = r; }
+    }
+    out.push(pts[pick]);
+    a = pick;
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+// Buckets the points by `sec` (0 = as they are) on the device's local
+// clock, so 1d is the device's day; one value per bucket by `mode` (avg for
+// lttb). Returns { pts, sec } with the width actually used.
+function _scAggregate(pts, sec, mode) {
+  if (sec > 0 && pts.length) {
+    var off = _scDeviceOffset(pts[pts.length - 1].ts) || 0;
+    var out = [], cur = null;
+    pts.forEach(function (p) {
+      var b = Math.floor((p.ts + off) / sec) * sec - off;
+      if (!cur || cur.ts !== b) {
+        cur = { ts: b, sum: 0, n: 0, min: Infinity, max: -Infinity };
+        out.push(cur);
+      }
+      cur.sum += p.v; cur.n++;
+      if (p.v < cur.min) cur.min = p.v;
+      if (p.v > cur.max) cur.max = p.v;
+    });
+    pts = out.map(function (c) {
+      var v = mode === "min" ? c.min : mode === "max" ? c.max : c.sum / c.n;
+      return { ts: c.ts, v: Math.round(v * 100) / 100 };
+    });
+  }
+  if (pts.length > SC_MAX_POINTS) {
+    if (mode === "lttb") return { pts: _scLttb(pts, SC_MAX_POINTS), sec: sec };
+    var wider = SC_BUCKET_LADDER.filter(function (w) { return w > sec; })[0];
+    if (wider) return _scAggregate(pts, wider, mode);
+    pts = pts.slice(pts.length - SC_MAX_POINTS);
+  }
+  return { pts: pts, sec: sec };
+}
+
+// One chart series: data log history, then the ring's readings after it.
+function _scSeries(sid, metric, from, to, agg, mode) {
+  var ringUrl = "/api/data?sensor=" + encodeURIComponent(sid) +
+    "&metric=" + encodeURIComponent(metric) +
+    "&from=" + from + "&to=" + to + "&agg=raw&mode=raw&limit=300";
+  var ring = fetchWithTimeout(ringUrl, {}, 15000)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; });
+  var hist = _scLogHistory(sid, metric, from, to)
+    .catch(function () { return { pts: [], noDate: false }; });
+  return Promise.all([ring, hist]).then(function (res) {
+    var rd = (res[0] && res[0].data) || [];
+    var unit = rd.length ? (rd[0].unit || "") : "";
+    if (!unit) {
+      var s = ((_sensorsCache && _sensorsCache.sensors) || []).find(function (x) { return x.id === sid; });
+      var lv = s && s.last_values && s.last_values[metric];
+      if (lv && typeof lv === "object") unit = lv.u || "";
+    }
+    var firstRing = rd.length ? rd[0].ts : Infinity;
+    var pts = res[1].pts.filter(function (p) { return p.ts < firstRing; })
+      .concat(rd.map(function (p) { return { ts: p.ts, v: p.v }; }));
+    var a = _scAggregate(pts, SC_BUCKET_SEC[agg] || 0, mode);
+    return {
+      agg: _scBucketName(a.sec), mode: mode, count: a.pts.length, noDate: res[1].noDate,
+      data: a.pts.map(function (p) { return { ts: p.ts, v: p.v, unit: unit }; }),
+    };
+  });
+}
+
+var _scLoadSeq = 0;
+
 function sensorChartLoad() {
   var sid = (document.getElementById("sc-sensor") || {}).value;
   var metric = (document.getElementById("sc-metric") || {}).value;
@@ -336,42 +691,26 @@ function sensorChartLoad() {
   var now = Math.floor(Date.now() / 1000);
   var from = now - range;
 
-  // Build primary URL
-  var url1 =
-    "/api/data?sensor=" +
-    encodeURIComponent(sid) +
-    "&metric=" +
-    encodeURIComponent(metric) +
-    "&from=" + from + "&to=" + now +
-    "&agg=" + agg + "&mode=" + mode + "&limit=250";
-
   // Secondary overlay sensor
   var sid2 = (document.getElementById("sc-sensor2") || {}).value;
   var metric2 = (document.getElementById("sc-metric2") || {}).value;
-  var url2 = null;
-  if (sid2 && metric2) {
-    url2 =
-      "/api/data?sensor=" +
-      encodeURIComponent(sid2) +
-      "&metric=" +
-      encodeURIComponent(metric2) +
-      "&from=" + from + "&to=" + now +
-      "&agg=" + agg + "&mode=" + mode + "&limit=250";
-  }
 
   if (msg) msg.textContent = window.I18n ? I18n.t("common.loading") : "Loading…";
 
-  // Fetch primary (and optionally secondary) data
-  var fetches = [fetchWithTimeout(url1, {}, 15000).then(function (r) { return r.ok ? r.json() : null; })];
-  if (url2) fetches.push(fetchWithTimeout(url2, {}, 15000).then(function (r) { return r.ok ? r.json() : null; }));
+  // Primary (and optionally secondary) series: data log history + ring.
+  var myLoad = ++_scLoadSeq;
+  var fetches = [_scSeries(sid, metric, from, now, agg, mode)];
+  if (sid2 && metric2) fetches.push(_scSeries(sid2, metric2, from, now, agg, mode));
 
   Promise.all(fetches)
     .then(function (results) {
+      if (myLoad !== _scLoadSeq) return;   // a newer selection is loading
       var d1 = results[0];
       var d2 = results.length > 1 ? results[1] : null;
 
       if (!d1 || !d1.data || d1.data.length === 0) {
-        if (msg) msg.textContent = spT("noDataPeriod", "No data for selected period.");
+        if (msg) msg.textContent = spT("noDataPeriod", "No data for selected period.") +
+          (d1 && d1.noDate ? " " + spT("historyNeedsDate", "History needs the Date field in the data log.") : "");
         return;
       }
 
@@ -432,6 +771,7 @@ function sensorChartLoad() {
 
       var infoStr = d1.agg + " · " + d1.mode;
       if (hasDual) infoStr += spT("plusOverlay", " + overlay");
+      if (d1.noDate) infoStr += " · " + spT("historyNeedsDate", "History needs the Date field in the data log.");
       if (msg) msg.textContent = infoStr;
 
       var ctx = document.getElementById("sensorChart");
