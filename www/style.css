@@ -38,6 +38,7 @@
   --ok:            #15803d;   /* was #16a34a (3.3:1) — now 5:1 on white */
   --warn:          #b45309;   /* was #d97706 (3.2:1) — now 5:1 on white */
   --err:           #dc2626;
+  --info:          #1d4ed8;
   --shadow-sm:     0 1px 2px rgba(15,20,25,.04);
   --shadow-md:     0 6px 18px rgba(15,20,25,.08);
   --radius:        6px;
@@ -68,6 +69,7 @@
   --ok:            #4ade80;
   --warn:          #fbbf24;
   --err:           #f87171;
+  --info:          #60a5fa;
   --shadow-md:     0 6px 18px rgba(0,0,0,.5);
 }
 /* Accent variants are theme-scoped: light values must hold ≥4.5:1 as text on
@@ -277,10 +279,25 @@ button, a, [role="button"] { min-height: 24px; }
   border-radius:4px; background:var(--panel-2);
 }
 .sstat [data-lucide] { width:11px; height:11px; flex-shrink:0; }
-.sstat.ok { color:var(--ok); border-color:rgba(22,163,74,.3); background:rgba(22,163,74,.06); }
-[data-theme="dark"] .sstat.ok { background:rgba(74,222,128,.06); border-color:rgba(74,222,128,.25); }
-.sstat.err { color:var(--err); border-color:rgba(220,38,38,.3); background:rgba(220,38,38,.06); }
-[data-theme="dark"] .sstat.err { background:rgba(248,113,113,.06); border-color:rgba(248,113,113,.25); }
+/* Connection state tints the whole stats group (.ok/.err on .sidebar-stats),
+   drawn as a halo (box-shadow) rather than padding so the chips keep their
+   full width; the sidebar-foot's 10 px padding holds it. Each chip carries
+   its own level (lv-ok/info/warn/err, set by core.js), mixed into the opaque
+   panel colour so it reads the same on either group tint. */
+.sidebar-stats.ok, .sidebar-stats.err { --grp:var(--ok); border-radius:4px; margin-top:4px; margin-bottom:14px;
+  background:color-mix(in srgb, var(--grp) 7%, transparent);
+  box-shadow:0 0 0 4px color-mix(in srgb, var(--grp) 7%, var(--panel)), 0 0 0 5px color-mix(in srgb, var(--grp) 28%, transparent); }
+.sidebar-stats.err { --grp:var(--err); }
+.sidebar-stats .sstat { gap:4px; padding:5px; }
+.sstat.lv-ok   { --lv:var(--ok); }
+.sstat.lv-info { --lv:var(--info); }
+.sstat.lv-warn { --lv:var(--warn); }
+.sstat.lv-err  { --lv:var(--err); }
+.sstat[class*="lv-"] {
+  color:var(--lv);
+  border-color:color-mix(in srgb, var(--lv) 30%, transparent);
+  background:color-mix(in srgb, var(--lv) 8%, var(--panel-2));
+}
 
 /* BOTTOM NAV */
 .bottomnav { display:none; grid-area:botnav; background:var(--panel); border-top:1px solid var(--border); }
@@ -932,12 +949,21 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .sidebar-rail .nav-item span:not(.icon):not(.ndot):not(.nbadge),
 .sidebar-rail .nav-item .nbadge,
 .sidebar-rail .sidebar-foot .mono,
-.sidebar-rail .sidebar-stats .sstat span,
+.sidebar-rail .sidebar-stats .sstat span:not([data-icon]),
 .sidebar-rail .logo-name,
 .sidebar-rail .logo-meta { display:none; }
 .sidebar-rail .nav-item { padding:0; justify-content:center; }
 .sidebar-rail .sidebar-stats { grid-template-columns:1fr; }
-.sidebar-rail .sstat { justify-content:center; padding:6px 4px; }
+/* Rail: the status chips take the nav buttons' size and shape (full rail
+   width, 44 px tall, 6 px radius, 15 px icon). The foot drops its own side
+   padding so the chips line up with the nav column; the group's halo shrinks
+   to 4 px so it still fits inside the rail's 6 px padding. */
+.sidebar-rail .sidebar-foot { padding-left:0; padding-right:0; }
+.sidebar-rail .sidebar-stats { gap:4px; }
+.sidebar-rail .sidebar-stats.ok, .sidebar-rail .sidebar-stats.err {
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--grp) 7%, var(--panel)), 0 0 0 4px color-mix(in srgb, var(--grp) 28%, transparent); }
+.sidebar-rail .sstat, .sidebar-rail .sidebar-stats .sstat { justify-content:center; padding:0; height:44px; border-radius:6px; }
+.sidebar-rail .sstat [data-lucide], .sidebar-rail .sstat svg { width:15px; height:15px; }
 .sidebar-rail .kbd { display:none; }
 
 /* ══════════════════════════════════════════════
