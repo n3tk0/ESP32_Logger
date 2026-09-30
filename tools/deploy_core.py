@@ -403,12 +403,24 @@ _UPLOAD_FILTER_LABELS = {
 #: question from opposite ends.
 try:
     from build_web import GZIP_TEXT_EXTS as _GZIPPABLE      # noqa: E402
+    from build_web import plan_bundle as _plan_bundle       # noqa: E402
 except Exception:                                            # pragma: no cover
+    _plan_bundle = None
     # NOT A SECOND COPY OF THE LIST — that is what the import is here to
     # avoid, and a stale copy would answer the question wrongly with nothing
     # logged. None means "cannot tell", and the one caller treats that as
     # "rebuild", which is the cheap direction.
     _GZIPPABLE = None
+
+
+def www_predates_bundle(root: Path | None = None) -> bool:
+    """A tree from before build_web bundled index.html's scripts: 27 separate
+    files where the device needs one js/app.js. Uploading it works, and
+    leaves the device with the page-load burst the bundle is there to stop.
+    """
+    root = root or DATA_WWW
+    has_index = (root / "index.html").exists() or (root / "index.html.gz").exists()
+    return has_index and not any((root / "js").glob("app.js*"))
 
 
 def www_matches_filter(uf: str, root: Path | None = None) -> bool:
@@ -449,6 +461,8 @@ def www_matches_filter(uf: str, root: Path | None = None) -> bool:
     root = root or DATA_WWW
     if not root.is_dir():
         return True                     # nothing built; the caller builds it
+    if www_predates_bundle(root):
+        return False
     if uf == "plain":
         return not any(root.rglob("*.gz"))
     if uf not in ("gz", "all"):
@@ -1242,6 +1256,12 @@ class DeployManager:
             self._log("ERROR: data/www/ is empty. Run step 1 (Build web assets) first.")
             self._emit_complete(8, 2)
             return 2
+        if www_predates_bundle():
+            self._log("data/www/ predates js/app.js — rebuilding it first…")
+            rc = self._build_web_assets()
+            if rc != 0:
+                self._emit_complete(8, rc)
+                return rc
 
         # Connectivity check
         try:
@@ -1298,7 +1318,13 @@ class DeployManager:
         _BIN_EXT = {".ico", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".woff", ".woff2"}
         ok = fail = skipped = 0
 
-        for fpath in sorted(DATA_WWW.rglob("*")):
+        # index.html LAST. It names js/app.js, and until that file is on
+        # the device the page it serves loads no script at all. Uploaded in
+        # name order it went first, so a bundle that failed to fit left a
+        # page with nothing behind it; last, a failure leaves the old page
+        # and the old scripts it still names.
+        for fpath in sorted(DATA_WWW.rglob("*"),
+                            key=lambda p: (p.name.startswith("index.html"), str(p))):
             if self._cancelled:
                 self._log("")
                 self._log(f"■ Stopped after {ok} file(s).")
@@ -1307,6 +1333,13 @@ class DeployManager:
             if not fpath.is_file():
                 continue
             if "platform_config" in fpath.name:
+                continue
+
+            # Everything before it has to be there first; see the sort above.
+            if fpath.name.startswith("index.html") and fail:
+                self._log(f"  ✗  /www/{fpath.name} not sent: {fail} file(s) before it failed, "
+                          f"and it may name them")
+                fail += 1
                 continue
 
             is_gz  = fpath.suffix == ".gz"
@@ -1349,6 +1382,7 @@ class DeployManager:
         skip_note = f", {skipped} skipped" if skipped else ""
         if fail == 0:
             self._log(f"✓ Uploaded {ok} files successfully{skip_note}.")
+            self._http_drop_bundled(base)
             self._emit_complete(8, 0)
             return 0
 
@@ -1379,6 +1413,37 @@ class DeployManager:
         """'&csrf=<token>' query-string fragment, or '' when no token is held."""
         tok = getattr(self, "_csrf_token", "")
         return f"&csrf={urllib.parse.quote(tok)}" if tok else ""
+
+    def _http_drop_bundled(self, base: str) -> None:
+        """Delete the scripts js/app.js replaced from a device that has them.
+
+        A device updated from before the bundle still holds the 27 separate
+        files, about as much flash again as js/app.js, and nothing asks for
+        them. Only once every upload has succeeded, so the page that names
+        them is gone. A file that is not there answers an error, which is
+        the expected answer on every update after the first.
+        """
+        # Only when what was just uploaded is a bundled tree: the page on
+        # the device names js/app.js, not the files this deletes.
+        if www_predates_bundle() or not any((DATA_WWW / "js").glob("app.js*")):
+            return
+        plan = _plan_bundle(WWW_SRC) if _plan_bundle else None
+        if not plan:
+            return
+        gone = 0
+        for name in sorted(plan[2]):
+            for disp in (f"/www/{name}", f"/www/{name}.gz"):
+                try:
+                    del_url = (f"{base}/delete?path={urllib.parse.quote(disp)}"
+                               f"&storage=internal{self._csrf_qs()}")
+                    req = urllib.request.Request(del_url, data=b"", method="POST")
+                    with urllib.request.urlopen(req, timeout=6):
+                        pass
+                    gone += 1
+                except Exception:
+                    pass
+        if gone:
+            self._log(f"Removed {gone} script(s) now inside js/app.js.")
 
     def _http_wipe_www(self, base: str) -> tuple[int, int]:
         """Delete every file under /www on the device."""

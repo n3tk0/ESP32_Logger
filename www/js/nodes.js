@@ -31,6 +31,8 @@
 //          must not be conflated. Both render as an em dash.
 // ============================================================================
 
+"use strict";
+
 var ndEspnowData = null;      // last successful /api/espnow/status payload, or null
 var ndRemoteData = null;      // last successful /api/remote/status payload, or null
 var ndEspnowAvailable = null; // true | false (404) | null (unknown/error)

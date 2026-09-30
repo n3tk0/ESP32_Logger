@@ -34,6 +34,19 @@ WHICH COPIES GET WRITTEN — `--filter`
 Binaries (.png .jpg .ico .woff …) are already compressed and are copied
 as-is under every filter — gzipping them makes them bigger.
 
+ONE SCRIPT FOR THE MAIN PAGE — `--no-bundle` turns it off
+    index.html names some 27 deferred scripts. With an empty cache the
+    browser fetches them six at a time, and on a C3 each open connection
+    holds about 9 KB (the server's send buffer plus lwIP's unacknowledged
+    segments). Six of those after boot took the heap to 5 KB free with a
+    4.6 KB largest block, and the device stopped answering. So the build
+    concatenates every `<script src="/…" defer>` tag of index.html, in
+    document order, into js/app.js and leaves one tag in their place.
+    Deferred scripts run in document order anyway, so the order of
+    execution is unchanged. Every source file opens with "use strict", and
+    the bundle does too, so no file changes mode. A file another page still
+    names (firstrun.html) is kept; the rest are not written.
+
 Stdlib only — no pip install needed.
 
 Usage:
@@ -150,13 +163,86 @@ def minify_css(src: str) -> str:
     return src.strip() + "\n"
 
 
+BUNDLE_REL = "js/app.js"
+
+# A local deferred script tag and nothing else: `<script src="/x.js" defer></script>`.
+_DEFER_TAG = re.compile(r'<script src="/([^"]+\.js)" defer></script>')
+# "use strict" as the first statement, or as the first of a wrapping IIFE's.
+_STRICT_HEAD = re.compile(
+    r"""(?s);?(?:\(function\s*\([^)]*\)\s*\{(?:\s*//[^\n]*|\s*/\*.*?\*/)*\s*)?["']use strict["']""")
+_SRC_ATTR = re.compile(r'<script[^>]*\bsrc="/([^"]+)"')
+
+
+def plan_bundle(src_root: Path) -> tuple[str, bytes, set[str]] | None:
+    """index.html with its deferred scripts replaced by one, the bundle, and
+    the source paths that need not be written on their own.
+
+    None when index.html has fewer than two deferred scripts to merge.
+    """
+    index = src_root / "index.html"
+    if not index.is_file():
+        return None
+    # Comments first: a tag commented out is not a script to bundle. The
+    # page loses them anyway in minify_html.
+    html = re.sub(r"<!--(?!\[).*?-->", "", index.read_text("utf-8"), flags=re.DOTALL)
+    names = _DEFER_TAG.findall(html)
+    if len(names) < 2:
+        return None
+    # A deferred tag written any other way would stay where it is and run
+    # after js/app.js instead of in its place in the order.
+    odd = [t for t in re.findall(r"<script\b[^>]*\bdefer\b[^>]*>", html)
+           if not _DEFER_TAG.match(t + "</script>")]
+    if odd:
+        print(f"error: index.html has a deferred script the bundle cannot take: {odd[0]}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    parts = ['"use strict";\n']
+    for name in names:
+        path = src_root / name
+        if not path.is_file():
+            print(f"error: index.html names /{name}, which is not in {src_root}",
+                  file=sys.stderr)
+            sys.exit(1)
+        body = path.read_text("utf-8")
+        # Each file already opens with "use strict" (see the module
+        # docstring); a sloppy one would silently turn strict here.
+        head = re.sub(r"(?s)^(?:\s*//[^\n]*|\s*/\*.*?\*/)*\s*", "", body)
+        if not _STRICT_HEAD.match(head):
+            print(f"error: /{name} does not open with \"use strict\" "
+                  f"(or an IIFE whose body does), "
+                  f"and the bundle is strict", file=sys.stderr)
+            sys.exit(1)
+        parts.append(f"\n// ---- /{name} ----\n{body}\n;\n")
+    bundle = "".join(parts).encode("utf-8")
+
+    first = True
+
+    def swap(m: re.Match) -> str:
+        nonlocal first
+        if first:
+            first = False
+            return f'<script src="/{BUNDLE_REL}" defer></script>'
+        return ""
+
+    new_html = _DEFER_TAG.sub(swap, html)
+
+    # Anything another page loads by name keeps its own file.
+    still_named: set[str] = set()
+    for page in src_root.rglob("*.htm*"):
+        if page != index:
+            still_named.update(_SRC_ATTR.findall(page.read_text("utf-8")))
+    dropped = {n for n in names if n not in still_named}
+    return new_html, bundle, dropped
+
+
 def gzip_bytes(data: bytes) -> bytes:
     """Maximum compression — flash space is at a premium, decode is fast."""
     return gzip.compress(data, compresslevel=9)
 
 
 def build(src_root: Path, dst_root: Path, *, do_gzip: bool = True,
-          filter_mode: str = "all") -> dict:
+          filter_mode: str = "all", bundle: bool = True) -> dict:
     """Walk src_root and emit a flash-ready tree under dst_root.
 
     `filter_mode` is which copies to keep — "all", "gz" or "plain"; see the
@@ -179,17 +265,46 @@ def build(src_root: Path, dst_root: Path, *, do_gzip: bool = True,
     gz_bytes = 0
     flash_bytes = 0
 
-    for src in src_root.rglob("*"):
-        if not src.is_file():
-            continue
+    plan = plan_bundle(src_root) if bundle else None
+    if not plan:
+        # A bundle from an earlier build, next to an index.html that no
+        # longer names it, reads to the deploy tool as a bundled tree.
+        for stale in (dst_root / BUNDLE_REL, dst_root / (BUNDLE_REL + ".gz")):
+            if stale.exists():
+                stale.unlink()
+    overrides: dict[str, bytes] = {}
+    dropped: set[str] = set()
+    if plan:
+        html, bundled, dropped = plan
+        overrides["index.html"] = html.encode("utf-8")
+        overrides[BUNDLE_REL] = bundled
+        if (src_root / BUNDLE_REL).exists():
+            print(f"error: www/{BUNDLE_REL} exists, and the build writes it",
+                  file=sys.stderr)
+            sys.exit(1)
+
+    sources = [p for p in src_root.rglob("*") if p.is_file()]
+    if plan:
+        sources.append(src_root / BUNDLE_REL)
+
+    for src in sources:
         rel = src.relative_to(src_root)
         # Skip pre-compressed siblings — we'll regenerate them.
         if src.suffix == ".gz":
             continue
         dst = dst_root / rel
+        if rel.as_posix() in dropped:
+            # In js/app.js now. A copy left by an earlier build would be
+            # flash spent on a file nothing asks for.
+            for stale in (dst, dst.with_suffix(dst.suffix + ".gz")):
+                if stale.exists():
+                    stale.unlink()
+            continue
         dst.parent.mkdir(parents=True, exist_ok=True)
 
-        raw = src.read_bytes()
+        raw = overrides.get(rel.as_posix())
+        if raw is None:
+            raw = src.read_bytes()
         in_bytes += len(raw)
 
         # Minify text formats; pass everything else through unchanged.
@@ -344,6 +459,10 @@ def main() -> int:
                         "tree costs on flash), plain (no .gz at all)")
     p.add_argument("--no-gzip", action="store_true",
                    help="alias for --filter plain (kept for old call sites)")
+    p.add_argument("--no-bundle", action="store_true",
+                   help="keep index.html's scripts as separate files instead "
+                        "of js/app.js (debugging; the deploy tool rebuilds "
+                        "such a tree with the bundle before uploading it)")
     p.add_argument("--src", default=str(SRC),
                    help="source directory (default: www/)")
     p.add_argument("--dst", default=str(DST),
@@ -368,7 +487,8 @@ def main() -> int:
 
     mode = "plain" if args.no_gzip else args.filter
     print(f"[build_web] {src_root} -> {dst_root}  (filter: {mode})")
-    totals = build(src_root, dst_root, filter_mode=mode)
+    totals = build(src_root, dst_root, filter_mode=mode,
+                   bundle=not args.no_bundle)
 
     in_b   = totals["in_bytes"]
     wire_b = totals["gz_bytes"]

@@ -315,7 +315,7 @@ pio run -e xiao_esp32c3 --target upload
 pio run -e xiao_esp32c3 --target uploadfs
 ```
 
-`tools/build_web.py` must be run first to produce the LittleFS image from `www/` (minifies and gzip-compresses JS/CSS into `dist/www/`).
+`tools/build_web.py` must be run first to produce the LittleFS image from `www/` (minifies and gzip-compresses JS/CSS into `dist/www/`). It also merges the main page's scripts into one `js/app.js`, because a C3 runs out of heap serving 27 of them at once. `--no-bundle` keeps them separate for debugging.
 
 **4. Connect to the device AP**
 
