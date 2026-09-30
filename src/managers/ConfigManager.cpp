@@ -5,6 +5,7 @@
 #include "../web/DashboardStrings.h"    // KLANG_AUTO — the dashboard's language
 #include "../utils/MutexGuard.h"
 #include "../utils/PosixTz.h"       // dstRuleClamp, DST_RULE_EU
+#include "../utils/WifiTxPower.h"   // wifiTxPowerValid
 #include <LittleFS.h>
 #include "esp_mac.h"
 #include <math.h>
@@ -61,6 +62,7 @@ static void applyDefaults() {
     if (config.network.timezone < -12 || config.network.timezone > 14) config.network.timezone = 2;
     if (config.network.dstOffsetHours < 0 || config.network.dstOffsetHours > 2) config.network.dstOffsetHours = 0;
     config.network.dstRule = dstRuleClamp(config.network.dstRule);
+    if (!wifiTxPowerValid(config.network.txPower)) config.network.txPower = 0;
 
     if (!config.network.apIP[0]) {
         config.network.apIP[0]=192; config.network.apIP[1]=168;

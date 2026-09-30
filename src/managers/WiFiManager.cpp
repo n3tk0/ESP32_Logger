@@ -4,6 +4,8 @@
 #include "RtcManager.h"                 // currentPosixTz
 #include "../pipeline/DataPipeline.h"   // rtcMutex
 #include "../utils/MutexGuard.h"
+#include "../utils/WifiTxPower.h"
+#include "../core/BoardProfiles.h"   // g_boardProfile ids
 #include <WiFi.h>
 #include <DNSServer.h>            // Captive portal — Pass 5 5.5 phase 2
 #include <time.h>
@@ -64,6 +66,16 @@ void safeWiFiShutdown() {
     Serial.println("WiFi: Radio OFF, safe to restart.");
 }
 
+uint8_t applyWifiTxPower() {
+    const bool low = g_boardProfile &&
+                     (g_boardProfile->id == BOARD_LOLIN_C3_PICO ||
+                      g_boardProfile->id == BOARD_SUPERMINI_C3);
+    const uint8_t q = wifiTxPowerFor(config.network.txPower, low);
+    if (!WiFi.setTxPower((wifi_power_t)q))
+        Serial.printf("WiFi: could not set TX power %u.%u dBm\n", q / 4, (q % 4) * 25);
+    return q;
+}
+
 bool connectToWiFi() {
     if (config.network.wifiMode != WIFIMODE_CLIENT ||
         strlen(config.network.clientSSID) == 0) {
@@ -86,6 +98,8 @@ bool connectToWiFi() {
     }
 
     WiFi.begin(config.network.clientSSID, config.network.clientPassword);
+    // Right after begin(), before the burst of connecting: see WifiTxPower.h.
+    applyWifiTxPower();
 
     unsigned long start = millis();
     unsigned long lastDot = 0;
@@ -124,6 +138,7 @@ void startAPMode() {
                        config.network.apSubnet[2],  config.network.apSubnet[3]);
     WiFi.softAPConfig(apIP, apGW, apSubnet);
     WiFi.softAP(apName.c_str(), config.network.apPassword);
+    applyWifiTxPower();
 
     // Use the locally-configured `apIP` instead of WiFi.softAPIP() for the
     // same reason as the DNS bind below — softAPIP() can transiently return

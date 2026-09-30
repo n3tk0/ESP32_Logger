@@ -121,6 +121,27 @@
         </div>
       </div>
 
+      <!-- Radio: the transmit power, both modes (src/utils/WifiTxPower.h) -->
+      <div class="card">
+        <div class="card-head"><div class="card-title"><span data-icon="wifi"></span> <span data-i18n="settingsPages.netRadio">Radio</span></div></div>
+        <div class="card-body">
+          <div class="field"><label class="field-label" for="net-txPower" data-i18n="settingsPages.netTxPower">Transmit power</label>
+            <select name="txPower" id="net-txPower" class="input">
+              <option value="0" data-i18n="settingsPages.netTxDefault">Board default</option>
+              <option value="78">19.5 dBm</option>
+              <option value="68">17 dBm</option>
+              <option value="60">15 dBm</option>
+              <option value="52">13 dBm</option>
+              <option value="44">11 dBm</option>
+              <option value="34">8.5 dBm</option>
+              <option value="28">7 dBm</option>
+              <option value="20">5 dBm</option>
+            </select>
+            <div class="hint" data-i18n="settingsPages.netTxHint">Board default: 8.5 dBm on the LOLIN C3 Pico and C3 Super Mini, which brown out at full power; 19.5 dBm on the other boards. Lower means less range and less current.</div>
+          </div>
+        </div>
+      </div>
+
       <button type="submit" class="btn primary"><span data-icon="save"></span> <span data-i18n="settingsPages.netSaveRestart">Save &amp; Restart</span></button>
     </form>
   </section>

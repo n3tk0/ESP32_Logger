@@ -630,6 +630,7 @@ function netInit() {
       setVal("net-gw", net.gateway || "0.0.0.0");
       setVal("net-sn", net.subnet || "0.0.0.0");
       setVal("net-dns", net.dns || "0.0.0.0");
+      setVal("net-txPower", net.txPower || 0);
       netToggleStatic();
     });
 }

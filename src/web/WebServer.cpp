@@ -43,6 +43,7 @@
 #include "../tasks/TaskManager.h"      // applyLoggerConfig after a data log save
 #include "../utils/MutexGuard.h"
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
+#include "../utils/WifiTxPower.h"       // wifiTxPowerValid
 #include "../utils/PosixTz.h"           // dstRuleClamp, tzOffsetAt
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -1097,6 +1098,13 @@ const char* applyNetworkForm(NetworkConfig& net, NetFormGet get, void* ctx) {
     if ((v = get(ctx, "clientPassword")) && strcmp(v, "***") != 0)
         SAFE_STRNCPY(net.clientPassword, v, sizeof(net.clientPassword));
     net.useStaticIP = get(ctx, "useStaticIP") != nullptr;
+    if ((v = get(ctx, "txPower"))) {
+        char* end = nullptr;
+        const long q = strtol(v, &end, 10);
+        if (end == v || *end || !wifiTxPowerValid((int)q))
+            return "txPower must be 0 (board default) or one of the listed powers";
+        net.txPower = (uint8_t)q;
+    }
 
     auto parseIP = [&](const char* param, uint8_t* dst) {
         ipv4Parse(get(ctx, param), dst);   // leaves dst alone unless valid

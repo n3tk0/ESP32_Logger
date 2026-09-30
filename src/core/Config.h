@@ -401,7 +401,10 @@ struct NetworkConfig {
     uint8_t apSubnet[4];
     uint8_t dstRule;      // DST_RULE_* (utils/PosixTz.h); 0 = EU, which is what a
                           // config from before this byte (reserved, zero) reads as
-    uint8_t reserved[16]; // Reserved for alignment
+    uint8_t txPower;      // Wi-Fi transmit power, quarter-dBm (wifi_power_t);
+                          // 0 = the board's default (utils/WifiTxPower.h), which
+                          // a config from before this byte reads as
+    uint8_t reserved[15]; // Reserved for alignment
 };
 
 // KindleConfig — how GET /kindle is drawn (v14).

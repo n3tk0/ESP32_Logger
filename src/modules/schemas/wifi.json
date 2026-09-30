@@ -6,5 +6,6 @@
   {"id": "staticIP", "type": "ipv4", "label": "IP", "group": "Static IP", "showIf": "useStaticIP"},
   {"id": "gateway", "type": "ipv4", "label": "Gateway", "group": "Static IP", "showIf": "useStaticIP"},
   {"id": "subnet", "type": "ipv4", "label": "Subnet", "group": "Static IP", "showIf": "useStaticIP"},
-  {"id": "dns", "type": "ipv4", "label": "DNS", "group": "Static IP", "showIf": "useStaticIP"}
+  {"id": "dns", "type": "ipv4", "label": "DNS", "group": "Static IP", "showIf": "useStaticIP"},
+  {"id": "txPower", "type": "enum", "label": "Transmit power", "group": "Radio", "help": "Board default: 8.5 dBm on the LOLIN C3 Pico and C3 Super Mini, which brown out at full power; 19.5 dBm elsewhere. Lower = less range and less current. Applies after a restart.", "options": [{"v": 0, "l": "Board default"}, {"v": 78, "l": "19.5 dBm"}, {"v": 68, "l": "17 dBm"}, {"v": 60, "l": "15 dBm"}, {"v": 52, "l": "13 dBm"}, {"v": 44, "l": "11 dBm"}, {"v": 34, "l": "8.5 dBm"}, {"v": 28, "l": "7 dBm"}, {"v": 20, "l": "5 dBm"}]}
 ]}

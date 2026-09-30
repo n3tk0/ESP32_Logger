@@ -8,6 +8,8 @@
 #include "../modules/TimeModule.h"
 #include "../storage/Datalog.h"          // the data log's sensor columns
 #include "../utils/Utils.h"              // sanitizePath
+#include "../utils/JsonEnum.h"           // jsonEnumInt
+#include "../utils/WifiTxPower.h"        // wifiTxPowerValid
 
 #include <string.h>
 
@@ -179,6 +181,9 @@ void settingsFromJson(JsonObjectConst doc) {
         const int mode = net["wifiMode"] | -1;
         if (mode == WIFIMODE_AP || mode == WIFIMODE_CLIENT) config.network.wifiMode = (WiFiModeType)mode;
         if (net["useStaticIP"].is<bool>()) config.network.useStaticIP = net["useStaticIP"];
+        // A power this firmware does not offer keeps what was stored.
+        const int tx = jsonEnumInt(net["txPower"], -1);
+        if (wifiTxPowerValid(tx)) config.network.txPower = (uint8_t)tx;
     }
 
     JsonObjectConst hw = doc["hardware"];
