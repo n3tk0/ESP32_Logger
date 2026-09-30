@@ -16,10 +16,10 @@
 // ============================================================================
 // R28 / AUDIT 31.11: Config.h is the canonical source. ESP_Logger.ino's banner
 // comment and www/changelog.txt's top entry must reference this same triple.
-// Bumped 4.2.0 -> 4.2.1 to match the latest changelog entry (safe-mode + OTA
-// rollback hardening), which previously diverged from Config.h.
-#define VERSION_MAJOR 4
-#define VERSION_MINOR 2
+// 5.0.1: the 5.0 line (Kindle display, remote nodes, firmware optimisations)
+// plus the sidebar RAM readout; www/changelog.txt covers 4.x -> 5.0.1.
+#define VERSION_MAJOR 5
+#define VERSION_MINOR 0
 #define VERSION_PATCH 1
 
 // Inline so every translation unit that includes Config.h gets the same

@@ -35,26 +35,39 @@ function fetchWithTimeout(url, opts, timeoutMs) {
 }
 window.fetchWithTimeout = fetchWithTimeout;
 
-// ── Connection state chip (sidebar footer) ─────────────────────────────────
-// Previously the "Online" chip was static HTML that never changed. Every
-// successful/failed round-trip through the shared fetch helpers now reports
-// here; the SSE channel in pages.js does too.
+// ── RAM / connection chip (sidebar footer) ─────────────────────────────────
+// The chip shows free / total heap (from /api/status and the live channel,
+// via updateFooter). Its colour still tracks the connection: every
+// successful/failed round-trip through the shared fetch helpers reports
+// here, and so does the SSE channel in pages.js. While the device is
+// unreachable the label says "Offline" instead of a stale heap figure; with
+// no heap reading yet it falls back to "Online".
 var _connOnline = null;
+var _ramText = "";
+function _fmtRam(free, total) {
+  if (total < 1048576) {
+    return Math.round(free / 1024) + "/" + Math.round(total / 1024) + " KB";
+  }
+  return fmtBytes(free) + " / " + fmtBytes(total);
+}
+function _connLabelSync() {
+  var label = document.getElementById("sstat-conn-label");
+  if (!label || (_connOnline === null && !_ramText)) return;
+  var t = window.I18n ? function (k) { return I18n.t(k); }
+                      : function (k) { return k === "chrome.online" ? "Online" : "Offline"; };
+  if (_connOnline === false) label.textContent = t("chrome.offline");
+  else label.textContent = _ramText || t("chrome.online");
+}
 function setConnState(ok) {
   ok = !!ok;
   if (_connOnline === ok) return;
   _connOnline = ok;
   var chip = document.getElementById("sstat-conn");
-  var label = document.getElementById("sstat-conn-label");
   if (chip) {
     chip.classList.toggle("ok", ok);
     chip.classList.toggle("err", !ok);
   }
-  if (label) {
-    label.textContent = window.I18n
-      ? I18n.t(ok ? "chrome.online" : "chrome.offline")
-      : (ok ? "Online" : "Offline");
-  }
+  _connLabelSync();
 }
 window.setConnState = setConnState;
 
@@ -471,12 +484,16 @@ function updateFooter(d) {
   }
   if (d.heap !== undefined && d.heapTotal !== undefined) {
     setEl("footer-heap", fmtBytes(d.heap) + " / " + fmtBytes(d.heapTotal));
-    // sstat-storage sits under a hard-drive icon — show FS usage, not heap
-    if (d.fsUsed !== undefined && d.fsTotal !== undefined) {
-      setEl("sstat-storage", fmtBytes(d.fsUsed) + " / " + fmtBytes(d.fsTotal));
-    } else {
-      setEl("sstat-storage", fmtBytes(d.heap) + " free");
+    if (d.heapTotal > 0) {
+      _ramText = _fmtRam(d.heap, d.heapTotal);
+      _connLabelSync();
     }
+  }
+  // sstat-storage sits under a hard-drive icon: FS usage only. The live
+  // channel carries no fs fields, so it leaves the /api/status value alone
+  // (heap has its own chip now).
+  if (d.fsUsed !== undefined && d.fsTotal !== undefined) {
+    setEl("sstat-storage", fmtBytes(d.fsUsed) + " / " + fmtBytes(d.fsTotal));
   }
   if (d.network !== undefined && d.network !== null) {
     setEl("footer-net", d.network);
@@ -704,10 +721,7 @@ document.addEventListener("i18n:change", function () {
   _themeUpdateToggleIcon(themeMode);
   _densitySyncBtn(document.documentElement.getAttribute("data-density") || "comfortable");
   _sidebarRailSyncBtn(document.documentElement.classList.contains("sidebar-rail"));
-  if (_connOnline !== null) {
-    var label = document.getElementById("sstat-conn-label");
-    if (label) label.textContent = I18n.t(_connOnline ? "chrome.online" : "chrome.offline");
-  }
+  _connLabelSync();
 
   // Page bodies built as JS strings (rather than data-i18n markup) keep the
   // language they were rendered in, so they have to be redrawn.

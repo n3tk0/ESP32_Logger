@@ -1,53 +1,77 @@
+## v5.0.1 - Release housekeeping
+- [Changed] Firmware version raised to 5.0.1; the version shown in the web UI, /api/status, /api/diag and the OTA page now reads v5.0.1.
+- [Changed] Sidebar: the "Online" chip now shows free / total RAM (heap), refreshed from /api/status and the live channel. The chip keeps its colour as the connection indicator and reads "Offline" while the device cannot be reached.
+- [Changed] Change log rewritten: the 4.2 - 4.7 intermediate releases are now documented, and 4.0 - 4.1 are summarised under v4.0.0.
+
+## v5.0.0 - Kindle Display, remote nodes and firmware optimisation
+- [Added] Kindle e-ink display: the Collector serves a dashboard to a jailbroken Kindle (KUAL extension), rendered either as a browser page or natively on the panel through FBInk with the same design.
+- [Added] Kindle layout engine: a configurable list of readings in nine named places, a three-wide grid, per-place ink, centred headlines and single-item rows, readings sized as large as they fit, and a one-line indoor row with an optional two-column indoor block.
+- [Added] Kindle display options: rotation 0/90/180/270 with a dedicated landscape page (panel and browser rotate independently), clock on/off, EN/BG language, week strip styles with the weekly forecast, rule settings and a text-size setting.
+- [Added] Kindle operation: refresh tiers that clear ghosting, a tap menu and a screen of its own, power-button wake, radio and CPU sleep between ticks, reader clock sync from the Collector every N days, and script updates for the reader pushed through the Collector.
+- [Added] Kindle content: a 24-hour chart that survives a reboot and draws from the first minutes, drawn tendency arrows, battery warnings for running-down nodes, and per-font sizing measured from each TTF's own proportions.
+- [Added] Remote nodes: a common configuration contract for WiFi (ESP8266) and ESP-NOW (XIAO ESP32-C3) nodes, with runtime-configurable sensors on a shared sensor layer and a setup page styled like the Collector's.
+- [Added] Node management from the Collector: edit every node's settings on the Nodes page, move nodes together with a network change, and keep readings the Collector could not accept until it can.
+- [Added] Node OTA: the Collector stores node firmware images and offers them to WiFi and ESP-NOW nodes, with trial boot and automatic rollback on the node.
+- [Added] Sensor corrections: dedicated offset and multiplier fields per metric, applied to node data as well; BME280/BMP280 now use forced mode with one conversion per read.
+- [Added] Automatic summer/winter time (EU, US, off or manual), on-demand weather forecast refresh from three places, and Collector pin fields typed as the board labels them, with header drawing and warnings.
+- [Added] Settings UI redesign: a status-first settings hub, a unified Nodes page, panel-led e-ink settings, and full English/Bulgarian translation of the web UI.
+- [Added] Deploy tools: remote update of the Collector and its nodes over WiFi, a STOP button, and a Build OTA Firmware workflow with dropdowns and checkboxes.
+- [Changed] Data log: sensor rows, hybrid fills and legacy runs are written to one data_log file by a single writer; the Sensors chart reads its history from it, and each column documents how it combines its interval.
+- [Optimized] Firmware size: about 38 KB freed on the C3 app slot, ArduinoJson compiled once per direction, and duplicated code folded (-30 KB on the all-features C3 image), so every feature fits on the ESP32-C3.
+- [Optimized] Web UI stability: /api/data and /api/latest no longer copy the whole ring buffer, the static file handler is registered after every route, the first forecast fetch waits 90 s after boot, and a Wi-Fi transmit power setting (8.5 dBm by default on the C3 Pico and Super Mini) prevents brownouts on page load.
+- [Fixed] Whole-tree code review: 49 findings across 14 areas (locking, allocation failure paths, SSE client list, AP lock-out, DS1302 bus), 44 fixed; Modules page forms save enums as numbers and keep the WiFi password.
+
+## v4.7.0 - First remote nodes, Kindle dashboard preview and flash savings
+- [Added] Remote sensor nodes over WiFi and ESP-NOW battery nodes (protocol, Collector ingest and node firmware); a remote reading keeps the time it was measured, and each node's clock drift is measured.
+- [Added] First e-ink Kindle dashboard with manual and data-driven repaints, the weather forecast client, and an ESP-NOW node settings page.
+- [Added] LOLIN C3 Pico target; the deploy toolchain reads platformio.ini, flashes nodes, generates their shared key and is published as a downloadable artifact.
+- [Added] Self-heating humidity correction for the BME280 and a Remote Node option in the hardware sensor wizard.
+- [Optimized] Flash: failsafe page stored gzipped, SD support optional, exception tables dropped (-138 KB of app flash in total); 53 MB of committed build artifacts removed.
+
+## v4.6.0 - Security, sensor boards and new hardware
+- [Added] SPS30 health reporting, dew-point correction and an enclosure heater module.
+- [Added] Second I2C bus so devices with the same address can coexist, a PSRAM-backed ring buffer with full 16 MB flash on the S3, and the Seeed XIAO ESP32-S3 as a build target.
+- [Fixed] fsMutex deadlocks, an HTTP exporter heap overflow, a config wipe and several sensor reading bugs.
+- [Changed] CSRF and auth guards on every mutating route, first-run gating and file list path sanitising; Web UI WCAG contrast, mobile layout, truthful indicators and async saves.
+- [Added] Complete, CI-verified API reference and the fsMutex thread-safety model in the documentation.
+
+## v4.5.0 - Module manager and new sensors
+- [Added] Modules page rebuilt into a module manager with per-module forms, OTA settings and a USB CDC module.
+- [Added] Sensirion SPS30 particulate-matter sensor and BME68x IAQ air-quality index (plus the BME680 plugin id).
+- [Added] Dynamic sensor assignment with per-metric sensor cards, offline charts with vendored uPlot, and an alert rule editor.
+- [Added] Periodic-sensor sleep handling and restricted-pin warnings with per-sensor override.
+- [Fixed] CSRF 403 errors on restart, import, OTA, file upload and time/maintenance actions; timezone offsets, 0-byte downloads, BME280 calibration parsing, WiFi scan and NTP self-heal.
+
+## v4.4.0 - Web UI consolidation and deploy tool
+- [Changed] Web UI and hardware settings consolidated; the flow-meter settings page retired and its options redistributed.
+- [Added] Editable card decks, masonry layout and mobile polish in the dashboard.
+- [Added] Graphical deployment tool with USB CDC management, built as a standalone executable in CI.
+- [Added] Host unit tests with sanitizers and cppcheck in CI.
+- [Fixed] First-run wizard now starts its AP instead of deep-sleeping on a fresh device; pipeline tasks no longer self-delete at boot and the watchdog reboot fires; saveConfig no longer self-deadlocks.
+- [Optimized] Web UI bugs fixed, dead code removed, about 12% smaller.
+
+## v4.3.0 - Firmware audit remediation
+- [Changed] Atomic file writes, MutexGuard everywhere, requireMutatingAuth on all 26 mutating endpoints, ISR-safe pulse pins and a frontend HTML-escape sweep.
+- [Added] Board profiles with a first-run wizard, boot and init hardening (FS safety, TaskManager, GPIO snapshot), and an IModule lifecycle with a per-module restart endpoint.
+- [Added] Extended diagnostics in /api/diag, exporter TLS and auth hardening, and backend numeric validation clamps.
+- [Fixed] Critical API patches, seven cross-task race conditions, sensor math underflow, auth defaults and RTC write protection (audit rounds R10 - R28).
+- [Changed] Documentation rebuilt from the audit baseline.
+
 ## v4.2.1 - Safe-mode + OTA rollback hardening
-- [Breaking] RainSensor default pin moved from GPIO 9 → GPIO 10. GPIO 9
-  is an ESP32-C3 bootstrap pin; a tipped bucket at power-on triggers SPI
-  download mode (soft-brick). Existing deployments using the default
-  pin MUST rewire to GPIO 10 OR explicitly set `"pin": 9` in
-  platform_config.json (not recommended).
-- [Fixed] Restart circuit breaker: 3 consecutive watchdog/panic resets
-  without a 60-s healthy uptime now boots into AP-only safe mode for
-  OTA recovery instead of looping until flash wears out (AUDIT FC.4).
-- [Fixed] OTA auto-confirmation removed from restart / deep-sleep paths.
-  A pending-verify image that crashes within 90 s now rolls back instead
-  of being silently confirmed (AUDIT FC.1). Legacy-mode users may need
-  to /api/ota/confirm manually if the device sleeps before 90 s uptime.
+- [Breaking] RainSensor default pin moved from GPIO 9 to GPIO 10. GPIO 9 is an ESP32-C3 bootstrap pin; a tipped bucket at power-on triggers download mode. Existing deployments on the default pin must rewire to GPIO 10 or explicitly set "pin": 9 in platform_config.json (not recommended).
+- [Fixed] Restart circuit breaker: 3 consecutive watchdog/panic resets without 60 s of healthy uptime now boot into AP-only safe mode for OTA recovery instead of looping.
+- [Fixed] OTA auto-confirmation removed from restart and deep-sleep paths. A pending-verify image that crashes within 90 s now rolls back instead of being silently confirmed.
 
 ## v4.2.0 - Production audit hardening
-- [Fixed] Implemented crash-safe configuration writes, division-by-zero guards, and resolved numerous memory and bounds-checking vulnerabilities.
-- [Optimized] Improved memory and file efficiency using tail-seek for endpoints, safe string replacements, and better variable localization.
-- [Changed] Updated core APIs to support concurrent uploads, deferred restarts, and preferred secure HTTP methods.
-- [Added] Added IP address validation and synchronized schema defaults.
+- [Fixed] Crash-safe configuration writes, division-by-zero guards, and numerous memory and bounds-checking fixes.
+- [Optimized] Tail-seek for log endpoints, safe string replacements and better variable localisation.
+- [Changed] Core APIs support concurrent uploads, deferred restarts and preferred secure HTTP methods.
+- [Added] IP address validation and synchronised schema defaults.
 
-## v4.1.5 - SPA refactor & recovery hardening
-- [Changed] Migrated to an external SPA Web UI with parallel data loading.
-- [Added] Failsafe recovery flow with an embedded setup page and OTA flash safety checks.
-- [Fixed] Corrected Dashboard/File UI logic, CSV export filenames, and Chart.js fallback loading.
-- [Optimized] Streamlined API endpoints by centralizing settings exports.
-
-## v4.1.4 - Post-correction improvements
-- [Added] Button hold tracking to skip post-correction on intentional long presses.
-- [Fixed] Corrected config migration for struct size changes and patch version formatting.
-- [Optimized] Streamlined Post-Correction UI and updated descriptions.
-
-## v4.1.3 - Wake-up detection accuracy & UI consistency
-- [Added] Volume-based post-correction system with threshold settings and dedicated logging.
-- [Fixed] Button misidentification resolved via early (< 1ms) GPIO boot snapshots.
-- [Optimized] Standardized UI components (save buttons, warnings, form hints).
-
-## v4.1.2 - Wake-up fix
-- [Fixed] Reverted to reliable debounce-based button detection for ESP32-C3 compatibility.
-- [Optimized] Extracted CSS to an external file, freeing ~30KB of flash storage.
-
-## v4.1.1 - UI & optimization
-- [Added] Folder selection for Move/Rename features and added settings hints.
-- [Optimized] Unified popups and reduced overall code footprint.
-
-## v4.1.0 - Reliability improvements
-- [Added] Configurable button debounce and edge detection handling.
-- [Fixed] Web handler interference blocked during active measurements.
-- [Optimized] Non-blocking WiFi connects and introduced auto-sleep optimizations.
-
-## v4.0.0 - Major release
-- [Added] Dashboard data filters, CSV export, configuration Import/Export components, and test mode visual indicators.
-- [Changed] System resources seamlessly migrated to LittleFS.
-- [Optimized] Removed multi-language support to conserve flash memory space.
+## v4.0.0 - Major release (4.0 - 4.1.5)
+- [Added] Dashboard data filters, CSV export, configuration import/export and test mode indicators.
+- [Changed] System resources moved to LittleFS; the Web UI became an external single-page app with parallel data loading.
+- [Added] Failsafe recovery page embedded in firmware, with OTA flash safety checks.
+- [Added] Volume-based post-correction with thresholds, dedicated logging and button-hold detection.
+- [Fixed] Reliable wake-up source detection on the ESP32-C3 (early GPIO boot snapshot, configurable debounce and edge handling); web handlers no longer interfere with active measurements.
+- [Optimized] Non-blocking WiFi connect, auto-sleep, CSS moved to an external file (about 30 KB of flash saved), unified popups, and multi-language support removed to save flash.
