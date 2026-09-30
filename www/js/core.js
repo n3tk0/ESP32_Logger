@@ -38,7 +38,7 @@ window.fetchWithTimeout = fetchWithTimeout;
 // ── Sidebar stats: connection tint + RAM chip ──────────────────────────────
 // The connection state tints the whole stats group (#sstat-group): every
 // successful/failed round-trip through the shared fetch helpers reports
-// here, and so does the SSE channel in pages.js. The RAM chip shows free /
+// here, and so does the SSE channel in pages.js. The RAM chip shows used /
 // total heap (from /api/status and the live channel, via updateFooter);
 // while the device is unreachable it says "Offline" instead of a stale heap
 // figure, and with no heap reading yet it falls back to "Online". Each chip
@@ -525,7 +525,7 @@ function updateFooter(d) {
   if (d.heap !== undefined && d.heapTotal !== undefined) {
     setEl("footer-heap", fmtBytes(d.heap) + " / " + fmtBytes(d.heapTotal));
     if (d.heapTotal > 0) {
-      _ramText = _fmtPair(d.heap, d.heapTotal);
+      _ramText = _fmtPair(d.heapTotal - d.heap, d.heapTotal);  // used / total, like storage
       _connLabelSync();
       _sstatLevel("sstat-conn", _usedLevel(d.heapTotal - d.heap, d.heapTotal));
       _sstatTitle("sstat-conn", "RAM " + _ramText);
