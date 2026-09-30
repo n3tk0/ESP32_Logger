@@ -954,13 +954,16 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .sidebar-rail .logo-meta { display:none; }
 .sidebar-rail .nav-item { padding:0; justify-content:center; }
 .sidebar-rail .sidebar-stats { grid-template-columns:1fr; }
-/* Rail: the 52 px sidebar has 6 px padding, so the foot drops its own side
-   padding and the group sits 5 px in on each side, leaving room for its 5 px
-   halo. Chips become centred 30 x 28 icon cells. */
+/* Rail: the status chips take the nav buttons' size and shape (full rail
+   width, 44 px tall, 6 px radius, 15 px icon). The foot drops its own side
+   padding so the chips line up with the nav column; the group's halo shrinks
+   to 4 px so it still fits inside the rail's 6 px padding. */
 .sidebar-rail .sidebar-foot { padding-left:0; padding-right:0; }
-.sidebar-rail .sidebar-stats { margin-left:5px; margin-right:5px; gap:6px; }
-.sidebar-rail .sstat, .sidebar-rail .sidebar-stats .sstat { justify-content:center; padding:0; height:28px; }
-.sidebar-rail .sstat [data-lucide], .sidebar-rail .sstat svg { width:14px; height:14px; }
+.sidebar-rail .sidebar-stats { gap:4px; }
+.sidebar-rail .sidebar-stats.ok, .sidebar-rail .sidebar-stats.err {
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--grp) 7%, var(--panel)), 0 0 0 4px color-mix(in srgb, var(--grp) 28%, transparent); }
+.sidebar-rail .sstat, .sidebar-rail .sidebar-stats .sstat { justify-content:center; padding:0; height:44px; border-radius:6px; }
+.sidebar-rail .sstat [data-lucide], .sidebar-rail .sstat svg { width:15px; height:15px; }
 .sidebar-rail .kbd { display:none; }
 
 /* ══════════════════════════════════════════════
