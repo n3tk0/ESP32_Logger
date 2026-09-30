@@ -1691,15 +1691,15 @@ class DeployManager:
                         cancelled=lambda: self._cancelled)
 
     def _progress(self, label: str) -> Callable[[int, int], None]:
-        """Log an upload in quarters. Whole lines only: the GUI's log is a
+        """Log an upload in 5 % steps. Whole lines only: the GUI's log is a
         text widget, where a carriage return overwrites nothing."""
         shown = {"q": 0}
 
         def cb(sent: int, total: int) -> None:
-            q = sent * 4 // max(total, 1)
+            q = sent * 20 // max(total, 1)
             if q > shown["q"]:
                 shown["q"] = q
-                self._log(f"{label} {q * 25:>3}%  ({sent:,} / {total:,} B)")
+                self._log(f"{label} {q * 5:>3}%  ({sent:,} / {total:,} B)")
         return cb
 
     def _read_image(self, chosen: str, built: Path, what: str) -> Optional[tuple[Path, bytes]]:
