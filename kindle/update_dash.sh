@@ -327,11 +327,11 @@ payload_key_ok() {
         # allowed here. They reach one drawn string and nothing else.
         CACHED_AT|CACHED_ON) return 0 ;;
         SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
+        # The face chosen on the collector, KFACE_* 0..5 — see face_files().
+        FONT_FACE) return 0 ;;
         # The week strip's look and, when it holds the forecast, its seven
         # days; and the dividing lines' thickness, pens and style. The pens
         # are checked where they are used — see rule_pen().
-        # The face chosen on the collector, KFACE_* 0..5 — see face_files().
-        FONT_FACE) return 0 ;;
         WK_STYLE|WK_FC|WF[0-9]_*|RULE_PX|RULE_INK|RULE_SOFT|RULE_STYLE) return 0 ;;
         # The chart's axis: the five values, the five hours, their widths, and
         # where the image's plot area is inside the image.
@@ -1836,16 +1836,18 @@ pick_font() {
     echo ""
 }
 
-# The first .ttf/.otf in fonts/ then the system's whose name has $1 in it:
+# The first .ttf/.otf in fonts/ then the system's whose name has $1 in it,
+# as spelt or in lower case:
 # the upright face for $2=reg, skipping bold, italic and the heavier cuts, or
 # the bold one for $2=bold. For the faces whose file names this script does
 # not know for certain — Palatino and Baskerville differ between firmwares —
 # and as a second chance for the ones it does.
 pick_family() {
     # $1=family as it appears in the file name, $2=reg|bold
-    local dir f base
+    local dir f base lc
+    lc=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
     for dir in "$USR_FONTS" "$SYS_FONTS"; do
-        for f in "$dir"/*"$1"*; do
+        for f in "$dir"/*"$1"* "$dir"/*"$lc"*; do
             [ -f "$f" ] || continue
             base=${f##*/}
             case "$base" in *.ttf|*.TTF|*.otf|*.OTF) ;; *) continue ;; esac
@@ -1884,6 +1886,9 @@ face_files() {
     esac
     [ -n "$FACE_REG" ]  || FACE_REG=$(pick_family "$fam" reg)
     [ -n "$FACE_BOLD" ] || FACE_BOLD=$(pick_family "$fam" bold)
+    # A bold with no upright of its own would sit beside Bookerly's regular:
+    # two faces on one line, which is what falling back whole avoids.
+    [ -n "$FACE_REG" ] || FACE_BOLD=""
     return 0
 }
 

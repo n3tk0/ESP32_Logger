@@ -417,6 +417,12 @@ font_setup
   [ "$FONT_REG" = "$FD/Bookerly-Regular.ttf" ] && [ "$FONT_BOLD" = "$FD/Bookerly-Bold.ttf" ] || exit 4
   FONT_FACE=4 font_setup 2>/dev/null
   [ "$FONT_REG" = "$SD/Helvetica_LT_65_Medium.ttf" ] && [ "$FONT_BOLD" = "$FONT_REG" ] || exit 5
+  : > "$SD/Futura_LT_Bold.ttf"; rm -f "$SD/Futura_LT_Book.ttf"
+  FONT_FACE=5 font_setup 2>/dev/null
+  [ "$FONT_REG" = "$FD/Bookerly-Regular.ttf" ] && [ "$FONT_BOLD" = "$FD/Bookerly-Bold.ttf" ] || exit 7
+  : > "$SD/baskerville-regular.ttf"
+  FONT_FACE=3 font_setup 2>/dev/null
+  [ "$FONT_REG" = "$SD/baskerville-regular.ttf" ] && [ "$FONT_BOLD" = "$FONT_REG" ] || exit 8
   unset FONT_FACE; font_setup 2>/dev/null
   [ "$FONT_REG" = "$FD/Bookerly-Regular.ttf" ] && [ "$FONT_FACE_SET" = 0 ] || exit 6
   exit 0 )
