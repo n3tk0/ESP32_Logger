@@ -253,6 +253,21 @@ jobs:
           sleep 2
           MOCK_PORT=8765 python3 tests/web/drive_nodes_page.py
 
+      - name: Drive the pages as built, from one js/app.js
+        # tools/build_web.py concatenates index.html's deferred scripts into
+        # js/app.js, since a C3 ran out of heap serving them six at a time.
+        # The drivers above load www/ as written; these load the bundle the
+        # device gets, where a file that breaks in strict mode or in another
+        # file's company is caught.
+        run: |
+          python3 tools/build_web.py --filter plain --dst /tmp/www-built
+          test -f /tmp/www-built/js/app.js
+          MOCK_WWW=/tmp/www-built python3 tests/web/mock_device.py 8792 &
+          sleep 2
+          MOCK_PORT=8792 python3 tests/web/drive_nodes_page.py
+          MOCK_PORT=8792 python3 tests/web/drive_kindle_page.py
+          MOCK_PORT=8792 python3 tests/web/drive_sensors_page.py
+
       - name: Drive the node's own setup page, both transports
         # node_portal/ is the page a person uses on a phone joined to a
         # node's AP (docs/NODE_CONFIG.md §6). The mock serves the bytes of the

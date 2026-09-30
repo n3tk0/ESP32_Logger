@@ -19,7 +19,10 @@ like /export_settings) 404 by design; the driver ignores those.
 import gzip, json, threading, http.server, socketserver, urllib.parse, os, sys, time
 
 import pathlib
-ROOT = str(pathlib.Path(__file__).resolve().parent.parent.parent / "www")
+# MOCK_WWW serves a built tree instead (python3 tools/build_web.py --filter
+# plain --dst …), to drive the pages as the device gets them: one js/app.js.
+ROOT = os.environ.get("MOCK_WWW") or str(
+    pathlib.Path(__file__).resolve().parent.parent.parent / "www")
 
 STATUS = {
     "pairing": False,

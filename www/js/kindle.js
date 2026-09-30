@@ -63,6 +63,8 @@
 //   aiming at its edge. The three rows that are not regions at all (the
 //   tendency arrow, captions, units) get no box, because there is no one
 //   place on the panel to point at.
+"use strict";
+
 var KD_ZONES = [
   { id:"hero", name:"Headline",
     where:"Top left. The largest number on the page.",
