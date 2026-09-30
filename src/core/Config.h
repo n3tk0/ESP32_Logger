@@ -364,7 +364,10 @@ struct HardwareConfig {
     bool debugMode;
     uint8_t defaultStorageView;
     uint16_t debounceMs;
-    uint8_t reserved[5];
+    uint8_t activeCpuMHz; // CPU MHz while the web server is up (utils/CpuFreq.h);
+                          // 0 = 160, which a config from before this byte
+                          // (reserved, zero) reads as
+    uint8_t reserved[4];
 };
 
 // LoggerConfig — wide-CSV pipeline + sensor logging knobs (v13).

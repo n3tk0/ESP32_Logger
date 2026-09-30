@@ -10,6 +10,7 @@
 #include "../utils/Utils.h"              // sanitizePath
 #include "../utils/JsonEnum.h"           // jsonEnumInt
 #include "../utils/WifiTxPower.h"        // wifiTxPowerValid
+#include "../utils/CpuFreq.h"            // cpuMhzValid, CPU_MAX_MHZ
 
 #include <string.h>
 
@@ -131,6 +132,8 @@ void settingsToJson(JsonObject doc, bool revealSecrets) {
     hw["storageType"]        = (int)config.hardware.storageType;
     hw["wakeupMode"]         = (int)config.hardware.wakeupMode;
     hw["cpuFreqMHz"]         = config.hardware.cpuFreqMHz > 0 ? config.hardware.cpuFreqMHz : 80;
+    hw["activeCpuMHz"]       = config.hardware.activeCpuMHz;   // 0 = default (160)
+    hw["cpuMaxMHz"]          = CPU_MAX_MHZ;     // what the form may offer; not imported
     hw["defaultStorageView"] = config.hardware.defaultStorageView;
     hw["debounceMs"]         = config.hardware.debounceMs > 0  ? config.hardware.debounceMs : 100;
     hw["pinWifiTrigger"]     = config.hardware.pinWifiTrigger;
@@ -194,7 +197,13 @@ void settingsFromJson(JsonObjectConst doc) {
         const int wk = hw["wakeupMode"]  | -1;
         if (st == STORAGE_LITTLEFS || st == STORAGE_SD_CARD)                config.hardware.storageType = (StorageType)st;
         if (wk == WAKEUP_GPIO_ACTIVE_HIGH || wk == WAKEUP_GPIO_ACTIVE_LOW)  config.hardware.wakeupMode  = (WakeupMode)wk;
-        if (hw["cpuFreqMHz"].is<int>())         config.hardware.cpuFreqMHz         = hw["cpuFreqMHz"];
+        if (hw["cpuFreqMHz"].is<int>() && cpuMhzValid(hw["cpuFreqMHz"].as<int>()))
+            config.hardware.cpuFreqMHz = hw["cpuFreqMHz"];
+        // 240 from an S3 backup imported on a C3 keeps what was stored.
+        if (hw["activeCpuMHz"].is<int>()) {
+            const int v = hw["activeCpuMHz"].as<int>();
+            if (v == 0 || cpuMhzValid(v)) config.hardware.activeCpuMHz = (uint8_t)v;
+        }
         if (hw["defaultStorageView"].is<int>()) config.hardware.defaultStorageView = hw["defaultStorageView"];
         if (hw["debounceMs"].is<int>()) {
             const int v = hw["debounceMs"].as<int>();
