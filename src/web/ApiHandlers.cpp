@@ -1168,6 +1168,7 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         JsonObject net = doc["network"].to<JsonObject>();
         net["ip"] = wifiConnectedAsClient ? WiFi.localIP().toString()
                                           : WiFi.softAPIP().toString();
+        net["txPower"] = (int)WiFi.getTxPower();   // quarter-dBm, as applied
     }
 
     // R19.D — tail of the diagnostic log (last ≤16 lines).
