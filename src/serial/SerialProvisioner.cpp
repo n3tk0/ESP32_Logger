@@ -1,5 +1,6 @@
 #include "SerialProvisioner.h"
 #include <WiFi.h>
+#include "../managers/WiFiManager.h"  // applyWifiTxPower()
 #include "../managers/OtaManager.h"   // tick() during blocking connect wait
 
 SerialProvisioner serialProvisioner;
@@ -142,6 +143,7 @@ void SerialProvisioner::_cmdConnect(const char* ssid, const char* pass) {
     // Switch to STA (keep AP running so we can recover via web if needed).
     WiFi.mode(WIFI_MODE_APSTA);
     WiFi.begin(ssid, (pass && pass[0]) ? pass : nullptr);
+    applyWifiTxPower();   // full power browns out the C3 Pico / Super Mini
 
     // Wait up to 20 s for association.
     // • Call OtaManager::tick() each iteration so the 90-second OTA rollback

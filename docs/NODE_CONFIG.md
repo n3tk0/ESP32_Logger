@@ -277,7 +277,7 @@ bytes after the name's first NUL is refused; a reply with port 0 is refused.
    `POST /api/nodes/handover {"action":"start","ssid":…,"pass":…,"form":{…}}`.
    `form` is optional: every field of the `/save_network` form, keyed by its
    form name (`wifiMode`, `clientSSID`, `clientPassword`, `useStaticIP`,
-   `staticIP`, `gateway`, `subnet`, `dns`, `apSSID`, …), all strings, exactly
+   `staticIP`, `gateway`, `subnet`, `dns`, `txPower`, `apSSID`, …), all strings, exactly
    as that form would post them (an unchecked checkbox is absent); a value of
    any other type is refused with 400. When the
    collector switches (step 4) it applies `form` the way `/save_network`

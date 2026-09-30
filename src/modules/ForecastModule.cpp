@@ -287,8 +287,14 @@ void ForecastModule::tick(uint32_t nowMs) {
     if (_lat == 0.0f && _lon == 0.0f)    return;
     if (WiFi.status() != WL_CONNECTED)   return;
 
-    // Unsigned subtraction handles the millis() wrap. _lastAttempt starts at
-    // 0, so the first tick after boot fetches immediately.
+    // The first fetch waits FIRST_FETCH_DELAY_MS after boot. The TLS
+    // handshake takes ~40 KB of heap, and on a C3 the first minute is when
+    // the web UI is opened too: both at once took min_free_heap to ~5 KB.
+    // A refresh button still fetches at once.
+    if (_lastAttempt == 0 && nowMs < FIRST_FETCH_DELAY_MS &&
+        !_refreshRequested) return;
+
+    // Unsigned subtraction handles the millis() wrap.
     if (_lastAttempt != 0 && (nowMs - _lastAttempt) < _intervalMs &&
         !_refreshRequested) return;
     _lastAttempt = nowMs ? nowMs : 1;

@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include "../utils/Ipv4Parse.h"
 #include "../utils/JsonEnum.h"
+#include "../utils/WifiTxPower.h"
 
 namespace {
 
@@ -36,6 +37,11 @@ bool WiFiModule::load(JsonObjectConst cfg) {
     const char* pw = cfg["clientPassword"] | (const char*)nullptr;
     if (pw && pw[0]) strlcpy(n.clientPassword, pw, sizeof(n.clientPassword));
 
+    // Refused like a bad address: the stored power stays.
+    const int tx = jsonEnumInt(cfg["txPower"], (int)n.txPower);
+    if (wifiTxPowerValid(tx)) n.txPower = (uint8_t)tx;
+    else ok = false;
+
     ok &= parseIPv4(cfg["staticIP"] | (const char*)nullptr, n.staticIP);
     ok &= parseIPv4(cfg["gateway"]  | (const char*)nullptr, n.gateway);
     ok &= parseIPv4(cfg["subnet"]   | (const char*)nullptr, n.subnet);
@@ -52,6 +58,7 @@ bool WiFiModule::save(JsonObject cfg) const {
     // storing it in two places without encryption is worse than one.  The
     // real password continues to live in config.bin only.
     cfg["useStaticIP"]    = n.useStaticIP;
+    cfg["txPower"]        = n.txPower;
 
     char buf[16];
     formatIPv4(n.staticIP, buf, sizeof(buf)); cfg["staticIP"] = String(buf);

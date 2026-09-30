@@ -43,6 +43,7 @@
 #include "../tasks/TaskManager.h"      // applyLoggerConfig after a data log save
 #include "../utils/MutexGuard.h"
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
+#include "../utils/WifiTxPower.h"       // wifiTxPowerValid
 #include "../utils/PosixTz.h"           // dstRuleClamp, tzOffsetAt
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -1097,6 +1098,13 @@ const char* applyNetworkForm(NetworkConfig& net, NetFormGet get, void* ctx) {
     if ((v = get(ctx, "clientPassword")) && strcmp(v, "***") != 0)
         SAFE_STRNCPY(net.clientPassword, v, sizeof(net.clientPassword));
     net.useStaticIP = get(ctx, "useStaticIP") != nullptr;
+    if ((v = get(ctx, "txPower"))) {
+        char* end = nullptr;
+        const long q = strtol(v, &end, 10);
+        if (end == v || *end || !wifiTxPowerValid((int)q))
+            return "txPower must be 0 (board default) or one of the listed powers";
+        net.txPower = (uint8_t)q;
+    }
 
     auto parseIP = [&](const char* param, uint8_t* dst) {
         ipv4Parse(get(ctx, param), dst);   // leaves dst alone unless valid
@@ -1708,15 +1716,8 @@ void setupWebServer() {
 
     server.on("/", HTTP_GET, h_get_root);
 
-    // Always register the static tree so asset fetches (js/css/images) work
-    // the moment `/www/` is populated.  5-min cache: reuses JS/CSS across
-    // page navigation but still picks up firmware-bundled UI changes within
-    // a few minutes of a release.  AsyncStaticWebHandler already probes a
-    // `.gz` sibling automatically and emits `Content-Encoding: gzip` — no
-    // extra wiring needed for the regular asset tree.
-    server.serveStatic("/", LittleFS, "/www/")
-          .setDefaultFile("index.html")
-          .setCacheControl("public, max-age=300, must-revalidate");
+    // The static tree (/www/) is registered in startWebServer(), after every
+    // route — see there.
 
     if (LittleFS.exists("/www/index.html") || LittleFS.exists("/www/index.html.gz")) {
         DBGLN("Web UI: serving from /www/");
@@ -2905,6 +2906,25 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
 }
 
 void startWebServer() {
+    // The static tree LAST, after every route. The server asks each handler
+    // in the order they were added, and the static one answers "can I?" by
+    // trying to open the file: registered here in setupWebServer(), before
+    // the API, every /api/… request first tried four LittleFS paths
+    // (/www/api/status.gz, /www/api/status, …/index.html.gz, …/index.html),
+    // each a failed open logged on the console, on the AsyncTCP task — about
+    // 60 ms per request, and the Overview makes a dozen of them while the
+    // browser fetches the page. A route never needs a file, and no route has
+    // the name of one in /www/, so nothing else changes.
+    //
+    // Always registered so asset fetches (js/css/images) work the moment
+    // `/www/` is populated. 5-min cache: reuses JS/CSS across page
+    // navigation but still picks up firmware-bundled UI changes within a few
+    // minutes of a release. AsyncStaticWebHandler already probes a `.gz`
+    // sibling and emits `Content-Encoding: gzip`.
+    server.serveStatic("/", LittleFS, "/www/")
+          .setDefaultFile("index.html")
+          .setCacheControl("public, max-age=300, must-revalidate");
+
     server.begin();
     DBGF("Web server started. Free heap: %d\n", ESP.getFreeHeap());
 }

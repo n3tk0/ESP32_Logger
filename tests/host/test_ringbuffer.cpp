@@ -171,6 +171,65 @@ static void test_scan_limits_leave_small_ring_unchanged() {
     CHECK(r.value == 42.0f);
 }
 
+// copyMatching() sees the same window as copyRecent(out, maxScan, fromTs) and
+// keeps what the /api/data filter kept: the time range, sensor and metric.
+static void test_copyMatching_filters_window() {
+    RingBuffer rb;
+    CHECK(rb.begin(32, /*preferPsram=*/false));
+    for (int i = 0; i < 20; i++) {
+        rb.push(mk("a", "t", (float)i, (uint32_t)(100 + i)));
+        rb.push(mk("b", "t", (float)-i, (uint32_t)(100 + i)));
+    }
+    // Window = newest 10 entries: a/b for ts 115..119.
+    size_t n = rb.copyMatching(nullptr, 0, 10, 0, UINT32_MAX, "a", "t", true);
+    CHECK_EQ(n, (size_t)5);
+    SensorReading out[5];
+    CHECK_EQ(rb.copyMatching(out, 5, 10, 0, UINT32_MAX, "a", "t"), (size_t)5);
+    CHECK_EQ((int)out[0].timestamp, 115);   // oldest first
+    CHECK_EQ((int)out[4].timestamp, 119);
+    // Range [116, 118].
+    CHECK_EQ(rb.copyMatching(nullptr, 0, 10, 116, 118, "a", "t", true), (size_t)3);
+    // No filter: every entry in the window.
+    CHECK_EQ(rb.copyMatching(nullptr, 0, 10, 0, UINT32_MAX, nullptr, nullptr, true), (size_t)10);
+    CHECK_EQ(rb.copyMatching(nullptr, 0, 10, 0, UINT32_MAX, "c", nullptr, true), (size_t)0);
+}
+
+// A buffer smaller than the matches gets the newest of them, oldest first.
+static void test_copyMatching_keeps_newest_when_short() {
+    RingBuffer rb;
+    CHECK(rb.begin(16, /*preferPsram=*/false));
+    for (int i = 0; i < 10; i++) rb.push(mk("a", "t", (float)i, (uint32_t)i));
+    SensorReading out[3];
+    CHECK_EQ(rb.copyMatching(out, 3, 16, 0, UINT32_MAX, "a", "t"), (size_t)3);
+    CHECK_EQ((int)out[0].timestamp, 7);
+    CHECK_EQ((int)out[2].timestamp, 9);
+    // Fewer matches than room: packed at the start.
+    SensorReading big[8];
+    CHECK_EQ(rb.copyMatching(big, 8, 4, 0, UINT32_MAX, "a", "t"), (size_t)4);
+    CHECK_EQ((int)big[0].timestamp, 6);
+    CHECK_EQ((int)big[3].timestamp, 9);
+}
+
+static void test_latestPerMetric() {
+    RingBuffer rb;
+    CHECK(rb.begin(16, /*preferPsram=*/false));
+    rb.push(mk("a", "t", 1.0f, 1));
+    rb.push(mk("a", "h", 2.0f, 2));
+    rb.push(mk("b", "t", 3.0f, 3));
+    rb.push(mk("a", "t", 4.0f, 4));        // newer a/t
+    SensorReading out[8];
+    size_t n = rb.latestPerMetric(out, 8, 16);
+    CHECK_EQ(n, (size_t)3);
+    CHECK_EQ((int)out[0].value, 4);          // newest first
+    CHECK_EQ((int)out[1].value, 3);
+    CHECK_EQ((int)out[2].value, 2);
+    // Scan bound: only the newest 2 entries.
+    CHECK_EQ(rb.latestPerMetric(out, 8, 2), (size_t)2);
+    // Output bound.
+    CHECK_EQ(rb.latestPerMetric(out, 1, 16), (size_t)1);
+    CHECK_EQ((int)out[0].value, 4);
+}
+
 int main() {
     RUN(test_push_and_copy_order);
     RUN(test_overflow_keeps_most_recent);
@@ -181,5 +240,8 @@ int main() {
     RUN(test_copyRecent_window_with_fromTs);
     RUN(test_scan_limits_bound_backward_walk);
     RUN(test_scan_limits_leave_small_ring_unchanged);
+    RUN(test_copyMatching_filters_window);
+    RUN(test_copyMatching_keeps_newest_when_short);
+    RUN(test_latestPerMetric);
     return SUMMARY();
 }

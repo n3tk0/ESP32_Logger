@@ -4,6 +4,11 @@
 bool connectToWiFi();
 void startAPMode();
 
+// Sets the radio's transmit power from config.network.txPower (0 = the
+// board's default, utils/WifiTxPower.h). Needs the radio on: call after
+// WiFi.mode(). Returns the power set, in quarter-dBm.
+uint8_t applyWifiTxPower();
+
 /**
  * Правилно спира WiFi преди рестарт:
  *  1. Изчаква активни трансфери
