@@ -272,6 +272,14 @@ def generate_all():
                     wpath = out_dir / f"fc_{code}_{sz}w.bmp"
                     wpath.write_bytes(bmp)
                     print(f"  {wpath.relative_to(project_root)} ({len(bmp)} bytes)")
+                    # And on the filled week strip's darker weekend cells.
+                    dpath = out_dir / f"fc_{code}_{sz}d.bmp"
+                    dimg = Bmp4(str(dpath), bmp)
+                    why = reground(dimg, GROUND["weekend"])
+                    if why:
+                        raise SystemExit(f"{dpath.name}: {why}")
+                    dpath.write_bytes(bytes(dimg.raw))
+                    print(f"  {dpath.relative_to(project_root)} ({len(bmp)} bytes)")
                     img = Bmp4(str(path), bmp)
                     why = reground(img, GROUND["outlook"])
                     if why:

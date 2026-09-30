@@ -621,7 +621,10 @@ tab (`KSHOW_WEEK`).
   `WF<i>_NAME/_ICON/_HI/_LO` with their widths.
 - `week_style`: 0 filled (grey cells, the weekend darker, as before), 1
   outlined, 2 only today marked, 3 minimal (today underlined, its date bold).
-  The forecast marks no cell, since none of its days is today. The panel's unfilled styles use the white-ground icons
+  The forecast marks no cell, since none of its days is today, and shades
+  its weekend as the calendar does (`WF<i>_WE=1`): darker cells in the filled
+  style, with the icons grounded on them (`fc_<code>_<size>d.bmp`, ground
+  `WK_WE_PEN` in update_dash.sh), and a darker weekday name in the others. The panel's unfilled styles use the white-ground icons
   `fc_<code>_<size>w.bmp`. Sent to the panel as `WK_STYLE`.
 
 **Dividing lines** set the rules between the sections and between the two

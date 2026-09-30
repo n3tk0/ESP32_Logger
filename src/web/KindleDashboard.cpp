@@ -793,7 +793,8 @@ static bool kdWeekFcOn(const KindleConfig& k, uint32_t now) {
 /// The week strip holding the forecast: tomorrow and the six days after it,
 /// each cell its weekday, the condition and the high over the low. Not today:
 /// the headline above already says what today is doing, and a cell repeating
-/// it was a day of outlook given away. So no cell is marked either. The cells
+/// it was a day of outlook given away. So no cell is marked either; the
+/// weekend is shaded darker, as in the calendar. The cells
 /// are one height with the calendar's, month heading included, so nothing
 /// else on the page moves when the reader switches between them.
 static void appendWeekFc(String& out, const ForecastModule::Data& fc, int start,
@@ -810,7 +811,12 @@ static void appendWeekFc(String& out, const ForecastModule::Data& fc, int start,
         const int di = start + 1 + i;              // tomorrow onwards
         const ForecastModule::Period& d =
             di < ForecastModule::DAYS_N ? fc.days[di] : none;
-        out += F("<td class=\"wd\"><div class=\"wd-n\">");
+        // The weekend darker, as in the calendar: by the day's own weekday,
+        // or worked out from today for a day the provider did not reach.
+        const int wd = d.valid && d.wday >= 0 ? d.wday
+                     : (haveDay ? (tmv.tm_wday + i + 1) % 7 : -1);
+        out += (wd == 0 || wd == 6) ? F("<td class=\"wd wd-we\">") : F("<td class=\"wd\">");
+        out += F("<div class=\"wd-n\">");
         out += d.valid ? forecastPeriodLabel(d)
                        : (haveDay ? kdWeekdayAhead(tmv.tm_wday, i + 1) : "");
         out += F("</div>");
@@ -1835,6 +1841,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
                                                     : kdWeekdayAhead(tm.tm_wday, i + 1));
                 kdShellVarN(s, "WF%d_NAME", i, wn);
                 s->printf("WF%d_NAMEW=%u\n", i, kdAdvanceMille(wn));
+                // Saturday or Sunday, drawn darker as the calendar's are.
+                const int wd = d.valid && d.wday >= 0 ? d.wday : (tm.tm_wday + i + 1) % 7;
+                s->printf("WF%d_WE=%d\n", i, (wd == 0 || wd == 6) ? 1 : 0);
                 if (d.valid) {
                     char hi[12], lo[12];
                     snprintf(hi, sizeof(hi), "%d°", (int)lroundf(d.tempC));

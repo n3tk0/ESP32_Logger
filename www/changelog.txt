@@ -1,7 +1,7 @@
 ## v5.0.1 - Release housekeeping
 - [Changed] Firmware version raised to 5.0.1; the version shown in the web UI, /api/status, /api/diag and the OTA page now reads v5.0.1.
 - [Changed] Sidebar: the "Online" chip now shows used / total RAM (heap), like the storage chip. The connection state tints the whole stats group (red, with "Offline", while the device cannot be reached), and each chip has its own pale level colour: Wi-Fi by signal strength, CPU green at 80 MHz and blue at 160 MHz, storage and RAM green, amber from 70 % used and red from 85 %. With the sidebar collapsed the four coloured icons stay visible and their tooltips give the values; the chips refresh from /api/status once a minute.
-- [Changed] Kindle week strip with the forecast: shows the next seven days starting tomorrow instead of today (today is already in the headline); Open-Meteo is now asked for nine days so all seven cells fill.
+- [Changed] Kindle week strip with the forecast: shows the next seven days starting tomorrow instead of today (today is already in the headline), with the weekend shaded darker as in the calendar; Open-Meteo is now asked for nine days so all seven cells fill.
 - [Changed] Change log rewritten: the 4.2 - 4.7 intermediate releases are now documented, and 4.0 - 4.1 are summarised under v4.0.0.
 
 ## v5.0.0 - Kindle Display, remote nodes and firmware optimisation
