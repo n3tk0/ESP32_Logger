@@ -2046,6 +2046,10 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdShellVar(s, "LANG", KD_T("en", "bg"));
     kdShellInt(s, "DECIMALS", skin.tempDecimals);
     kdShellInt(s, "CLOCK_STYLE", skin.clockStyle);
+    // The face (KFACE_*), for the panel to draw in when the reader has its
+    // files; a list of the reader's own names is a browser thing, and the
+    // panel keeps Bookerly for it. An older script ignores the key.
+    kdShellInt(s, "FONT_FACE", skin.face < KFACE_CUSTOM ? skin.face : KFACE_BOOKERLY);
     // How the week strip's cells are drawn (KWEEK_*), and the dividing lines:
     // their thickness at this panel's size, their pens and their style
     // (0 solid, 1 dashed, 2 dotted). A reader too old to know these draws

@@ -471,6 +471,10 @@ override the system's.
 The search order is `fonts/` first, then the Kindle's own `/usr/java/lib/fonts`,
 and within each: `Bookerly-Regular.ttf`, `Caecilia_LT_65_Medium.ttf`,
 `Helvetica_LT_65_Medium.ttf`, `Futura_LT_Book.ttf` — and their bold cousins.
+The face chosen on the collector's E-ink settings page comes first: its files
+by name, then any file in either folder named after the family (Palatino and
+Baskerville are found that way), and only then the order above. Its bold is
+never borrowed from another face — a face with no bold file uses its regular.
 A device whose firmware ships none of them gets a message on stderr saying so,
 rather than a page that silently comes up blank: a font that does not resolve
 means every string is undrawn.

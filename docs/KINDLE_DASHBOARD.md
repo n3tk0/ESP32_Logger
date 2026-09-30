@@ -809,7 +809,7 @@ The rest of the page is the controls those rows point at:
 
 | | |
 |---|---|
-| **Face** | Bookerly (default), Caecilia, Palatino, Baskerville, Helvetica, Futura, or a font-family list of your own |
+| **Face** | Bookerly (default), Caecilia, Palatino, Baskerville, Helvetica, Futura, or a font-family list of your own. The FBInk panel gets it as `FONT_FACE` and draws in that face's files when the Kindle has them (`face_files()` in update_dash.sh: known names first, then any file named after the family), else in Bookerly; a custom list is Bookerly on the panel. `TRACE=1` logs the file it chose |
 | **Clock** | plain, boxed, ruled, or with the date beneath |
 | **Time** | `09:05`, `9:05`, `9:05am` |
 | **Date** | `27 august`, `august 27`, `27.08.2026`, `2026-08-27` |
