@@ -1092,19 +1092,17 @@ function kdRenderPreview() {
     if (L.wkRule) h += kdRl(18, L.wkHdgY - 5, RW, 1);
     if (wfc) {
       var ft = L.wkHdgY, fh = L.wkY + 58 - L.wkHdgY;
-      var fn = ["SU","MO","TU","WE","TH","FR","SA"], fv = ["14°","12°","9°","11°","15°","17°","16°"];
+      // Tomorrow onwards, so no day is marked as today; the weekend darker,
+      // as in the calendar (WF<i>_WE).
+      var fn = ["FR","SA","SU","MO","TU","WE","TH"], fv = ["14°","12°","9°","11°","15°","17°","16°"];
       for (i = 0; i < 7; i++) {
-        var fx = wx + i * wc;
-        if (wst === 0) h += kdBox(fx, ft, wc, fh, "kd-wk");
+        var fx = wx + i * wc, fwe = i === 1 || i === 2;
+        if (wst === 0) h += kdBox(fx, ft, wc, fh, fwe ? "kd-wk we" : "kd-wk");
         if (wst === 1) h += ruled(fx, ft, wc, fh);
-        if (i === 0) {
-          h += wst === 3 ? kdBox(fx, ft + fh - 3, wc, 3, "kd-pl dk")
-                         : "<u style='left:" + fx + "px;top:" + ft + "px;width:" + wc + "px;height:" +
-                           fh + "px;box-sizing:border-box;border:3px solid #111111'></u>";
-        }
         h += kdT(fx + kdQ(wc - kdTw(fn[i], 14), 2), ft + 4, 14, fn[i],
-                 { ink:i === 0 ? "#111111" : "#777777" });
-        h += kdBox(fx + kdQ(wc - 34, 2), ft + 22, 34, 34, wst === 0 ? "kd-pl" : "kd-wk we");
+                 { ink:fwe && wst ? "#444444" : "#777777" });
+        h += kdBox(fx + kdQ(wc - 34, 2), ft + 22, 34, 34,
+                   wst === 0 ? (fwe ? "kd-wk we" : "kd-pl") : "kd-wk we");
         h += kdT(fx + kdQ(wc - kdTw(fv[i] + "/4°", 16), 2), ft + 58, 16, fv[i] + "/4°",
                  { bold:!!(bold & 0x0080) });
       }

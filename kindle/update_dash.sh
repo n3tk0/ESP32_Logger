@@ -4334,9 +4334,11 @@ mark_t() {
 # WF_NOW names the cell that is today, to frame: -1 from a collector whose
 # strip starts tomorrow, and 0 when it is not sent, from an older one whose
 # strip started today. TODAY IS FRAMED, NOT INVERTED: a weather icon on a
-# black plate is a white square with nothing in it. The icons carry their own ground (see
-# tools/check_kindle_icons.py), so a filled cell takes the outlook's GRAYE
-# icons and every other style the white-ground ones, fc_<code>_<size>w.bmp.
+# black plate is a white square with nothing in it.
+#
+# The icons carry their own ground (see tools/check_kindle_icons.py), so a
+# filled cell takes the outlook's GRAYE icons (its weekend the GRAYD ones) and
+# every other style the white-ground ones, fc_<code>_<size>w.bmp.
 draw_week_fc() {
     local st="${WK_STYLE:-0}" top="${WK_HDG_Y:-$WK_Y}" x="$WK_X" i now="${WF_NOW:-0}"
     local h name nw icon hi lo hiw low tsz nh th pad y nx ix hx lx w f sfx="" we csfx npen
