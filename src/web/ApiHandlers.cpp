@@ -148,17 +148,27 @@ static void handleApiData(AsyncWebServerRequest* req) {
     //    the Overview asks for six sparklines at once while the browser is
     //    still fetching the page's scripts — on a C3 with ~40 KB free after
     //    boot that ran the heap out and the device panicked mid-page.
+    //    The allocation is made between the two holds of the mutex, not inside
+    //    one: ProcessingTask waits only 5 ms for it before dropping a reading,
+    //    and malloc can wait on the heap's own lock. Readings pushed in
+    //    between are newer; the copy keeps the newest `want`, as before.
     SensorReading* raw = nullptr;
+    size_t want = 0;
     if (webDataMutex && xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        const size_t want = webRingBuf.copyMatching(nullptr, 0, RING_SHARE, fromTs, toTs,
-                                                    sensorFilter, metricFilter, true);
-        if (want > 0) raw = new (std::nothrow) SensorReading[want];
-        if (raw) ringCount = webRingBuf.copyMatching(raw, want, RING_SHARE, fromTs, toTs,
-                                                     sensorFilter, metricFilter);
+        want = webRingBuf.copyMatching(nullptr, 0, RING_SHARE, fromTs, toTs,
+                                       sensorFilter, metricFilter, true);
         xSemaphoreGive(webDataMutex);
-        if (want > 0 && !raw) {
+    }
+    if (want > 0) {
+        raw = new (std::nothrow) SensorReading[want];
+        if (!raw) {
             req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
             return;
+        }
+        if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            ringCount = webRingBuf.copyMatching(raw, want, RING_SHARE, fromTs, toTs,
+                                                sensorFilter, metricFilter);
+            xSemaphoreGive(webDataMutex);
         }
     }
 
