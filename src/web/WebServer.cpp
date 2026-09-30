@@ -693,9 +693,25 @@ static void h_get_api_filelist(AsyncWebServerRequest* r) {
 }
 
 static void h_get_api_changelog(AsyncWebServerRequest* r) {
-    if (LittleFS.exists("/www/changelog.txt"))
+    if (LittleFS.exists("/www/changelog.txt")) {
         r->send(LittleFS, "/www/changelog.txt", "text/plain");
-    else if (LittleFS.exists("/changelog.txt"))
+        return;
+    }
+    // tools/build_web.py --filter gz (the flash-saving tree) keeps only the
+    // .gz of every text file, changelog.txt included. Serve it compressed,
+    // the way the static handler serves any other .gz-only file.
+    if (LittleFS.exists("/www/changelog.txt.gz")) {
+        AsyncWebServerResponse* resp =
+            r->beginResponse(LittleFS, "/www/changelog.txt.gz", "text/plain");
+        if (resp) {
+            resp->addHeader("Content-Encoding", "gzip");
+            r->send(resp);
+        } else {
+            r->send(500, "text/plain", "Out of memory");
+        }
+        return;
+    }
+    if (LittleFS.exists("/changelog.txt"))
         r->send(LittleFS, "/changelog.txt", "text/plain");
     else
         r->send(404, "text/plain", "Changelog not found. Upload /www/changelog.txt");
