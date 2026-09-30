@@ -174,6 +174,8 @@ private:
     char     _apiKey[40]   = {0};
     uint32_t _intervalMs   = 1800000UL;   // 30 min; forecasts do not move faster
 
+    // First fetch after boot, kept clear of the web UI's first load.
+    static constexpr uint32_t FIRST_FETCH_DELAY_MS = 90000UL;
     uint32_t _lastAttempt  = 0;
     uint32_t _failures     = 0;
     // Set by requestRefresh() on the AsyncTCP task, cleared by tick() on the
