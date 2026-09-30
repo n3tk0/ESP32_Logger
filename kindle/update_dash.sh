@@ -328,9 +328,10 @@ payload_key_ok() {
         CACHED_AT|CACHED_ON) return 0 ;;
         SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
         # The week strip's look and, when it holds the forecast, its seven
-        # days; and the dividing lines' thickness, pens and style. The pens
-        # are checked where they are used — see rule_pen().
-        WK_STYLE|WK_FC|WF[0-9]_*|RULE_PX|RULE_INK|RULE_SOFT|RULE_STYLE) return 0 ;;
+        # days and which of them is today (WF_NOW); and the dividing lines'
+        # thickness, pens and style. The pens are checked where they are
+        # used — see rule_pen().
+        WK_STYLE|WK_FC|WF_NOW|WF[0-9]_*|RULE_PX|RULE_INK|RULE_SOFT|RULE_STYLE) return 0 ;;
         # The chart's axis: the five values, the five hours, their widths, and
         # where the image's plot area is inside the image.
         CH_Y[0-9]|CH_Y[0-9]W|CH_H[0-9]|CH_H[0-9]W|CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
@@ -4202,7 +4203,7 @@ draw_forecast_body() {
 
 # ── The week strip ───────────────────────────────────────────────────────────
 draw_week() {
-    # WHAT THE STRIP HOLDS: the calendar week, or — WK_FC=1 — the next seven
+    # WHAT THE STRIP HOLDS: the calendar week, or — WK_FC=1 — seven
     # days' forecast in the same cells. The collector decides, because it is
     # the end that knows whether there is a fresh forecast to put there.
     if [ "${WK_FC:-0}" = "1" ]; then
@@ -4315,17 +4316,19 @@ mark_t() {
 }
 
 # ── The forecast in the week strip ───────────────────────────────────────────
-# Today and the six days after it, where the calendar would be: the weekday,
-# the condition, the high and, grey after it, the low. The cells take the
-# calendar's and its month heading's height together, so nothing else on the
-# page moves when the reader switches between the two.
+# Tomorrow and the six days after it, where the calendar would be: the
+# weekday, the condition, the high and, grey after it, the low. The cells take
+# the calendar's and its month heading's height together, so nothing else on
+# the page moves when the reader switches between the two.
 #
-# TODAY IS FRAMED, NOT INVERTED: a weather icon on a black plate is a white
-# square with nothing in it. The icons carry their own ground (see
+# WF_NOW names the cell that is today, to frame: -1 from a collector whose
+# strip starts tomorrow, and 0 when it is not sent, from an older one whose
+# strip started today. TODAY IS FRAMED, NOT INVERTED: a weather icon on a
+# black plate is a white square with nothing in it. The icons carry their own ground (see
 # tools/check_kindle_icons.py), so a filled cell takes the outlook's GRAYE
 # icons and every other style the white-ground ones, fc_<code>_<size>w.bmp.
 draw_week_fc() {
-    local st="${WK_STYLE:-0}" top="${WK_HDG_Y:-$WK_Y}" x="$WK_X" i
+    local st="${WK_STYLE:-0}" top="${WK_HDG_Y:-$WK_Y}" x="$WK_X" i now="${WF_NOW:-0}"
     local h name nw icon hi lo hiw low tsz nh th pad y nx ix hx lx w f sfx=""
     case "$st" in 0|1|2|3) ;; *) st=0 ;; esac
     [ "$st" = "0" ] || sfx="w"
@@ -4353,7 +4356,7 @@ draw_week_fc() {
                [ "$i" = "6" ] && \
                    fill_rect "$(( x + WK_CELL_W - RULE_T ))" "$top" "$RULE_T" "$h" "$RULE_PEN" ;;
         esac
-        if [ "$i" = "0" ]; then
+        if [ "$i" = "$now" ]; then
             if [ "$st" = "3" ]; then
                 fill_rect "$x" "$(( top + h - WK_MARK_T ))" "$WK_CELL_W" "$WK_MARK_T" BLACK
             else
@@ -4367,7 +4370,7 @@ draw_week_fc() {
 
         y=$(( top + pad ))
         centre_in "$x" "$WK_CELL_W" "$(( WK_NAME_SZ * nw / 1000 ))"; nx="$CENTRE_X"
-        if [ "$i" = "0" ]; then draw_text_reg "$nx" "$y" "$WK_NAME_SZ" BLACK "$name"
+        if [ "$i" = "$now" ]; then draw_text_reg "$nx" "$y" "$WK_NAME_SZ" BLACK "$name"
         else                    draw_text_reg "$nx" "$y" "$WK_NAME_SZ" GRAY7 "$name"
         fi
         y=$(( y + nh + 2 ))

@@ -960,6 +960,22 @@ check "$?" "the minimal week: no cells, today bold with a bar under it"
   exit 0 )
 check "$?" "the forecast in the week strip: seven days, the right icons, today framed"
 
+# A collector whose strip starts tomorrow says so with WF_NOW=-1: no cell is
+# framed, every style, and no name is set in black as today's.
+( wk_fixture; WK_FC=1 WF_NOW=-1
+  for i in 0 1 2 3 4 5 6; do
+      eval "WF${i}_NAME=D$i WF${i}_NAMEW=1000 WF${i}_ICON=3 WF${i}_HI=1${i}° WF${i}_LO=/${i}° WF${i}_HIW=1500 WF${i}_LOW=1500"
+  done
+  mark_t
+  for st in 0 1 2 3; do
+      WK_STYLE=$st; : > "$FBINK_LOG"; draw_week
+      grep -q -- "-B${T}BLACK.*\(width=$WK_MARK_T,\|height=$WK_MARK_T\)" "$FBINK_LOG" && exit 1
+      grep -q -- "-C${T}BLACK.*D0" "$FBINK_LOG" && exit 2
+      grep -q -- "--${T}D0${T}" "$FBINK_LOG" || exit 3
+  done
+  exit 0 )
+check "$?" "the forecast from tomorrow: no day framed as today"
+
 # The rules: the collector's thickness and pen, a pen that is not one refused,
 # and dashed or dotted drawn as one cached image rather than dozens of boxes.
 ( wk_fixture
