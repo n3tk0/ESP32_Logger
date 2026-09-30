@@ -954,7 +954,12 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .sidebar-rail .logo-meta { display:none; }
 .sidebar-rail .nav-item { padding:0; justify-content:center; }
 .sidebar-rail .sidebar-stats { grid-template-columns:1fr; }
-.sidebar-rail .sstat, .sidebar-rail .sidebar-stats .sstat { justify-content:center; padding:6px 4px; }
+/* Rail: the 52 px sidebar has 6 px padding, so the foot drops its own side
+   padding and the group sits 5 px in on each side, leaving room for its 5 px
+   halo. Chips become centred 30 x 28 icon cells. */
+.sidebar-rail .sidebar-foot { padding-left:0; padding-right:0; }
+.sidebar-rail .sidebar-stats { margin-left:5px; margin-right:5px; gap:6px; }
+.sidebar-rail .sstat, .sidebar-rail .sidebar-stats .sstat { justify-content:center; padding:0; height:28px; }
 .sidebar-rail .sstat [data-lucide], .sidebar-rail .sstat svg { width:14px; height:14px; }
 .sidebar-rail .kbd { display:none; }
 
