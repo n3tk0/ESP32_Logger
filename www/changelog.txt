@@ -1,6 +1,6 @@
 ## v5.0.1 - Release housekeeping
 - [Changed] Firmware version raised to 5.0.1; the version shown in the web UI, /api/status, /api/diag and the OTA page now reads v5.0.1.
-- [Changed] Sidebar: the "Online" chip now shows free / total RAM (heap). The connection state tints the whole stats group (red and "Offline" while the device cannot be reached), and each chip has its own pale level colour: Wi-Fi by signal strength, CPU green at 80 MHz and blue at 160 MHz, storage and RAM green, amber from 70 % used and red from 85 %. The chips refresh from /api/status once a minute.
+- [Changed] Sidebar: the "Online" chip now shows free / total RAM (heap). The connection state tints the whole stats group (red, with "Offline", while the device cannot be reached), and each chip has its own pale level colour: Wi-Fi by signal strength, CPU green at 80 MHz and blue at 160 MHz, storage and RAM green, amber from 70 % used and red from 85 %. With the sidebar collapsed the four coloured icons stay visible and their tooltips give the values; the chips refresh from /api/status once a minute.
 - [Changed] Change log rewritten: the 4.2 - 4.7 intermediate releases are now documented, and 4.0 - 4.1 are summarised under v4.0.0.
 
 ## v5.0.0 - Kindle Display, remote nodes and firmware optimisation
@@ -26,7 +26,7 @@
 - [Added] First e-ink Kindle dashboard with manual and data-driven repaints, the weather forecast client, and an ESP-NOW node settings page.
 - [Added] LOLIN C3 Pico target; the deploy toolchain reads platformio.ini, flashes nodes, generates their shared key and is published as a downloadable artifact.
 - [Added] Self-heating humidity correction for the BME280 and a Remote Node option in the hardware sensor wizard.
-- [Optimized] Flash: failsafe page stored gzipped, SD support optional, exception tables dropped (-138 KB of app flash in total); 53 MB of committed build artifacts removed.
+- [Optimized] Flash: failsafe page stored gzipped and SD support made optional (52 KB back), exception tables dropped (-138 KB), and the CI size ceiling corrected; 53 MB of committed build artifacts removed from the repository.
 
 ## v4.6.0 - Security, sensor boards and new hardware
 - [Added] SPS30 health reporting, dew-point correction and an enclosure heater module.

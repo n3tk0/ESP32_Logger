@@ -46,11 +46,11 @@ window.fetchWithTimeout = fetchWithTimeout;
 var _connOnline = null;
 var _ramText = "";
 // "a/b KB" or "a/b MB": short enough for a half-width chip.
-function _fmtRam(free, total) {
+function _fmtPair(a, total) {
   if (total < 1048576) {
-    return Math.round(free / 1024) + "/" + Math.round(total / 1024) + " KB";
+    return Math.round(a / 1024) + "/" + Math.round(total / 1024) + " KB";
   }
-  return (free / 1048576).toFixed(1) + "/" + (total / 1048576).toFixed(1) + " MB";
+  return (a / 1048576).toFixed(1) + "/" + (total / 1048576).toFixed(1) + " MB";
 }
 function _connLabelSync() {
   var label = document.getElementById("sstat-conn-label");
@@ -90,6 +90,13 @@ setInterval(function () {
     .then(function (d) { if (d) updateFooter(d); })
     .catch(function () {});
 }, 60000);
+
+// Chip tooltip carries the value: with the sidebar collapsed to a rail
+// only the icons (and their colours) are visible.
+function _sstatTitle(id, text) {
+  var el = document.getElementById(id);
+  if (el) el.title = text;
+}
 
 // Used-fraction levels, the Files page's usage bar thresholds (amber from
 // 70 %) plus red from 85 %, where the Live page's meters turn amber.
@@ -339,9 +346,11 @@ window.addEventListener("DOMContentLoaded", function () {
   Promise.all([
     fetchWithTimeout("/api/status")
       .then(function (r) {
+        setConnState(r.ok);
         return r.json();
       })
       .catch(function () {
+        setConnState(false);
         return {};
       }),
     fetchWithTimeout("/export_settings")
@@ -511,21 +520,28 @@ function updateFooter(d) {
     setEl("sstat-cpu", d.cpu + " MHz");
     // 80 MHz green (low power), 160 MHz blue, faster amber.
     _sstatLevel("sstat-cpu-chip", d.cpu <= 80 ? "ok" : d.cpu <= 160 ? "info" : "warn");
+    _sstatTitle("sstat-cpu-chip", "CPU " + d.cpu + " MHz");
   }
   if (d.heap !== undefined && d.heapTotal !== undefined) {
     setEl("footer-heap", fmtBytes(d.heap) + " / " + fmtBytes(d.heapTotal));
     if (d.heapTotal > 0) {
-      _ramText = _fmtRam(d.heap, d.heapTotal);
+      _ramText = _fmtPair(d.heap, d.heapTotal);
       _connLabelSync();
       _sstatLevel("sstat-conn", _usedLevel(d.heapTotal - d.heap, d.heapTotal));
+      _sstatTitle("sstat-conn", "RAM " + _ramText);
     }
   }
   // sstat-storage sits under a hard-drive icon: FS usage only. The live
   // channel carries no fs fields, so it leaves the /api/status value alone
   // (heap has its own chip now).
+  // getStorageInfo() reports whichever store the device logs to (LittleFS or
+  // SD); a zero total means none is mounted.
   if (d.fsUsed !== undefined && d.fsTotal !== undefined) {
-    setEl("sstat-storage", _fmtRam(+d.fsUsed, +d.fsTotal));
-    if (+d.fsTotal > 0) _sstatLevel("sstat-storage-chip", _usedLevel(+d.fsUsed, +d.fsTotal));
+    var fsOk = +d.fsTotal > 0;
+    var fsText = fsOk ? _fmtPair(+d.fsUsed, +d.fsTotal) : "--";
+    setEl("sstat-storage", fsText);
+    _sstatLevel("sstat-storage-chip", fsOk ? _usedLevel(+d.fsUsed, +d.fsTotal) : "");
+    _sstatTitle("sstat-storage-chip", fsText);
   }
   // Wi-Fi signal (only /api/status carries rssi). In AP mode there is no
   // signal to judge (rssi -100), so the chip stays neutral.
@@ -533,8 +549,7 @@ function updateFooter(d) {
     var sta = d.wifi === "client";
     _sstatLevel("sstat-wifi-chip", !sta ? "" :
       d.rssi >= -60 ? "ok" : d.rssi >= -70 ? "info" : d.rssi >= -80 ? "warn" : "err");
-    var wChip = document.getElementById("sstat-wifi-chip");
-    if (wChip) wChip.title = sta ? d.rssi + " dBm" : "AP";
+    _sstatTitle("sstat-wifi-chip", (d.network ? d.network + " · " : "") + (sta ? d.rssi + " dBm" : "AP"));
   }
   if (d.network !== undefined && d.network !== null) {
     setEl("footer-net", d.network);
