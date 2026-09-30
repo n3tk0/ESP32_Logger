@@ -1110,6 +1110,9 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .btn-primary:hover { filter:brightness(1.08); }
 
 .text-muted   { color:var(--text-3); }
+/* Generic hide toggle (the Device page's change log card, the first-run
+   disclaimer). Missing from this sheet, so the card never closed. */
+.hidden       { display:none !important; }
 .text-success { color:var(--ok); }
 .text-warning { color:var(--warn); }
 .text-danger  { color:var(--err); }
