@@ -12,6 +12,7 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 |------|------------|
 | `test_sensor_types.cpp` | `SensorReading::toJsonLine()` (format, JSON escaping, truncation), `parseMode()`, `parseBucket()` |
 | `test_wifi_tx_power.cpp` | `WifiTxPower.h`: which powers the setting accepts, and the board default (8.5 dBm on the C3 Pico and Super Mini) |
+| `test_cpu_freq.cpp` | `CpuFreq.h`: which CPU speeds the settings accept (240 MHz only on an S3), and the 160 MHz default while the web server is up |
 | `test_ringbuffer.cpp` | `RingBuffer<N>` single-thread correctness: ordering, overflow, `fromTs` filter, `findLast`, `collectMetricSeries`, `copyMatching`, `latestPerMetric` |
 | `test_ringbuffer_concurrency.cpp` | `RingBuffer<N>` SPSC acquire/release visibility (ThreadSanitizer target) |
 | `test_aggregation.cpp` | `AggregationEngine` — `lttb()` (endpoint preservation, bounds), `bucket()` (raw/avg/min/max/sum), `aggregate()` pipeline bounds |

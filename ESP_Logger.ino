@@ -92,6 +92,7 @@
 #include "src/managers/OtaManager.h"
 #include "src/web/WebServer.h"    // setupWebServer()
 #include "src/utils/Utils.h"
+#include "src/utils/CpuFreq.h"        // cpuActiveMhzFor (web-active CPU speed)
 
 // ── Platform v5.0 — multi-sensor modules (compiled in only when needed) ──────
 #include "src/sensors/SensorManager.h"
@@ -317,7 +318,7 @@ static void _manageContinuousPower() {
     if ((int32_t)(g_lastWebActivity - g_contLastActivity) > 0) {
         g_contLastActivity = g_lastWebActivity;
         if (g_contPowerReduced) {
-            setCpuFrequencyMhz(160);
+            setCpuFrequencyMhz(cpuActiveMhzFor(config.hardware.activeCpuMHz));
             WiFi.setSleep(false);
             g_contPowerReduced = false;
             DBGLN("[Sleep] Power restored (web activity)");
@@ -782,7 +783,7 @@ void setup() {
 
     if (apModeTriggered) {
         DBGLN(onlineLoggerMode ? "=== Online Logger ===" : "=== Web Server ===");
-        setCpuFrequencyMhz(160);
+        setCpuFrequencyMhz(cpuActiveMhzFor(config.hardware.activeCpuMHz));
 
         if (!onlineLoggerMode) flushLogBufferToFS();
 

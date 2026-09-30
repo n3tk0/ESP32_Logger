@@ -193,8 +193,11 @@ function changelogLoad() {
 // Built by a function (not a static object) so the labels/hints pick up
 // the current I18n language every time hwInit() runs (Form.bind re-renders
 // from scratch on every page visit — same pattern as hubStatusInit()).
-function hwSchema(ctx) {
+function hwSchema(ctx, cpuMaxMHz) {
   var t = window.I18n ? I18n.t : function (k) { return k; };
+  // 240 MHz only where the chip runs it (S3); the firmware says which.
+  var cpuOpts = [["80", "80 MHz"], ["160", "160 MHz"]];
+  if (cpuMaxMHz >= 240) cpuOpts.push(["240", "240 MHz"]);
   return {
     saveUrl: "/save_hardware",
     restart: true,
@@ -242,9 +245,11 @@ function hwSchema(ctx) {
           ]},
       ]},
       { title: "⚡ " + t("settingsPages.hwSectionCpuFreq"), fields: [
-          { name: "cpuFreqMHz", type: "select", options: [
-              ["80",  "80 MHz"],
-              ["160", "160 MHz"],
+          { row: [
+              { name: "activeCpuMHz", label: t("settingsPages.hwCpuActive"), type: "select",
+                hint: t("settingsPages.hwCpuActiveHint"), options: cpuOpts },
+              { name: "cpuFreqMHz", label: t("settingsPages.hwCpuLogging"), type: "select",
+                hint: t("settingsPages.hwCpuLoggingHint"), options: cpuOpts },
           ]},
       ]},
       // Flow-meter LED diagnostics, migrated here when the standalone
@@ -274,8 +279,11 @@ function hwInit() {
       var hw = d.hardware || {};
       var defaults = {
         storageType: 0, wakeupMode: 0, debounceMs: 100, cpuFreqMHz: 80,
+        activeCpuMHz: 160, cpuMaxMHz: 160,
       };
       for (var k in defaults) if (hw[k] === undefined) hw[k] = defaults[k];
+      // 0 is "the default", which is 160; the select has no 0.
+      if (!hw.activeCpuMHz) hw.activeCpuMHz = 160;
 
       // Flow-meter diagnostics migrated from settings_flowmeter (PR #105).
       // Merge fm.testMode / fm.blinkDuration into the binding object so the
@@ -289,7 +297,7 @@ function hwInit() {
       // typed pin into the hidden input the form POSTs, so skipping it when
       // the profile list failed to load sent the old GPIOs and said "saved".
       var ctx = pdata ? Pins.ctx(pdata, pdata.active) : { profile: null, board: null };
-      var form = Form.bind("hw-host", hwSchema(ctx), hw);
+      var form = Form.bind("hw-host", hwSchema(ctx, hw.cpuMaxMHz), hw);
       if (form && window.Pins) hwWirePins(form, ctx);
 
       var th = (ST && ST.theme) || (CFG && CFG.theme) || {};

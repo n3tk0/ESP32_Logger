@@ -45,6 +45,7 @@
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
 #include "../utils/WifiTxPower.h"       // wifiTxPowerValid
 #include "../utils/PosixTz.h"           // dstRuleClamp, tzOffsetAt
+#include "../utils/CpuFreq.h"           // cpuMhzValid
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Update.h>
@@ -816,7 +817,10 @@ static void h_post_save_hardware(AsyncWebServerRequest* r) {
             }
         }
     }
-    if (const String* v = formArg(r, "cpuFreqMHz"))     config.hardware.cpuFreqMHz     = v->toInt();
+    if (const String* v = formArg(r, "cpuFreqMHz"))
+        if (cpuMhzValid(v->toInt())) config.hardware.cpuFreqMHz = v->toInt();
+    if (const String* v = formArg(r, "activeCpuMHz"))
+        if (cpuMhzValid(v->toInt())) config.hardware.activeCpuMHz = (uint8_t)v->toInt();
     if (const String* v = formArg(r, "debounceMs"))     config.hardware.debounceMs     = constrain(v->toInt(), 20, 500);
     if (const String* v = formArg(r, "debugMode"))      config.hardware.debugMode      = *v == "1";
     
@@ -1997,7 +2001,8 @@ void setupWebServer() {
     // Keys consumed by web.js:
     //   hwInit:  hardware{storageType, pinSdCS, pinSdMOSI, pinSdMISO, pinSdSCK,
     //                      wakeupMode, debounceMs, pinWifiTrigger, pinWakeupFF,
-    //                      pinWakeupPF, pinFlowSensor, pinRtcCE, pinRtcIO, pinRtcSCLK, cpuFreqMHz}
+    //                      pinWakeupPF, pinFlowSensor, pinRtcCE, pinRtcIO, pinRtcSCLK, cpuFreqMHz,
+    //                      activeCpuMHz, cpuMaxMHz}
     //            (also flowMeter.testMode / blinkDuration after PR #105 follow-up)
     //   thInit:  theme{mode, showIcons, primaryColor, secondaryColor, bgColor, textColor,
     //                   ffColor, pfColor, otherColor, storageBarColor, storageBar70Color,

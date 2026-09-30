@@ -6,6 +6,7 @@
 #include "../utils/MutexGuard.h"
 #include "../utils/PosixTz.h"       // dstRuleClamp, DST_RULE_EU
 #include "../utils/WifiTxPower.h"   // wifiTxPowerValid
+#include "../utils/CpuFreq.h"       // cpuMhzValid
 #include <LittleFS.h>
 #include "esp_mac.h"
 #include <math.h>
@@ -181,8 +182,14 @@ static bool sanitizeWakeConfig() {
         assign(config.hardware.pinRtcSCLK, DefaultPins::RTC_SCLK);
     }
 
-    if (config.hardware.cpuFreqMHz != 80 && config.hardware.cpuFreqMHz != 160) {
+    if (!cpuMhzValid(config.hardware.cpuFreqMHz)) {
         config.hardware.cpuFreqMHz = 80;
+        changed = true;
+    }
+    // 0 is "the default"; 240 read on a C3 (a config carried over from an S3)
+    // falls back to it too.
+    if (config.hardware.activeCpuMHz != 0 && !cpuMhzValid(config.hardware.activeCpuMHz)) {
+        config.hardware.activeCpuMHz = 0;
         changed = true;
     }
 

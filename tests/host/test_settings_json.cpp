@@ -179,6 +179,7 @@ static void populate() {
     h.pinRtcCE = 6; h.pinRtcIO = 7; h.pinRtcSCLK = 8;
     h.pinSdCS = 9; h.pinSdMOSI = 10; h.pinSdMISO = 20; h.pinSdSCK = 21;
     h.cpuFreqMHz = 160;
+    h.activeCpuMHz = 80;
     h.defaultStorageView = 1;
     h.debounceMs = 150;
 
@@ -291,6 +292,7 @@ static void test_restores_what_it_carries() {
     config.hardware.storageType = STORAGE_LITTLEFS;
     config.hardware.wakeupMode = WAKEUP_GPIO_ACTIVE_HIGH;
     config.hardware.cpuFreqMHz = 80;
+    config.hardware.activeCpuMHz = 0;
     config.hardware.defaultStorageView = 0;
     config.hardware.debounceMs = 50;
 
