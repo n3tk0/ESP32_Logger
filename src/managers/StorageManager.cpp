@@ -31,9 +31,13 @@ bool initStorage() {
         // Three file slots, not the library's five. The C3 core builds FatFs
         // with 4 KB sectors, and every slot is a FIL with its own 4 KB cache
         // allocated at mount whether a file is open or not: five slots cost
-        // ~25 KB of heap, three ~17 KB. Nothing keeps more than two SD files
-        // open at once (a data_log append and a web download); the third is
-        // headroom. An open past the limit fails like any missing file.
+        // ~25 KB of heap, three ~17 KB. The usual load is one data_log append
+        // plus perhaps one web download. The data_log trim (Datalog.cpp
+        // trim(), once per tenth of maxEntries) holds two, so it fails, and
+        // that cycle's rows are not written, only if two other SD files are
+        // open at that moment. An open past the limit fails like a missing
+        // file. On a C3 the 8 KB is worth that: heap exhaustion here has meant
+        // failed TLS and PANIC resets.
         if (SD.begin(config.hardware.pinSdCS, SPI, 4000000, "/sd", 3)) {
             DBGF("SD OK - %llu MB\n", SD.cardSize() / (1024 * 1024));
             sdAvailable = true;
