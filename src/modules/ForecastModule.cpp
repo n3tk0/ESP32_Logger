@@ -8,11 +8,33 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <math.h>
+#include <memory>
 #include "../core/Globals.h"        // config.kindle: whether the week strip wants the days
 #include "../web/DashboardStrings.h"
 #include "../web/KindleDashboard.h"   // kdPx(): the glyphs scale with the page
 
 ForecastModule forecastModule;
+
+// Open-Meteo over plain HTTP on the C3. A TLS session wants two 16 KB record
+// buffers (CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN, fixed in the prebuilt core) on
+// top of the handshake, and a C3 with an SD card mounted does not have that
+// much contiguous heap: the fetch failed with mbedTLS -0x7F00 (alloc failed).
+// The request carries only coordinates and the answer is public weather, and
+// setInsecure() never checked the server anyway. OpenWeatherMap stays on
+// HTTPS because its URL carries the API key. Override with
+// -DFORECAST_OPENMETEO_TLS=1 (or 0) to choose on any chip.
+#ifndef FORECAST_OPENMETEO_TLS
+#  if defined(CONFIG_IDF_TARGET_ESP32C3)
+#    define FORECAST_OPENMETEO_TLS 0
+#  else
+#    define FORECAST_OPENMETEO_TLS 1
+#  endif
+#endif
+#if FORECAST_OPENMETEO_TLS
+#  define OPENMETEO_BASE "https://api.open-meteo.com"
+#else
+#  define OPENMETEO_BASE "http://api.open-meteo.com"
+#endif
 
 // Drives the form under Settings → Modules → Weather forecast
 // (src/modules/schemas/forecast.json). Without it hasUI() is false and the
@@ -337,14 +359,21 @@ bool ForecastModule::_fetch() {
     return (_provider == PROVIDER_OWM) ? _fetchOwm() : _fetchOpenMeteo();
 }
 
-// Shared HTTPS GET. Returns the body, or an empty String on failure.
-static String httpsGet(const char* url) {
-    WiFiClientSecure client;
-    // No CA bundle shipped yet (R15) — same posture as HttpExporter.
-    client.setInsecure();
+// Shared GET, HTTPS or plain by the URL's scheme. Returns the body, or an
+// empty String on failure. The TLS client is only constructed for https://,
+// so a plain fetch never touches mbedTLS.
+static String httpGet(const char* url) {
+    const bool tls = strncmp(url, "https://", 8) == 0;
+    WiFiClient plain;
+    std::unique_ptr<WiFiClientSecure> secure;
+    if (tls) {
+        secure.reset(new WiFiClientSecure);
+        // No CA bundle shipped yet (R15) — same posture as HttpExporter.
+        secure->setInsecure();
+    }
 
-    HTTPClient http;
-    if (!http.begin(client, url)) return String();
+    HTTPClient http;   // declared after the clients: destroyed before them
+    if (!http.begin(tls ? static_cast<WiFiClient&>(*secure) : plain, url)) return String();
     // Every task stamps a watchdog heartbeat at the top of its loop and
     // TaskManager reboots after 30 s of silence, so this blocking call must
     // finish comfortably inside that. Redirect following is NOT enabled: the
@@ -390,7 +419,7 @@ bool ForecastModule::_fetchOpenMeteo() {
     // arrays start today.
     char url[320];
     snprintf(url, sizeof(url),
-             "https://api.open-meteo.com/v1/forecast"
+             OPENMETEO_BASE "/v1/forecast"
              "?latitude=%.4f&longitude=%.4f"
              "&current=temperature_2m,weather_code,wind_speed_10m"
              "&daily=temperature_2m_max,temperature_2m_min,weather_code"
@@ -398,7 +427,7 @@ bool ForecastModule::_fetchOpenMeteo() {
              "&timezone=auto&forecast_days=%d&forecast_hours=16",
              (double)_lat, (double)_lon, DAYS_N);
 
-    const String body = httpsGet(url);
+    const String body = httpGet(url);
     if (body.isEmpty()) return false;
 
     // Filtered parse: the response carries units and metadata this never
@@ -482,7 +511,7 @@ bool ForecastModule::_fetchOwm() {
              "?lat=%.4f&lon=%.4f&units=metric&appid=%s",
              (double)_lat, (double)_lon, _apiKey);
 
-    const String body = httpsGet(url);
+    const String body = httpGet(url);
     if (body.isEmpty()) return false;
 
     JsonDocument filter;
@@ -546,7 +575,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
              "?lat=%.4f&lon=%.4f&units=metric&cnt=%d&appid=%s",
              (double)_lat, (double)_lon, days ? 40 : 8, _apiKey);
 
-    const String body = httpsGet(url);
+    const String body = httpGet(url);
     if (body.isEmpty()) return false;
 
     JsonDocument filter;
