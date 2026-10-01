@@ -63,6 +63,10 @@ public:
     // Copy config.logger (sensor rows on/off, interval) to StorageTask.
     static void applyLoggerConfig();
 
+    // Start SlowSensorTask if a reload added a blocking sensor and it is not
+    // running. Call after sensorManager.reloadConfig().
+    static void ensureSlowSensorTask();
+
     // Task handles (public for diagnostics / watchdog)
     static TaskHandle_t hSensor;
     static TaskHandle_t hSlowSensor;
@@ -88,4 +92,7 @@ public:
     // tasks to stop). Returns true if the task should run, false if it should
     // exit immediately (init failed / shutdown raced startup).
     static bool waitForStart();
+
+private:
+    static bool _createSlowSensorTask();
 };

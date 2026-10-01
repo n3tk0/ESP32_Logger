@@ -173,6 +173,24 @@ void TaskManager::applyLoggerConfig() {
     storageParam.csvLoggingEnabled      = config.logger.csvLoggingEnabled;
 }
 
+bool TaskManager::_createSlowSensorTask() {
+    g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();
+    return xTaskCreatePinnedToCore(slowSensorTaskFunc,     "SlowSensorTask",
+                                   STACK_SLOW_SENSOR_TASK, nullptr,
+                                   TASK_PRIO_SLOW_SENSOR,  &hSlowSensor, 0) == pdPASS;
+}
+
+// Start SlowSensorTask after a config reload that added the first blocking
+// sensor. Never stops it: removing the sensor leaves an idle task until the
+// next reboot, which is what every boot before this change had anyway.
+void TaskManager::ensureSlowSensorTask() {
+    if (!running || hSlowSensor || !sensorManager.hasBlocking()) return;
+    if (_createSlowSensorTask())
+        Serial.println("[TaskManager] SlowSensorTask started for a blocking sensor");
+    else
+        Serial.println("[TaskManager] SlowSensorTask FAILED — blocking sensors will not be read until reboot");
+}
+
 bool TaskManager::init(fs::FS& fs) {
     // AUDIT 2.3: do NOT set running=true here. Tasks + queues + mutexes are
     // built below; if any step fails, half-built state would have left
@@ -284,10 +302,13 @@ bool TaskManager::init(fs::FS& fs) {
                                 TASK_PRIO_SENSOR,   &hSensor,   0);
     if (r != pdPASS) { Serial.println("[TaskManager] SensorTask FAILED"); _cleanupPartialInit(); return false; }
 
-    r = xTaskCreatePinnedToCore(slowSensorTaskFunc,     "SlowSensorTask",
-                                STACK_SLOW_SENSOR_TASK, nullptr,
-                                TASK_PRIO_SLOW_SENSOR,  &hSlowSensor, 0);
-    if (r != pdPASS) { Serial.println("[TaskManager] SlowSensorTask FAILED"); _cleanupPartialInit(); return false; }
+    // SlowSensorTask only when a blocking sensor (SDS011, PMS5003, wind) is
+    // configured: otherwise its 4 KB stack does nothing but wake every
+    // 500 ms to find no work. ensureSlowSensorTask() starts it later if one
+    // is added from the Sensors page.
+    if (sensorManager.hasBlocking() && !_createSlowSensorTask()) {
+        Serial.println("[TaskManager] SlowSensorTask FAILED"); _cleanupPartialInit(); return false;
+    }
 
     r = xTaskCreatePinnedToCore(processingTaskFunc, "ProcessTask",
                                 STACK_PROCESS_TASK, nullptr,
@@ -396,7 +417,8 @@ bool TaskManager::checkHealth() {
     };
     for (int i = 0; i < TASK_COUNT; i++) {
         TaskHandle_t h = taskHandles[i];
-        if (h && eTaskGetState(h) == eDeleted) {
+        if (!h) continue;    // not started (SlowSensorTask with no blocking sensor)
+        if (eTaskGetState(h) == eDeleted) {
             Serial.printf("[Watchdog] Task %d deleted unexpectedly\n", i);
             return false;
         }

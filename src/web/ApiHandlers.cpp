@@ -1025,6 +1025,7 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
         // StorageTask re-reads storageParam every aggregation tick, so this
         // is enough to apply changes live without a reboot.
         TaskManager::refreshStorageFromPlatform(*activeFS);
+        TaskManager::ensureSlowSensorTask();
         xSemaphoreGive(configMutex);
         if (sensorsOk && exportersOk) req->send(200, "application/json", "{\"ok\":true}");
         else                          req->send(500, "application/json", "{\"ok\":false,\"error\":\"reload failed\"}");
@@ -1129,7 +1130,8 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         return h ? (uint32_t)uxTaskGetStackHighWaterMark(h) : 0;
     };
     tasks["sensor"]     = stackWords(TaskManager::hSensor);
-    tasks["slowSensor"] = stackWords(TaskManager::hSlowSensor);
+    if (TaskManager::hSlowSensor)   // only started for a blocking sensor
+        tasks["slowSensor"] = stackWords(TaskManager::hSlowSensor);
     tasks["process"]    = stackWords(TaskManager::hProcess);
     tasks["storage"]    = stackWords(TaskManager::hStorage);
     tasks["export"]     = stackWords(TaskManager::hExport);

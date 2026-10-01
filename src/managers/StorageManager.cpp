@@ -28,7 +28,13 @@ bool initStorage() {
         DBGLN("Init SD Card...");
         SPI.begin(config.hardware.pinSdSCK,  config.hardware.pinSdMISO,
                   config.hardware.pinSdMOSI, config.hardware.pinSdCS);
-        if (SD.begin(config.hardware.pinSdCS)) {
+        // Three file slots, not the library's five. The C3 core builds FatFs
+        // with 4 KB sectors, and every slot is a FIL with its own 4 KB cache
+        // allocated at mount whether a file is open or not: five slots cost
+        // ~25 KB of heap, three ~17 KB. Nothing keeps more than two SD files
+        // open at once (a data_log append and a web download); the third is
+        // headroom. An open past the limit fails like any missing file.
+        if (SD.begin(config.hardware.pinSdCS, SPI, 4000000, "/sd", 3)) {
             DBGF("SD OK - %llu MB\n", SD.cardSize() / (1024 * 1024));
             sdAvailable = true;
         } else {
