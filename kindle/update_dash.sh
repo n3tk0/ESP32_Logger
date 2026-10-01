@@ -2014,7 +2014,7 @@ font_metrics() {
 CLOCK_CHARS="0 1 2 3 4 5 6 7 8 9 c a m p"
 clock_metrics() {
     # $1=font file
-    local f="$1" c n off sub fmt seg i k code gid nhm hmtx end start delta ro
+    local f="$1" c n off sub seg i k code gid nhm start delta ro
     for c in $CLOCK_CHARS; do eval "CW_$c="; done
     [ -s "$f" ] || return 1
     command -v od >/dev/null 2>&1 || return 1
@@ -2045,7 +2045,8 @@ clock_metrics() {
     nhm=$(( $1 * 256 + $2 ))
     [ "$nhm" -ge 1 ] || return 1
     # The encoding records: platform, encoding, offset. Windows Unicode BMP
-    # (3,1) first, then any Unicode-platform one, each only if it is format 4.
+    # (3,1) first, then a Unicode-platform BMP one (0,0-3) — not (0,4) or
+    # (0,6), which are format 12/13 and would fail the format check below.
     set -- $(od -A n -t u1 -j "$cmap" -N 4 "$f" 2>/dev/null)
     [ $# -eq 4 ] || return 1
     n=$(( $3 * 256 + $4 ))
@@ -2057,7 +2058,7 @@ clock_metrics() {
         off=$(( cmap + (($5 * 256 + $6) * 256 + $7) * 256 + $8 ))
         case "$1 $2 $3 $4" in
             '0 3 0 1') win=$off ;;
-            '0 0 0 '*) [ -z "$sub" ] && sub=$off ;;
+            '0 0 0 0'|'0 0 0 1'|'0 0 0 2'|'0 0 0 3') [ -z "$sub" ] && sub=$off ;;
         esac
         shift 8
     done
