@@ -5,6 +5,72 @@
 #include "../core/SdCompat.h"   // sdFs() — SD.h only when FEATURE_SD_STORAGE
 #include <SPI.h>
 
+// Settings that firmware before configFs() kept on the card when the storage
+// was SD. Moved to LittleFS once, on the first boot of this firmware with the
+// card mounted and SD selected: those are the copies that firmware read and
+// wrote, so they win over any older LittleFS copy left from before the card.
+// A marker file records that it ran, so a later edit on LittleFS is never
+// overwritten by the stale card copy. Each file is written to a temp name and
+// renamed, so a power cut mid-copy leaves the previous LittleFS file (or
+// none) and the marker unwritten, and the next boot tries again. The card's
+// copies are left in place: nothing reads them any more, and deleting a
+// user's file is not this function's call.
+static const char SETTINGS_MIGRATED[] = "/config/.settings_from_sd";
+
+static bool copySdToLittleFs(fs::FS& sd, const char* path) {
+    File src = sd.open(path, FILE_READ);
+    if (!src) return false;
+    String tmp = String(path) + ".mig";
+    File dst = LittleFS.open(tmp, FILE_WRITE);
+    bool ok = (bool)dst;
+    uint8_t buf[256];
+    while (ok) {
+        const int n = src.read(buf, sizeof(buf));
+        if (n <= 0) break;
+        ok = dst.write(buf, n) == (size_t)n;
+    }
+    src.close();
+    if (dst) dst.close();
+    if (ok) {
+        LittleFS.remove(path);
+        ok = LittleFS.rename(tmp, path);
+    }
+    if (!ok) LittleFS.remove(tmp);
+    return ok;
+}
+
+static void migrateSettingsFromSd() {
+    static const char* const FILES[] = {
+        "/platform_config.json",
+        "/alerts.json",
+        "/board_profile.txt",
+        "/config/kindle_slots.json",
+        "/error_log.txt",
+    };
+    if (LittleFS.exists(SETTINGS_MIGRATED)) return;
+    LittleFS.mkdir("/config");
+    // Only a device that was storing on the card had its settings there. A
+    // device on internal storage marks the move done straight away: its
+    // LittleFS copies are the current ones, and a card selected later must
+    // not bring back whatever an older firmware once left on it.
+    if (config.hardware.storageType == STORAGE_SD_CARD) {
+        fs::FS* sd = sdFs();
+        if (!sd || !sdAvailable) return;   // card missing: try next boot
+        for (const char* path : FILES) {
+            if (!sd->exists(path)) continue;
+            if (copySdToLittleFs(*sd, path)) {
+                Serial.printf("[storage] %s moved from SD to LittleFS\n", path);
+            } else {
+                // No marker: the next boot tries the whole list again.
+                Serial.printf("[storage] could not copy %s to LittleFS\n", path);
+                return;
+            }
+        }
+    }
+    File m = LittleFS.open(SETTINGS_MIGRATED, FILE_WRITE);
+    if (m) m.close();
+}
+
 bool initStorage() {
     DBGLN("Init LittleFS...");
     // R12 / AUDIT 1.7: formatOnFail=FALSE. A transient mount failure used to
@@ -55,7 +121,7 @@ bool initStorage() {
 #endif
     }
 
-    if (sdAvailable && littleFsAvailable) migrateSettingsFromSd();
+    if (littleFsAvailable) migrateSettingsFromSd();
 
     if (config.hardware.storageType == STORAGE_SD_CARD && sdAvailable) {
         activeFS = sdFs();
@@ -77,45 +143,6 @@ bool initStorage() {
 fs::FS* configFs() {
     if (littleFsAvailable) return &LittleFS;
     return activeFS;
-}
-
-// Settings that firmware before configFs() kept on the card when the storage
-// was SD. Copied to LittleFS once, when LittleFS has no copy of its own, so a
-// device that already runs from a card keeps its sensors, alerts and slots.
-// The card's copy is left in place: nothing reads it any more, and deleting a
-// user's file is not this function's call.
-static void migrateSettingsFromSd() {
-    static const char* const FILES[] = {
-        "/platform_config.json",
-        "/alerts.json",
-        "/board_profile.txt",
-        "/config/kindle_slots.json",
-        "/error_log.txt",
-    };
-    fs::FS* sd = sdFs();
-    if (!sd) return;
-    for (const char* path : FILES) {
-        if (LittleFS.exists(path) || !sd->exists(path)) continue;
-        File src = sd->open(path, FILE_READ);
-        if (!src) continue;
-        if (strncmp(path, "/config/", 8) == 0) LittleFS.mkdir("/config");
-        File dst = LittleFS.open(path, FILE_WRITE);
-        bool ok = (bool)dst;
-        uint8_t buf[256];
-        while (ok) {
-            const int n = src.read(buf, sizeof(buf));
-            if (n <= 0) break;
-            ok = dst.write(buf, n) == (size_t)n;
-        }
-        src.close();
-        if (dst) dst.close();
-        if (ok) {
-            Serial.printf("[storage] %s copied from SD to LittleFS\n", path);
-        } else {
-            LittleFS.remove(path);
-            Serial.printf("[storage] could not copy %s to LittleFS — left on SD\n", path);
-        }
-    }
 }
 
 fs::FS* getCurrentViewFS() {
