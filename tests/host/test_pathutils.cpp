@@ -59,6 +59,9 @@ static void test_isPathProtected() {
     CHECK(isPathProtected("/platform_config.json"));
     CHECK(isPathProtected("/_setup"));
     CHECK(isPathProtected("/_setup/wizard.json"));
+    CHECK(isPathProtected("/config/.settings_from_sd"));
+    CHECK(isPathProtected("/config/.settings_from_sd.pending"));
+    CHECK(isPathProtected("/alerts.json.mig"));
     CHECK(!isPathProtected("/www/index.html"));
     CHECK(!isPathProtected("/logs/2026-05-29.csv"));
     CHECK(!isPathProtected(""));

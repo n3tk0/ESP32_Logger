@@ -78,7 +78,9 @@ static void migrateSettingsFromSd() {
         "/alerts.json",
         "/board_profile.txt",
         "/config/kindle_slots.json",
-        "/error_log.txt",
+        // error_log.txt is not moved: it is a log, not a setting, and
+        // replacing the LittleFS log with the card's would lose entries.
+        // The card copy stays downloadable from the Files page.
     };
     if (LittleFS.exists(SETTINGS_DONE)) return;
     LittleFS.mkdir("/config");
@@ -95,11 +97,19 @@ static void migrateSettingsFromSd() {
         pending = m.read((uint8_t*)then, sizeof(then)) == sizeof(then);
         m.close();
     }
+    // When neither marker can be written, the move is given up (done marker)
+    // rather than left to repeat as a first move over newer LittleFS saves.
     auto writePending = [&]() {
         if (pending) return;
         for (size_t i = 0; i < N; i++) then[i] = lfsChecksum(FILES[i]);
         File m = LittleFS.open(SETTINGS_PENDING, FILE_WRITE);
-        if (m) { m.write((const uint8_t*)then, sizeof(then)); m.close(); }
+        bool ok = m && m.write((const uint8_t*)then, sizeof(then)) == sizeof(then);
+        if (m) m.close();
+        if (!ok) {
+            LittleFS.remove(SETTINGS_PENDING);
+            Serial.println("[storage] settings move from SD given up");
+            touch(SETTINGS_DONE);
+        }
     };
     fs::FS* sd = sdFs();
     if (!sd || !sdAvailable) {          // card missing: try again next boot
