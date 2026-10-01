@@ -3717,6 +3717,57 @@ check "$?" "the dated clock takes its room from the time and puts the date under
   grep -q -- "-B	BLACK" "$FBINK_LOG" && exit 2
   exit 0 )
 check "$?" "and with no style at all it is the plain one, as it always was"
+
+# A WIDE FACE MUST NOT WRAP THE CLOCK. With Futura "00:36" came out on two
+# lines: FBInk wraps what runs past the screen's edge, and the clock's room was
+# sized for Bookerly's figures. The panel reads the bold's own advances out of
+# its cmap and hmtx and sets the time smaller when it would not fit. A hand-made
+# face — cmap format 4 with one segment for '0'-':' and one for the end, and
+# figures 750/1000 em wide, wider than any text face's — so the check needs no
+# font installed and the answer is known.
+mk_wide_ttf() {
+    # Tables: head at 80, hhea at 140, hmtx at 180, cmap at 240. Glyphs 1-10
+    # are the figures, 750 wide; 11 the colon, 300. cmap (3,1) format 4 maps
+    # 48-58 to glyphs 1-11 (delta -47).
+    head -c 300 /dev/zero > "$1"
+    poke() { printf "$2" | dd of="$1" bs=1 seek="$3" conv=notrunc 2>/dev/null; }
+    poke "$1" '\000\001\000\000\000\004' 0
+    poke "$1" 'head\000\000\000\000\000\000\000P' 12
+    poke "$1" 'hhea\000\000\000\000\000\000\000\214' 28
+    poke "$1" 'hmtx\000\000\000\000\000\000\000\264' 44
+    poke "$1" 'cmap\000\000\000\000\000\000\000\360' 60
+    poke "$1" '\003\350' 98
+    poke "$1" '\000\014' 174
+    poke "$1" '\001\364\000\000\002\356\000\000\002\356\000\000\002\356\000\000\002\356\000\000\002\356\000\000\002\356\000\000\002\356\000\000\002\356\000\000\002\356\000\000\002\356\000\000\001\054\000\000' 180
+    poke "$1" '\000\000\000\001\000\003\000\001\000\000\000\014' 240
+    poke "$1" '\000\004\000\050\000\000\000\006\000\000\000\000\000\000' 252
+    poke "$1" '\000\071\000\072\377\377\000\000\000\060\000\072\377\377\377\321\377\321\000\001\000\000\000\000\000\000' 266
+}
+mk_wide_ttf "$WORK/wide_bold.ttf"
+clock_metrics "$WORK/wide_bold.ttf"
+check "$([ "$CW_0" = 750 ] && [ "$CW_9" = 750 ] && [ "$CW_c" = 300 ] && echo 0 || echo 1)" \
+      "the bold's figures and colon are read from its cmap and hmtx ($CW_0, $CW_c)"
+( reset_log
+  CLOCK_STYLE=0 draw_clock "00:36"
+  # 4 x 750 + 300 = 3.3 em: at 96 that is 316 px, past a 264 px rectangle.
+  sz=$(( Z_CLOCK_W * 96 / 100 * 1000 / 3300 ))
+  grep -q -- "px=$(px_of "$sz")," "$FBINK_LOG" || exit 1
+  grep -q -- "px=$(px_of "$CL_SIZE")," "$FBINK_LOG" && exit 2
+  exit 0 )
+check "$?" "a time too wide for its rectangle in that face is set smaller, not wrapped"
+( reset_log
+  CLOCK_STYLE=1 draw_clock "00:36"
+  left=$(sed -n 's/.*-h	-C	BLACK	-B	WHITE	-t	[^	]*left=\([0-9]*\),.*/\1/p' "$FBINK_LOG" | head -1)
+  # Centred by its real width at that size, which is the fitted 96 %.
+  [ "$left" = $(( Z_CLOCK_X + (Z_CLOCK_W - CLOCK_PX) / 2 )) ] || exit 1
+  [ "$left" -ge "$Z_CLOCK_X" ] || exit 2 )
+check "$?" "  and the boxed one is centred by that width"
+( reset_log
+  clock_metrics "$WORK/fonts/Bookerly-Regular.ttf"
+  CLOCK_STYLE=0 draw_clock "00:36"
+  grep -q -- "px=$(px_of "$CL_SIZE")," "$FBINK_LOG" || exit 1 )
+check "$?" "  and a face it cannot read draws the clock as it always did"
+clock_metrics /nonexistent
 load_kv "$DASH_TMP/data.txt" PAYLOAD
 
 # Every style, and the key, through the option table — the check section 1 runs

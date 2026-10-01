@@ -1919,6 +1919,10 @@ font_setup() {
     # Each face's own proportions, read out of its file — see font_metrics().
     font_metrics "$FONT_REG";  FONT_REG_SPAN="$FM_SPAN";  FONT_REG_ASC="$FM_ASC"
     font_metrics "$FONT_BOLD"; FONT_BOLD_SPAN="$FM_SPAN"; FONT_BOLD_ASC="$FM_ASC"
+    # The clock is set in the bold — see clock_metrics().
+    clock_metrics "$FONT_BOLD"
+    [ "${TRACE:-0}" = "1" ] && \
+        printf 'font clock widths: 0 %s 1 %s : %s\n' "${CW_0:-?}" "${CW_1:-?}" "${CW_c:-?}" >&2
     [ "${TRACE:-0}" = "1" ] && \
         printf 'font face %s: %s span %s asc %s; %s span %s asc %s\n' "$FONT_FACE_SET" \
             "$FONT_REG" "${FONT_REG_SPAN:-?}" "${FONT_REG_ASC:-?}" \
@@ -1986,6 +1990,168 @@ font_metrics() {
         return 1
     fi
     return 0
+}
+
+# ── How wide the clock's characters are in the face it is drawn in ───────────
+#
+# WITH FUTURA THE CLOCK WRAPPED: "00:36" came out on two lines. FBInk wraps a
+# string that runs past the screen's right edge, and the clock sits at the
+# right of the page with its rectangle sized for Bookerly's figures. Futura's
+# are wider — its 0 is a full circle — and the clock is the largest bold
+# string on the page, so it was the one that ran out of room. Nothing the
+# collector sends could have caught it: CLOCK_ADVW is measured with one
+# table for every face, and it is a sample, not this minute's string.
+#
+# So the panel measures the clock itself, from the file it is drawn with: the
+# advances of 0-9, ':' and the am/pm letters, looked up through `cmap`
+# (format 4, the Windows Unicode one) and `hmtx`. Read once per face, so the
+# minute-by-minute clock costs no fork. clock_fit() then sets the time smaller
+# when it would not fit its rectangle, and centres it by its real width.
+#
+# Sets CW_<c> for each character (CW_c for ':') in thousandths of the em, or
+# leaves them all empty when the file cannot be read that far — the clock
+# then draws as it always has.
+CLOCK_CHARS="0 1 2 3 4 5 6 7 8 9 c a m p"
+clock_metrics() {
+    # $1=font file
+    local f="$1" c n off sub seg i k code gid nhm start delta ro
+    for c in $CLOCK_CHARS; do eval "CW_$c="; done
+    [ -s "$f" ] || return 1
+    command -v od >/dev/null 2>&1 || return 1
+    set -- $(od -A n -t u1 -N 6 "$f" 2>/dev/null)
+    [ $# -eq 6 ] || return 1
+    n=$(( $5 * 256 + $6 ))
+    [ "$n" -ge 1 ] && [ "$n" -le 64 ] || return 1
+    local cmap="" hmtx="" hhea="" head=""
+    set -- $(od -A n -t u1 -j 12 -N $(( n * 16 )) "$f" 2>/dev/null)
+    [ $# -eq $(( n * 16 )) ] || return 1
+    while [ $# -ge 16 ]; do
+        off=$(( (($9 * 256 + ${10}) * 256 + ${11}) * 256 + ${12} ))
+        case "$1 $2 $3 $4" in
+            '99 109 97 112')   cmap=$off ;;
+            '104 109 116 120') hmtx=$off ;;
+            '104 104 101 97')  hhea=$off ;;
+            '104 101 97 100')  head=$off ;;
+        esac
+        shift 16
+    done
+    [ -n "$cmap" ] && [ -n "$hmtx" ] && [ -n "$hhea" ] && [ -n "$head" ] || return 1
+    set -- $(od -A n -t u1 -j $(( head + 18 )) -N 2 "$f" 2>/dev/null)
+    [ $# -eq 2 ] || return 1
+    local upm=$(( $1 * 256 + $2 ))
+    [ "$upm" -ge 16 ] || return 1
+    set -- $(od -A n -t u1 -j $(( hhea + 34 )) -N 2 "$f" 2>/dev/null)
+    [ $# -eq 2 ] || return 1
+    nhm=$(( $1 * 256 + $2 ))
+    [ "$nhm" -ge 1 ] || return 1
+    # The encoding records: platform, encoding, offset. Windows Unicode BMP
+    # (3,1) first, then a Unicode-platform BMP one (0,0-3) — not (0,4) or
+    # (0,6), which are format 12/13 and would fail the format check below.
+    set -- $(od -A n -t u1 -j "$cmap" -N 4 "$f" 2>/dev/null)
+    [ $# -eq 4 ] || return 1
+    n=$(( $3 * 256 + $4 ))
+    [ "$n" -ge 1 ] && [ "$n" -le 32 ] || return 1
+    set -- $(od -A n -t u1 -j $(( cmap + 4 )) -N $(( n * 8 )) "$f" 2>/dev/null)
+    [ $# -eq $(( n * 8 )) ] || return 1
+    sub=""; local win=""
+    while [ $# -ge 8 ]; do
+        off=$(( cmap + (($5 * 256 + $6) * 256 + $7) * 256 + $8 ))
+        case "$1 $2 $3 $4" in
+            '0 3 0 1') win=$off ;;
+            '0 0 0 0'|'0 0 0 1'|'0 0 0 2'|'0 0 0 3') [ -z "$sub" ] && sub=$off ;;
+        esac
+        shift 8
+    done
+    [ -n "$win" ] && sub=$win
+    [ -n "$sub" ] || return 1
+    set -- $(od -A n -t u1 -j "$sub" -N 8 "$f" 2>/dev/null)
+    [ $# -eq 8 ] && [ "$1 $2" = "0 4" ] || return 1
+    seg=$(( ($7 * 256 + $8) / 2 ))
+    [ "$seg" -ge 1 ] || return 1
+    # Segments are sorted by their last code, and ASCII is at the front: the
+    # first few cover everything the clock draws. Up to 128 of each array, one
+    # od apiece.
+    k=$seg; [ "$k" -gt 128 ] && k=128
+    local ends starts deltas ros
+    ends=$(od -A n -t u1 -j $(( sub + 14 )) -N $(( k * 2 )) "$f" 2>/dev/null)
+    starts=$(od -A n -t u1 -j $(( sub + 16 + seg * 2 )) -N $(( k * 2 )) "$f" 2>/dev/null)
+    deltas=$(od -A n -t u1 -j $(( sub + 16 + seg * 4 )) -N $(( k * 2 )) "$f" 2>/dev/null)
+    ros=$(od -A n -t u1 -j $(( sub + 16 + seg * 6 )) -N $(( k * 2 )) "$f" 2>/dev/null)
+    for c in $CLOCK_CHARS; do
+        case "$c" in
+            c) code=58 ;; a) code=97 ;; m) code=109 ;; p) code=112 ;;
+            *) code=$(( 48 + c )) ;;
+        esac
+        # The first segment whose last code is at or past this one.
+        i=0; set -- $ends
+        while [ $# -ge 2 ]; do
+            [ $(( $1 * 256 + $2 )) -ge "$code" ] && break
+            shift 2; i=$(( i + 1 ))
+        done
+        [ $# -ge 2 ] || continue
+        set -- $starts;  shift $(( i * 2 )); start=$(( $1 * 256 + $2 ))
+        [ "$start" -le "$code" ] || continue
+        set -- $deltas;  shift $(( i * 2 )); delta=$(( $1 * 256 + $2 ))
+        set -- $ros;     shift $(( i * 2 )); ro=$(( $1 * 256 + $2 ))
+        if [ "$ro" -eq 0 ]; then
+            gid=$(( (code + delta) & 65535 ))
+        else
+            # idRangeOffset is from its own slot in the array to the glyph.
+            set -- $(od -A n -t u1 -j $(( sub + 16 + seg * 6 + i * 2 + ro + (code - start) * 2 )) -N 2 "$f" 2>/dev/null)
+            [ $# -eq 2 ] || continue
+            gid=$(( $1 * 256 + $2 ))
+            [ "$gid" -eq 0 ] || gid=$(( (gid + delta) & 65535 ))
+        fi
+        [ "$gid" -gt 0 ] || continue
+        # Glyphs past numberOfHMetrics share the last advance.
+        [ "$gid" -ge "$nhm" ] && gid=$(( nhm - 1 ))
+        set -- $(od -A n -t u1 -j $(( hmtx + gid * 4 )) -N 2 "$f" 2>/dev/null)
+        [ $# -eq 2 ] || continue
+        eval "CW_$c=$(( ($1 * 256 + $2) * 1000 / upm ))"
+    done
+    # Without the figures and the colon there is nothing to measure a time by.
+    for c in 0 1 2 3 4 5 6 7 8 9 c; do
+        eval "[ -n \"\${CW_$c}\" ]" || { for c in $CLOCK_CHARS; do eval "CW_$c="; done; return 1; }
+    done
+    return 0
+}
+
+# How wide $1 comes out in the bold face, in thousandths of the em, into
+# CLOCK_W — 0 when a character in it was not measured. No fork: it runs every
+# minute.
+clock_width() {
+    local s="$1" c w
+    CLOCK_W=0
+    while [ -n "$s" ]; do
+        c="${s%"${s#?}"}"; s="${s#?}"
+        case "$c" in
+            [0-9]) eval "w=\${CW_$c}" ;;
+            :)     w="${CW_c}" ;;
+            a|m|p) eval "w=\${CW_$c}" ;;
+            *)     w="" ;;
+        esac
+        [ -n "$w" ] || { CLOCK_W=0; return 1; }
+        CLOCK_W=$(( CLOCK_W + w ))
+    done
+    return 0
+}
+
+# The size the time is drawn at, $1 or smaller so that $2 fits the clock's
+# rectangle with a little air at its sides — into CLOCK_SZ. Its width at that
+# size into CLOCK_PX, 0 when the face could not be measured.
+clock_fit() {
+    # $1=design size  $2=the time
+    local room
+    CLOCK_SZ="$1"; CLOCK_PX=0
+    clock_width "$2" || return 0
+    [ "$CLOCK_W" -gt 0 ] || return 0
+    # Kerning and FBInk's rounding are not in the sum; 4 % covers both.
+    room=$(( ${Z_CLOCK_W:-0} * 96 / 100 ))
+    [ "$room" -gt 0 ] || return 0
+    if [ $(( CLOCK_SZ * CLOCK_W / 1000 )) -gt "$room" ]; then
+        CLOCK_SZ=$(( room * 1000 / CLOCK_W ))
+    fi
+    CLOCK_PX=$(( CLOCK_SZ * CLOCK_W / 1000 ))
 }
 
 # ── Network helpers ──────────────────────────────────────────────────────────
@@ -3444,10 +3610,14 @@ now_clock() {
 # the two differ in width — 9:59 to 10:00 on the lean clock — the centring is
 # out by half a digit until the next fetch. Half a digit beats the time set
 # hard against the left edge of a black plate.
+#
+# When the face could be measured, clock_fit() has the real width of this
+# minute's string in CLOCK_PX, and that is what it is centred by instead.
 clock_centre_x() {
     # $1=type size  -> CENTRE_X
     local sz="$1" w
     w=$(( sz * ${CLOCK_ADVW:-0} / 1000 ))
+    [ "${CLOCK_PX:-0}" -gt 0 ] 2>/dev/null && w="$CLOCK_PX"
     if [ "$w" -gt 0 ] && [ "$w" -lt "${Z_CLOCK_W:-0}" ] 2>/dev/null; then
         CENTRE_X=$(( Z_CLOCK_X + (Z_CLOCK_W - w) / 2 ))
     else
@@ -3473,7 +3643,7 @@ draw_clock() {
             # weekday already gets in the week strip. On a screen with no
             # colour a filled block is the one mark that survives dithering
             # unambiguously, which is why the style exists at all.
-            sz="${CL_SZ_BOXED:-$CL_SIZE}"
+            clock_fit "${CL_SZ_BOXED:-$CL_SIZE}" "$now_time"; sz="$CLOCK_SZ"
             fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" BLACK
             cy=$(( Z_CLOCK_Y + (Z_CLOCK_H - sz) / 2 ))
             clock_centre_x "$sz"
@@ -3486,9 +3656,10 @@ draw_clock() {
             # rather than as a number that happens to have a line above it. The
             # hairline under it is the one the indoor row already draws.
             fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
-            sz="${CL_SZ_RULED:-$CL_SIZE}"
+            clock_fit "${CL_SZ_RULED:-$CL_SIZE}" "$now_time"; sz="$CLOCK_SZ"
             draw_hline "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" BLACK
-            cy=$(( Z_CLOCK_Y + ${CL_RULED_PAD:-15} ))
+            # Set smaller to fit, it keeps its middle where the full size had it.
+            cy=$(( Z_CLOCK_Y + ${CL_RULED_PAD:-15} + (${CL_SZ_RULED:-$CL_SIZE} - sz) / 2 ))
             clock_centre_x "$sz"
             draw_text_bold "$CENTRE_X" "$cy" "$sz" "BLACK" "$now_time"
             ;;
@@ -3499,7 +3670,7 @@ draw_clock() {
             # The date is the collector's, formatted to the reader's choice. It
             # changes once a day, so a value up to one fetch old is right.
             fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
-            sz="${CL_SZ_DATED:-$CL_SIZE}"
+            clock_fit "${CL_SZ_DATED:-$CL_SIZE}" "$now_time"; sz="$CLOCK_SZ"
             draw_text_bold "$CL_X" "$CL_Y" "$sz" "BLACK" "$now_time"
             # An `&&` here would make draw_clock's exit status the test's, so
             # a collector that sends no date — an older one, or the offline
@@ -3517,7 +3688,9 @@ draw_clock() {
             fi
             ;;
         *)  fill_rect "$Z_CLOCK_X" "$Z_CLOCK_Y" "$Z_CLOCK_W" "$Z_CLOCK_H" WHITE
-            draw_text_bold "$CL_X" "$CL_Y" "$CL_SIZE" "BLACK" "$now_time" ;;
+            clock_fit "$CL_SIZE" "$now_time"
+            draw_text_bold "$CL_X" "$(( CL_Y + (CL_SIZE - CLOCK_SZ) / 2 ))" \
+                "$CLOCK_SZ" "BLACK" "$now_time" ;;
     esac
 }
 
