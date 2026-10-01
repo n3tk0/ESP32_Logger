@@ -160,6 +160,9 @@ inline uint32_t& hostMillisRef() { static uint32_t m = 0; return m; }
 inline uint32_t  millis()                 { return hostMillisRef(); }
 inline void      hostSetMillis(uint32_t v) { hostMillisRef() = v; }
 inline void      hostAdvanceMillis(uint32_t d) { hostMillisRef() += d; }
+// delay() moves the settable clock, so a driver polling millis() for a
+// deadline cannot spin forever on the host.
+inline void      delay(uint32_t ms)       { hostAdvanceMillis(ms ? ms : 1); }
 
 // ----------------------------------------------------------------------------
 // GPIO and the ESP32 attributes, inert. Globals.h declares the RTC driver
