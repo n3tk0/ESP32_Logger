@@ -45,17 +45,18 @@ static bool copySdToLittleFs(fs::FS& sd, const char* path) {
     src.close();
     if (dst) dst.close();
     ok = ok && got == want;            // a short read is a failed copy
-    if (ok) {
-        LittleFS.remove(path);
-        ok = LittleFS.rename(tmp, path);
-    }
+    // LittleFS rename replaces the target atomically (AtomicWrite.h), so the
+    // old copy stays until the new one is in place.
+    if (ok) ok = LittleFS.rename(tmp, path);
     if (!ok) LittleFS.remove(tmp);
     return ok;
 }
 
-static void touch(const char* path) {
+static bool touch(const char* path) {
     File m = LittleFS.open(path, FILE_WRITE);
-    if (m) m.close();
+    if (!m) return false;
+    m.close();
+    return true;
 }
 
 // FNV-1a over a LittleFS file, 0 when it does not exist.
@@ -82,8 +83,7 @@ static void migrateSettingsFromSd() {
     if (LittleFS.exists(SETTINGS_DONE)) return;
     LittleFS.mkdir("/config");
     if (config.hardware.storageType != STORAGE_SD_CARD) {
-        touch(SETTINGS_DONE);
-        LittleFS.remove(SETTINGS_PENDING);
+        if (touch(SETTINGS_DONE)) LittleFS.remove(SETTINGS_PENDING);
         return;
     }
     constexpr size_t N = sizeof(FILES) / sizeof(FILES[0]);
@@ -119,12 +119,10 @@ static void migrateSettingsFromSd() {
             all = false;
         }
     }
-    if (all) {
-        touch(SETTINGS_DONE);
-        LittleFS.remove(SETTINGS_PENDING);
-    } else {
-        writePending();
-    }
+    // Without the done marker the next boot would take the card's copies
+    // again as a first move; the pending marker keeps it to leftovers.
+    if (all && touch(SETTINGS_DONE)) LittleFS.remove(SETTINGS_PENDING);
+    else                             writePending();
 }
 
 bool initStorage() {
