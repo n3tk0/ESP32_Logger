@@ -206,6 +206,16 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 }
 
 // ---------------------------------------------------------------------------
+// True when at least one configured sensor is read by SlowSensorTask. Called
+// after loadAndInit()/reloadConfig() by the same caller, so the list is not
+// changing underneath it.
+bool SensorManager::hasBlocking() const {
+    for (int i = 0; i < _count; i++)
+        if (_sensors[i] && _sensors[i]->isBlocking()) return true;
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking) {
     int pushed = 0;
     uint32_t ms = millis();

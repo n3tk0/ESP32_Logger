@@ -1,4 +1,5 @@
 #include "ApiHandlers.h"
+#include "../managers/StorageManager.h"   // configFs(): settings live on LittleFS
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <WiFi.h>                      // WiFi scan/test (Pass 5 5.5 phase 1)
@@ -987,11 +988,11 @@ static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, siz
     }
     kdZonesClamp(fresh);
 
-    if (!activeFS) {
+    if (!configFs()) {
         req->send(503, "application/json", "{\"ok\":false,\"error\":\"no filesystem\"}");
         return;
     }
-    if (!kdSlotsSave(*activeFS, fresh)) {
+    if (!kdSlotsSave(*configFs(), fresh)) {
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"save failed\"}");
         return;
     }
@@ -1013,18 +1014,20 @@ static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, siz
 // ---------------------------------------------------------------------------
 static void handleConfigPlatform(AsyncWebServerRequest* req) {
     if (!requireMutatingAuth(req)) return;   // rate-limit + CSRF
-    if (!activeFS) {
+    fs::FS* cfs = configFs();
+    if (!cfs) {
         req->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
         return;
     }
     // Lock config mutex so tasks don't read a partially-updated config
     if (configMutex && xSemaphoreTake(configMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
-        bool sensorsOk   = sensorManager.reloadConfig(*activeFS);
-        bool exportersOk = exportManager.reloadConfig(*activeFS);
+        bool sensorsOk   = sensorManager.reloadConfig(*cfs);
+        bool exportersOk = exportManager.reloadConfig(*cfs);
         // Propagate StorageTask-visible knobs (SDS011 humidity correction).
         // StorageTask re-reads storageParam every aggregation tick, so this
         // is enough to apply changes live without a reboot.
-        TaskManager::refreshStorageFromPlatform(*activeFS);
+        TaskManager::refreshStorageFromPlatform(*cfs);
+        TaskManager::ensureSlowSensorTask();
         xSemaphoreGive(configMutex);
         if (sensorsOk && exportersOk) req->send(200, "application/json", "{\"ok\":true}");
         else                          req->send(500, "application/json", "{\"ok\":false,\"error\":\"reload failed\"}");
@@ -1129,7 +1132,8 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         return h ? (uint32_t)uxTaskGetStackHighWaterMark(h) : 0;
     };
     tasks["sensor"]     = stackWords(TaskManager::hSensor);
-    tasks["slowSensor"] = stackWords(TaskManager::hSlowSensor);
+    if (TaskManager::hSlowSensor)   // only started for a blocking sensor
+        tasks["slowSensor"] = stackWords(TaskManager::hSlowSensor);
     tasks["process"]    = stackWords(TaskManager::hProcess);
     tasks["storage"]    = stackWords(TaskManager::hStorage);
     tasks["export"]     = stackWords(TaskManager::hExport);
@@ -1176,10 +1180,11 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     // saved diagnostic bundle already read, and renaming a field to match a
     // filename would break those for nothing.
     JsonArray rl = doc["resetLog"].to<JsonArray>();
-    if (fsAvailable && activeFS && fsMutex) {
+    fs::FS* lfs = configFs();   // where EventLog writes (EventLog.cpp logFs())
+    if (lfs && fsMutex) {
         MutexGuard g(fsMutex, pdMS_TO_TICKS(1000));
-        if (g.isLocked() && activeFS->exists(EVENT_LOG_PATH)) {
-            File f = activeFS->open(EVENT_LOG_PATH, FILE_READ);
+        if (g.isLocked() && lfs->exists(EVENT_LOG_PATH)) {
+            File f = lfs->open(EVENT_LOG_PATH, FILE_READ);
             if (f && f.size() <= 8 * 1024) {
                 String buf = f.readString();
                 f.close();
@@ -1780,9 +1785,10 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
 
     // Deserialize each shadow file directly into the parent doc to avoid
     // the temp-doc + deep-copy round-trip (gemini review PR #51).
-    auto inhaleJsonFile = [](JsonObject parent, const char* key, const char* path) {
-        if (!activeFS || !activeFS->exists(path)) return;
-        File f = activeFS->open(path, FILE_READ);
+    auto inhaleJsonFile = [](JsonObject parent, const char* key, const char* path,
+                             fs::FS* fs) {
+        if (!fs || !fs->exists(path)) return;
+        File f = fs->open(path, FILE_READ);
         if (!f) return;
         // 16 KB cap — same as ExportManager / SensorManager input caps;
         // beyond that we'd risk OOM on the AsyncTCP worker.
@@ -1794,22 +1800,26 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
         f.close();
     };
 
+    // All three are settings, so on LittleFS whatever the storage
+    // (configFs()). modules.json is only ever written there by saveConfig().
+    fs::FS* modulesFs = littleFsAvailable ? static_cast<fs::FS*>(&LittleFS) : nullptr;
+
     // Each section is best-effort — a missing file just leaves the key off
     // the response.  Restore code (future) must cope with absent keys.
     // Acquire fsMutex around all three reads so StorageTask / saveConfig can't
     // write a file mid-read.  Lock ordering: configMutex (already held) →
     // fsMutex — consistent with saveConfig which takes only fsMutex.  (AUDIT 3.20)
     if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
-        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
-        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json", modulesFs);
+        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json", configFs());
+        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json", configFs());
         xSemaphoreGive(fsMutex);
     } else {
         // Best-effort on timeout — files may be mid-write but we still send
         // whatever was deserialized rather than returning 503.
-        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
-        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
-        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json", modulesFs);
+        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json", configFs());
+        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json", configFs());
     }
 
     serializeJson(doc, static_cast<Print&>(*resp));

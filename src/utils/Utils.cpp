@@ -84,6 +84,11 @@ bool isPathProtected(const String& path) {
     if (path == "/config.tmp")              return true;  // atomic-write scratch
     if (path == "/platform_config.tmp")     return true;
     if (path == "/board_profile.tmp")       return true;
+    // SD -> LittleFS settings move (StorageManager.cpp): its markers and the
+    // temp copies it renames into place.
+    if (path == "/config/.settings_from_sd")         return true;
+    if (path == "/config/.settings_from_sd.pending") return true;
+    if (path.endsWith(".mig"))              return true;
     if (path.startsWith("/_setup/") || path == "/_setup") return true;
     return false;
 }

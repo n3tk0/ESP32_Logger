@@ -1494,11 +1494,12 @@ static void h_get_wifi_scan_result(AsyncWebServerRequest* r) {
 }
 
 static void h_get_api_platform_config(AsyncWebServerRequest* r) {
-    if (!fsAvailable || !activeFS || !activeFS->exists("/platform_config.json")) {
+    fs::FS* cfs = configFs();
+    if (!cfs || !cfs->exists("/platform_config.json")) {
         r->send(404, "application/json", "{\"ok\":false,\"error\":\"platform_config.json not found\"}");
         return;
     }
-    r->send(*activeFS, "/platform_config.json", "application/json");
+    r->send(*cfs, "/platform_config.json", "application/json");
 }
 
 static void h_post_api_platform_reload(AsyncWebServerRequest* r) {
@@ -2823,8 +2824,8 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             if (s_pcfgFile) s_pcfgFile.close();
             // If the upload didn't finish cleanly, discard the partial tmp so
             // the real platform_config.json remains the last good copy.
-            if (!s_pcfgComplete && activeFS && activeFS->exists(PCFG_TMP)) {
-                activeFS->remove(PCFG_TMP);
+            if (!s_pcfgComplete && configFs() && configFs()->exists(PCFG_TMP)) {
+                configFs()->remove(PCFG_TMP);
             }
             if (s_pcfgMutexHeld && fsMutex) {
                 xSemaphoreGive(fsMutex);
@@ -2847,7 +2848,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     return;
                 }
                 if (rateLimit429(r)) { pcfgCleanup(); return; }
-                if (!fsAvailable || !activeFS) {
+                if (!configFs()) {
                     pcfgCleanup();
                     r->send(503, "application/json", "{\"ok\":false,\"error\":\"no fs\"}");
                     return;
@@ -2857,7 +2858,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             nullptr,
             [pcfgCleanup](AsyncWebServerRequest *r, uint8_t *data, size_t len,
                size_t index, size_t total) {
-                if (!fsAvailable || !activeFS) return;
+                if (!configFs()) return;
                 if (index == 0) {
                     s_pcfgComplete = false;
                     s_pcfgAuthFail = false;
@@ -2871,8 +2872,8 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                         s_pcfgMutexHeld = true;
                     }
                     // Clean up any leftover tmp from a previous aborted save.
-                    if (activeFS->exists(PCFG_TMP)) activeFS->remove(PCFG_TMP);
-                    s_pcfgFile = activeFS->open(PCFG_TMP, FILE_WRITE);
+                    if (configFs()->exists(PCFG_TMP)) configFs()->remove(PCFG_TMP);
+                    s_pcfgFile = configFs()->open(PCFG_TMP, FILE_WRITE);
                     if (!s_pcfgFile && s_pcfgMutexHeld && fsMutex) {
                         xSemaphoreGive(fsMutex);
                         s_pcfgMutexHeld = false;
@@ -2894,14 +2895,14 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     // remove+rename if the first attempt fails. If we crash between
                     // remove and rename the tmp is still on disk, but no recovery
                     // path picks it up, so the small window is acceptable.
-                    bool ok = activeFS->rename(PCFG_TMP, PCFG_PATH);
+                    bool ok = configFs()->rename(PCFG_TMP, PCFG_PATH);
                     if (!ok) {
-                        if (activeFS->exists(PCFG_PATH)) activeFS->remove(PCFG_PATH);
-                        ok = activeFS->rename(PCFG_TMP, PCFG_PATH);
+                        if (configFs()->exists(PCFG_PATH)) configFs()->remove(PCFG_PATH);
+                        ok = configFs()->rename(PCFG_TMP, PCFG_PATH);
                     }
                     if (!ok) {
                         // Rename still failed — clean up the tmp so we don't leak it.
-                        if (activeFS->exists(PCFG_TMP)) activeFS->remove(PCFG_TMP);
+                        if (configFs()->exists(PCFG_TMP)) configFs()->remove(PCFG_TMP);
                     } else {
                         s_pcfgComplete = true;  // success → cleanup() won't delete anything
                     }

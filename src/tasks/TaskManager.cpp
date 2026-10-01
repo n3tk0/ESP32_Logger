@@ -15,6 +15,7 @@
 #include <time.h>                       // time() — pipelineNowEpoch()
 #include "../utils/MutexGuard.h"        // rtcMutex around the DS1302 exchange
 #include "../core/SdCompat.h"   // sdFs() — SD.h only when FEATURE_SD_STORAGE
+#include "../managers/StorageManager.h" // configFs(): platform_config.json
 #include "../utils/JsonIO.h"
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,24 @@ void TaskManager::applyLoggerConfig() {
     storageParam.csvLoggingEnabled      = config.logger.csvLoggingEnabled;
 }
 
+bool TaskManager::_createSlowSensorTask() {
+    g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();
+    return xTaskCreatePinnedToCore(slowSensorTaskFunc,     "SlowSensorTask",
+                                   STACK_SLOW_SENSOR_TASK, nullptr,
+                                   TASK_PRIO_SLOW_SENSOR,  &hSlowSensor, 0) == pdPASS;
+}
+
+// Start SlowSensorTask after a config reload that added the first blocking
+// sensor. Never stops it: removing the sensor leaves an idle task until the
+// next reboot, which is what every boot before this change had anyway.
+void TaskManager::ensureSlowSensorTask() {
+    if (!running || hSlowSensor || !sensorManager.hasBlocking()) return;
+    if (_createSlowSensorTask())
+        Serial.println("[TaskManager] SlowSensorTask started for a blocking sensor");
+    else
+        Serial.println("[TaskManager] SlowSensorTask FAILED — blocking sensors will not be read until reboot");
+}
+
 bool TaskManager::init(fs::FS& fs) {
     // AUDIT 2.3: do NOT set running=true here. Tasks + queues + mutexes are
     // built below; if any step fails, half-built state would have left
@@ -227,7 +246,10 @@ bool TaskManager::init(fs::FS& fs) {
     // SDS011 humidity correction from platform_config.json. The data log's
     // file, rotation and retention come from config.datalog (Datalog.h), no
     // longer from the "storage" block there.
-    refreshStorageFromPlatform(fs);
+    // platform_config.json is a setting: on LittleFS (configFs()), while `fs`
+    // is where the data log goes.
+    fs::FS* cfs = configFs();
+    if (cfs) refreshStorageFromPlatform(*cfs);
     storageParam.fs = &fs;
     applyLoggerConfig();
 
@@ -245,7 +267,7 @@ bool TaskManager::init(fs::FS& fs) {
     // and config requests "mirror" mode, start a second StorageTask on the other FS.
     storageParam.mirrorFS = nullptr;
     {
-        File cfgFile2 = fs.open("/platform_config.json", FILE_READ);
+        File cfgFile2 = cfs ? cfs->open("/platform_config.json", FILE_READ) : File();
         if (cfgFile2) {
             JsonDocument doc2;
             if (deserializeJsonFile(doc2, cfgFile2) == DeserializationError::Ok) {
@@ -284,10 +306,13 @@ bool TaskManager::init(fs::FS& fs) {
                                 TASK_PRIO_SENSOR,   &hSensor,   0);
     if (r != pdPASS) { Serial.println("[TaskManager] SensorTask FAILED"); _cleanupPartialInit(); return false; }
 
-    r = xTaskCreatePinnedToCore(slowSensorTaskFunc,     "SlowSensorTask",
-                                STACK_SLOW_SENSOR_TASK, nullptr,
-                                TASK_PRIO_SLOW_SENSOR,  &hSlowSensor, 0);
-    if (r != pdPASS) { Serial.println("[TaskManager] SlowSensorTask FAILED"); _cleanupPartialInit(); return false; }
+    // SlowSensorTask only when a blocking sensor (SDS011, PMS5003, wind) is
+    // configured: otherwise its 4 KB stack does nothing but wake every
+    // 500 ms to find no work. ensureSlowSensorTask() starts it later if one
+    // is added from the Sensors page.
+    if (sensorManager.hasBlocking() && !_createSlowSensorTask()) {
+        Serial.println("[TaskManager] SlowSensorTask FAILED"); _cleanupPartialInit(); return false;
+    }
 
     r = xTaskCreatePinnedToCore(processingTaskFunc, "ProcessTask",
                                 STACK_PROCESS_TASK, nullptr,
@@ -396,7 +421,8 @@ bool TaskManager::checkHealth() {
     };
     for (int i = 0; i < TASK_COUNT; i++) {
         TaskHandle_t h = taskHandles[i];
-        if (h && eTaskGetState(h) == eDeleted) {
+        if (!h) continue;    // not started (SlowSensorTask with no blocking sensor)
+        if (eTaskGetState(h) == eDeleted) {
             Serial.printf("[Watchdog] Task %d deleted unexpectedly\n", i);
             return false;
         }

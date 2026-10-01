@@ -1539,8 +1539,8 @@ are implemented:
 
 | Provider | `provider` | Key | Notes |
 |---|---|---|---|
-| Open-Meteo | `open-meteo` | none | No account, no quota worth counting. The default. |
-| OpenWeatherMap | `owm` | required | Free tier ~1000 calls/day. |
+| Open-Meteo | `open-meteo` | none | No account, no quota worth counting. The default. Plain HTTP on the ESP32-C3, where a TLS session does not fit the heap (`-DFORECAST_OPENMETEO_TLS=1` restores HTTPS); HTTPS elsewhere. |
+| OpenWeatherMap | `owm` | required | Free tier ~1000 calls/day. Always HTTPS, because the URL carries the key. |
 
 Configure via the module UI or `modules.json`:
 
