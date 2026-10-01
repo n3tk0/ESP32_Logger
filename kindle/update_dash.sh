@@ -327,6 +327,8 @@ payload_key_ok() {
         # allowed here. They reach one drawn string and nothing else.
         CACHED_AT|CACHED_ON) return 0 ;;
         SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
+        # The face chosen on the collector, KFACE_* 0..5 — see face_files().
+        FONT_FACE) return 0 ;;
         # The week strip's look and, when it holds the forecast, its seven
         # days and which of them is today (WF_NOW); and the dividing lines'
         # thickness, pens and style. The pens are checked where they are
@@ -1835,11 +1837,78 @@ pick_font() {
     echo ""
 }
 
+# The first .ttf/.otf in fonts/ then the system's whose name has $1 in it,
+# as spelt or in lower case:
+# the upright face for $2=reg, skipping bold, italic and the heavier cuts, or
+# the bold one for $2=bold. For the faces whose file names this script does
+# not know for certain — Palatino and Baskerville differ between firmwares —
+# and as a second chance for the ones it does.
+pick_family() {
+    # $1=family as it appears in the file name, $2=reg|bold
+    local dir f base lc
+    lc=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+    for dir in "$USR_FONTS" "$SYS_FONTS"; do
+        for f in "$dir"/*"$1"* "$dir"/*"$lc"*; do
+            [ -f "$f" ] || continue
+            base=${f##*/}
+            case "$base" in *.ttf|*.TTF|*.otf|*.OTF) ;; *) continue ;; esac
+            case "$base" in *[Ii]talic*|*[Oo]blique*) continue ;; esac
+            if [ "$2" = "bold" ]; then
+                case "$base" in *[Bb]old*|*_75_*) echo "$f"; return 0 ;; esac
+            else
+                case "$base" in *[Bb]old*|*[Hh]eavy*|*[Bb]lack*|*_75_*) continue ;; esac
+                echo "$f"; return 0
+            fi
+        done
+    done
+    echo ""
+}
+
+# The face the collector's E-ink settings chose (FONT_FACE, KFACE_* 0..5):
+# its files first, then the order this script has always used, so a face the
+# device does not have falls back to Bookerly rather than to nothing. Into
+# FACE_REG and FACE_BOLD, empty when that face has no file here.
+face_files() {
+    # $1=FONT_FACE
+    FACE_REG=""; FACE_BOLD=""
+    case "$1" in
+        1) FACE_REG=$(pick_font "Caecilia_LT_65_Medium.ttf" "Caecilia_LT_55_Roman.ttf")
+           FACE_BOLD=$(pick_font "Caecilia_LT_75_Bold.ttf")
+           fam=Caecilia ;;
+        2) fam=Palatino ;;
+        3) fam=Baskerville ;;
+        4) FACE_REG=$(pick_font "Helvetica_LT_65_Medium.ttf" "Helvetica_LT_55_Roman.ttf")
+           FACE_BOLD=$(pick_font "Helvetica_LT_75_Bold.ttf")
+           fam=Helvetica ;;
+        5) FACE_REG=$(pick_font "Futura_LT_Book.ttf" "Futura_LT_Medium.ttf")
+           FACE_BOLD=$(pick_font "Futura_LT_Bold.ttf" "Futura_LT_Heavy.ttf")
+           fam=Futura ;;
+        *) return 0 ;;
+    esac
+    [ -n "$FACE_REG" ]  || FACE_REG=$(pick_family "$fam" reg)
+    [ -n "$FACE_BOLD" ] || FACE_BOLD=$(pick_family "$fam" bold)
+    # A bold with no upright of its own would sit beside Bookerly's regular:
+    # two faces on one line, which is what falling back whole avoids.
+    [ -n "$FACE_REG" ] || FACE_BOLD=""
+    return 0
+}
+
+FONT_FACE_SET=""
+FACE_CHANGED=0
 font_setup() {
-    FONT_REG=$(pick_font "Bookerly-Regular.ttf" "Caecilia_LT_65_Medium.ttf" \
-                         "Helvetica_LT_65_Medium.ttf" "Futura_LT_Book.ttf")
-    FONT_BOLD=$(pick_font "Bookerly-Bold.ttf" "Caecilia_LT_75_Bold.ttf" \
-                          "Helvetica_LT_75_Bold.ttf" "Futura_LT_Bold.ttf")
+    local fam
+    FONT_FACE_SET="${FONT_FACE:-0}"
+    face_files "$FONT_FACE_SET"
+    FONT_REG="$FACE_REG"; FONT_BOLD="$FACE_BOLD"
+    [ -n "$FONT_REG" ] || \
+        FONT_REG=$(pick_font "Bookerly-Regular.ttf" "Caecilia_LT_65_Medium.ttf" \
+                             "Helvetica_LT_65_Medium.ttf" "Futura_LT_Book.ttf")
+    # The chosen face's bold with its own upright only: a Bookerly bold beside
+    # a Futura regular would be two faces on one line.
+    if [ -z "$FONT_BOLD" ] && [ -z "$FACE_REG" ]; then
+        FONT_BOLD=$(pick_font "Bookerly-Bold.ttf" "Caecilia_LT_75_Bold.ttf" \
+                              "Helvetica_LT_75_Bold.ttf" "Futura_LT_Bold.ttf")
+    fi
     [ -z "$FONT_BOLD" ] && FONT_BOLD="$FONT_REG"
     [ -z "$FONT_REG" ]  && FONT_REG="$FONT_BOLD"
     if [ -z "$FONT_REG" ]; then
@@ -1851,7 +1920,7 @@ font_setup() {
     font_metrics "$FONT_REG";  FONT_REG_SPAN="$FM_SPAN";  FONT_REG_ASC="$FM_ASC"
     font_metrics "$FONT_BOLD"; FONT_BOLD_SPAN="$FM_SPAN"; FONT_BOLD_ASC="$FM_ASC"
     [ "${TRACE:-0}" = "1" ] && \
-        printf 'font %s span %s asc %s; %s span %s asc %s\n' \
+        printf 'font face %s: %s span %s asc %s; %s span %s asc %s\n' "$FONT_FACE_SET" \
             "$FONT_REG" "${FONT_REG_SPAN:-?}" "${FONT_REG_ASC:-?}" \
             "$FONT_BOLD" "${FONT_BOLD_SPAN:-?}" "${FONT_BOLD_ASC:-?}" >&2
     return 0
@@ -2671,7 +2740,7 @@ zones_forget() {
     # And which way up, and whether there is a clock: a collector that no
     # longer says lays out the upright page with one.
     unset PAGE_ROT SHOW_CLOCK FC3_LABEL FC4_LABEL 2>/dev/null
-    unset TIME_UTC TIME_OFF SYNC_DAYS 2>/dev/null
+    unset TIME_UTC TIME_OFF SYNC_DAYS FONT_FACE 2>/dev/null
     # And the layout, for the same reason again: a collector downgraded to a
     # firmware that works none out has to take the panel back to the file's.
     for z in $FLOW_KEYS GRID_ROWS CH_T CH_B CH_L CH_R; do unset "LY_$z" 2>/dev/null; done
@@ -2686,6 +2755,12 @@ load_data() {
     [ -f "$TMP/data.txt" ] || return 1
     zones_forget
     load_kv "$TMP/data.txt" PAYLOAD || return 1
+    # The face chosen on the collector, picked up the moment it changes — and
+    # the whole page redrawn in it, not one zone at a time over half an hour.
+    if [ "${FONT_FACE:-0}" != "$FONT_FACE_SET" ]; then
+        font_setup || true
+        FACE_CHANGED=1
+    fi
 
     # The layout follows the data, always — RES_W and RES_H come from the
     # collector, so the two cannot be loaded independently.
@@ -4543,6 +4618,7 @@ redraw_offline() {
 # actually resets ghosting, and it is why the others do not have to.
 redraw_all() {
     # $1=HH:MM  $2=0 for a full redraw that does not flash
+    FACE_CHANGED=0
     clear_screen
     # A COLD START MAY HAVE NOTHING TO PUT IN THE READINGS. cache_load leaves a
     # page with a chart, a forecast and a week strip and readings whose ages
@@ -5147,6 +5223,13 @@ while true; do
     case " $TIERS " in
         *" sensors "*|*" forecast "*|*" chart "*) fetch_data && load_data ;;
     esac
+    # A new face from the collector: every zone at once, see load_data().
+    if [ "${FACE_CHANGED:-0}" = "1" ]; then
+        if quiet_now; then redraw_all "$NOW_TIME" 0
+        else               redraw_all "$NOW_TIME" 1
+        fi
+        continue
+    fi
 
     case " $TIERS " in
         *" sensors "*)

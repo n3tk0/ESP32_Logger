@@ -398,6 +398,36 @@ check "$([ -n "$DASH_DIR" ] && [ -d "$DASH_DIR/layout" ] && echo 0 || echo 1)" \
 USR_FONTS="$WORK/fonts"
 font_setup
 
+# The face the collector chose (FONT_FACE): its files when the reader has
+# them, found by family when their names are not known for certain, and
+# Bookerly, regular AND bold, when there are none — never a bold of one face
+# beside the regular of another.
+( FD="$WORK/face_usr"; SD="$WORK/face_sys"; mkdir -p "$FD" "$SD"
+  : > "$FD/Bookerly-Regular.ttf"; : > "$FD/Bookerly-Bold.ttf"
+  : > "$SD/Futura_LT_Book.ttf"; : > "$SD/Futura_LT_Bold.ttf"
+  : > "$SD/Palatino Linotype Italic.ttf"; : > "$SD/Palatino Linotype.ttf"
+  : > "$SD/Palatino Linotype Bold.ttf"; : > "$SD/Helvetica_LT_65_Medium.ttf"
+  USR_FONTS="$FD"; SYS_FONTS="$SD"
+  FONT_FACE=5 font_setup 2>/dev/null
+  [ "$FONT_REG" = "$SD/Futura_LT_Book.ttf" ] && [ "$FONT_BOLD" = "$SD/Futura_LT_Bold.ttf" ] || exit 1
+  [ "$FONT_FACE_SET" = 5 ] || exit 2
+  FONT_FACE=2 font_setup 2>/dev/null
+  [ "$FONT_REG" = "$SD/Palatino Linotype.ttf" ] && [ "$FONT_BOLD" = "$SD/Palatino Linotype Bold.ttf" ] || exit 3
+  FONT_FACE=3 font_setup 2>/dev/null
+  [ "$FONT_REG" = "$FD/Bookerly-Regular.ttf" ] && [ "$FONT_BOLD" = "$FD/Bookerly-Bold.ttf" ] || exit 4
+  FONT_FACE=4 font_setup 2>/dev/null
+  [ "$FONT_REG" = "$SD/Helvetica_LT_65_Medium.ttf" ] && [ "$FONT_BOLD" = "$FONT_REG" ] || exit 5
+  : > "$SD/Futura_LT_Bold.ttf"; rm -f "$SD/Futura_LT_Book.ttf"
+  FONT_FACE=5 font_setup 2>/dev/null
+  [ "$FONT_REG" = "$FD/Bookerly-Regular.ttf" ] && [ "$FONT_BOLD" = "$FD/Bookerly-Bold.ttf" ] || exit 7
+  : > "$SD/baskerville-regular.ttf"
+  FONT_FACE=3 font_setup 2>/dev/null
+  [ "$FONT_REG" = "$SD/baskerville-regular.ttf" ] && [ "$FONT_BOLD" = "$FONT_REG" ] || exit 8
+  unset FONT_FACE; font_setup 2>/dev/null
+  [ "$FONT_REG" = "$FD/Bookerly-Regular.ttf" ] && [ "$FONT_FACE_SET" = 0 ] || exit 6
+  exit 0 )
+check "$?" "the collector's face on the panel: its files, by family, else Bookerly whole"
+
 # ── The FBInk option table, from its own getopt definition ───────────────────
 # Short flags taking no argument, taking one, and taking an optional one. If
 # fbink gains an option, this list is what a new call has to be added to — and
@@ -2830,6 +2860,21 @@ check "$?" "the version is read plainly, spelt safely for the query, and refused
   cp "$FIXTURE" "$TMP/data.txt"
   exit 0 )
 check "$?" "a reading the collector stops sending is forgotten, not kept on screen"
+
+# A new face in the payload is taken up by load_data, and marks the page for
+# one whole redraw; the same face again marks nothing.
+( load_data || exit 1
+  FACE_CHANGED=0
+  { cat "$FIXTURE"; echo "FONT_FACE=5"; } > "$TMP/data.txt"
+  load_data || exit 2
+  [ "$FACE_CHANGED" = 1 ] && [ "$FONT_FACE_SET" = 5 ] || exit 3
+  FACE_CHANGED=0; load_data || exit 4
+  [ "$FACE_CHANGED" = 0 ] || exit 5
+  redraw_all "12:34" >/dev/null 2>&1
+  cp "$FIXTURE" "$TMP/data.txt"; load_data || exit 6
+  [ "$FACE_CHANGED" = 1 ] && [ "$FONT_FACE_SET" = 0 ] || exit 7
+  exit 0 )
+check "$?" "a face changed on the collector is picked up at once, and redraws the page"
 
 # ── Numbers nobody has confirmed are not drawn as if they had been ───────────
 ( DATA_FRESH=1 data_stale && exit 1
