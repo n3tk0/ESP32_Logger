@@ -1782,9 +1782,10 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
 
     // Deserialize each shadow file directly into the parent doc to avoid
     // the temp-doc + deep-copy round-trip (gemini review PR #51).
-    auto inhaleJsonFile = [](JsonObject parent, const char* key, const char* path) {
-        if (!activeFS || !activeFS->exists(path)) return;
-        File f = activeFS->open(path, FILE_READ);
+    auto inhaleJsonFile = [](JsonObject parent, const char* key, const char* path,
+                             fs::FS* fs) {
+        if (!fs || !fs->exists(path)) return;
+        File f = fs->open(path, FILE_READ);
         if (!f) return;
         // 16 KB cap — same as ExportManager / SensorManager input caps;
         // beyond that we'd risk OOM on the AsyncTCP worker.
@@ -1796,22 +1797,26 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
         f.close();
     };
 
+    // modules.json is on LittleFS whatever the storage (ModuleRegistry is
+    // saved there by saveConfig()); the other two follow activeFS.
+    fs::FS* modulesFs = littleFsAvailable ? static_cast<fs::FS*>(&LittleFS) : nullptr;
+
     // Each section is best-effort — a missing file just leaves the key off
     // the response.  Restore code (future) must cope with absent keys.
     // Acquire fsMutex around all three reads so StorageTask / saveConfig can't
     // write a file mid-read.  Lock ordering: configMutex (already held) →
     // fsMutex — consistent with saveConfig which takes only fsMutex.  (AUDIT 3.20)
     if (fsMutex && xSemaphoreTake(fsMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
-        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
-        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json", modulesFs);
+        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json", activeFS);
+        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json", activeFS);
         xSemaphoreGive(fsMutex);
     } else {
         // Best-effort on timeout — files may be mid-write but we still send
         // whatever was deserialized rather than returning 503.
-        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json");
-        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json");
-        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json");
+        inhaleJsonFile(doc.as<JsonObject>(), "modules",  "/config/modules.json", modulesFs);
+        inhaleJsonFile(doc.as<JsonObject>(), "sensors",  "/config/sensors.json", activeFS);
+        inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json", activeFS);
     }
 
     serializeJson(doc, static_cast<Print&>(*resp));

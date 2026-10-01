@@ -666,10 +666,14 @@ void setup() {
 #ifdef MODULE_FORECAST_ENABLED
     moduleRegistry.add(&forecastModule);
 #endif
-    if (fsAvailable && activeFS) {
-        moduleRegistry.loadAll(*activeFS);
-        if (!activeFS->exists(ModuleRegistry::DEFAULT_PATH)) {
-            moduleRegistry.saveAll(*activeFS);  // seed from current DeviceConfig
+    // modules.json lives on LittleFS, next to config.bin: saveConfig() always
+    // writes it there. Loading it from activeFS meant that with an SD card as
+    // storage every boot read a defaults-only copy on the card, and settings
+    // kept only in modules.json (the forecast coordinates) were lost.
+    if (littleFsAvailable) {
+        moduleRegistry.loadAll(LittleFS);
+        if (!LittleFS.exists(ModuleRegistry::DEFAULT_PATH)) {
+            moduleRegistry.saveAll(LittleFS);  // seed from current DeviceConfig
         }
     }
     moduleRegistry.startAll();  // AUDIT 6.11: complete IModule lifecycle post-load
