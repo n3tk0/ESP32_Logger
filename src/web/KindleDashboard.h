@@ -94,10 +94,36 @@
 #  error "KINDLE_PAGE_W is outside the range this layout has been checked over"
 #endif
 
-// Rescales a number tuned at the 600 px layout onto KINDLE_PAGE_W. Sizes are
-// written throughout as the figures the design was measured at and passed
-// through here, so the source stays readable as the design and the build
-// decides which pixel grid it lands on.
+// The width the page is being laid out at, in CSS px. KINDLE_PAGE_W unless
+// a request has said otherwise: GET /kindle works out the reader's own width
+// from ?scr= or the Device setting (see kdPageFor() in KindleDashboard.cpp)
+// and holds it here, through a KdPageScope, for as long as it builds the page.
+//
+// AMBIENT, LIKE THE LANGUAGE: the sizes are taken in a few hundred places, and
+// a parameter threaded through every one of them would change nothing about
+// the answer. The async web server builds one page at a time on its own task,
+// so there is never a second page in flight to disagree with.
+//
+// A function-local static in an inline function, so every translation unit
+// shares the one variable without a .cpp that every build must compile.
+inline int& kdPageWRef() {
+    static int w = KINDLE_PAGE_W;
+    return w;
+}
+
+// Holds a page width for the life of one render, and puts back the one before.
+struct KdPageScope {
+    int prev;
+    explicit KdPageScope(int w) : prev(kdPageWRef()) { kdPageWRef() = w; }
+    ~KdPageScope() { kdPageWRef() = prev; }
+    KdPageScope(const KdPageScope&) = delete;
+    KdPageScope& operator=(const KdPageScope&) = delete;
+};
+
+// Rescales a number tuned at the 600 px layout onto the page width above.
+// Sizes are written throughout as the figures the design was measured at and
+// passed through here, so the source stays readable as the design and the
+// reader decides which pixel grid it lands on.
 //
 // Rounds half away from zero: several of these are negative (letter-spacing, a
 // superscript's offset) and C's truncation would pull them toward zero and
@@ -105,9 +131,10 @@
 //
 // Outside the FEATURE_KINDLE_DASHBOARD guard on purpose — ForecastModule draws
 // its condition glyphs through this and can be built with the dashboard off.
-constexpr int kdPx(int n) {
-    return (n >= 0) ? ( n * KINDLE_PAGE_W + 300) / 600
-                    : -((-n * KINDLE_PAGE_W + 300) / 600);
+inline int kdPx(int n) {
+    const int w = kdPageWRef();
+    return (n >= 0) ? ( n * w + 300) / 600
+                    : -((-n * w + 300) / 600);
 }
 
 

@@ -47,6 +47,8 @@ const KdField KD_FIELDS[] = {
     KF("indoor_sensor",     "indoorSensor",    indoorSensor,    KF_STR),
     KF("lang",              "lang",            lang,            KF_U8),
     KF("layout_mode",       "layoutMode",      layoutMode,      KF_U8),
+    KF("browser_dev",       "browserDev",      browserDev,      KF_U8),
+    KF("browser_bar",       "browserBar",      browserBar,      KF_U8),
 };
 #undef KF
 
@@ -174,10 +176,9 @@ void kdConfigToApi(const KindleConfig& k, JsonObject out) {
     // How large the readings are set, per cent of the most that fits.
     out["out_size"]      = kdOutSizePct(k);
     out["in_size"]       = kdInSizePct(k);
-    // The page's own width, read-only. It is a build-time constant (every size
-    // in the stylesheet is derived from it), and the settings page shows it so
-    // that "the layout is wrong on my reader" has somewhere to start rather
-    // than looking like a setting somebody forgot to expose.
+    // The width the page falls back to, read-only: a build-time constant, used
+    // only when neither the page's address (?scr=) nor the Device setting
+    // above says which reader it is for.
     out["page_w"]        = KINDLE_PAGE_W;
 }
 

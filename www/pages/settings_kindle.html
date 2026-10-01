@@ -424,7 +424,24 @@
                   </select>
                 </div>
                 <p class="hint" data-i18n="kindle.rotHint">90° and 270° draw the landscape page: the clock and the week across the top, the readings beside the chart, five forecast columns. The FBInk panel can also be turned on the Kindle itself (KUAL → Settings → Screen), which wins over this. The browser page can be turned on its own, or follow the panel; the preview shows the panel.</p>
-                <p class="hint" id="kd-pagew"></p>
+                <div class="kd-row" style="margin-top:14px">
+                  <div class="field" style="flex:2 1 240px">
+                    <label class="field-label" for="kd-bdev" data-i18n="kindle.browserDev">Reader — the browser page (/kindle)</label>
+                    <select id="kd-bdev" class="input" data-change="kindleTouched">
+                      <option value="0" data-i18n="kindle.bdev0">Auto — ask the reader's browser</option>
+                      <option value="1" data-i18n="kindle.bdev1">Kindle 4/5/7/Touch/10 — 600×800</option>
+                      <option value="2" data-i18n="kindle.bdev2">Paperwhite 1/2 — 758×1024</option>
+                      <option value="3" data-i18n="kindle.bdev3">Paperwhite 3/4, Voyage, Kindle 11 — 536×724 (1072×1448)</option>
+                      <option value="4" data-i18n="kindle.bdev4">Paperwhite 5, Signature — 618×824 (1236×1648)</option>
+                      <option value="5" data-i18n="kindle.bdev5">Oasis 2/3, Paperwhite 12 — 632×840 (1264×1680)</option>
+                    </select>
+                  </div>
+                  <div class="field" style="flex:1 1 120px">
+                    <label class="field-label" for="kd-bbar" data-i18n="kindle.browserBar">Browser bar, px</label>
+                    <input type="number" id="kd-bbar" class="input" min="0" max="200" step="1" value="0" data-change="kindleTouched">
+                  </div>
+                </div>
+                <p class="hint" id="kd-pagew" data-i18n-html="kindle.browserDevHint">The browser page is laid out at the reader's own screen size, in the browser's pixels. <strong>Auto</strong> asks the browser once and reloads at that size; a reader that runs no script gets the one chosen here. Several readers at once: open <code>/kindle/probe</code> on each and bookmark the <code>/kindle?scr=…</code> address it shows. <strong>Browser bar</strong> is the height the browser keeps for its own address bar; if the bottom of the page is cut off, raise it (about 110 on a Paperwhite 4).</p>
               </div>
             </div>
 

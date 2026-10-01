@@ -61,8 +61,8 @@ constexpr const char* DEFAULT_NTP_SERVER     = "pool.ntp.org";
 // that is both too short AND carries a version the migrator does not accept —
 // which is a factory reset, written straight back to flash. v15 grew
 // KindleConfig by 33 bytes and would have done exactly that to every v14
-// device.
-#define CONFIG_VERSION       16
+// device. v17 grew it again, by 16 bytes (browserDev, browserBar, reserved).
+#define CONFIG_VERSION       17
 
 // DS1302 RAM addresses for bootcount backup
 #define RTC_RAM_BOOTCOUNT_ADDR  0
@@ -267,6 +267,20 @@ constexpr uint8_t KSIZE_MIN_PCT  = 60;
 constexpr uint8_t KLAYOUT_AUTO       = 0;   // standalone when there is no forecast to draw
 constexpr uint8_t KLAYOUT_NORMAL     = 1;   // always keep the forecast band
 constexpr uint8_t KLAYOUT_STANDALONE = 2;   // always the tall-readings page
+
+// Which reader the browser page at /kindle is laid out for, when its address
+// does not say (?scr=WxH). The table of sizes is kdDevice() in KindleSkin.h.
+//
+// AUTO IS 0, an older config's: the page asks the browser for its screen once
+// and reloads at that size, which is right on any reader that runs a script.
+constexpr uint8_t KDEV_AUTO   = 0;
+constexpr uint8_t KDEV_K7     = 1;   // Kindle 4/5/7/Touch/10, 600x800
+constexpr uint8_t KDEV_PW2    = 2;   // Paperwhite 1/2, 758x1024
+constexpr uint8_t KDEV_PW4    = 3;   // Paperwhite 3/4, Voyage, Kindle 11, 1072x1448
+constexpr uint8_t KDEV_PW5    = 4;   // Paperwhite 5/Signature, 1236x1648
+constexpr uint8_t KDEV_OASIS  = 5;   // Oasis 2/3, Paperwhite 12, 1264x1680
+constexpr uint8_t KDEV_MAX    = KDEV_OASIS;
+constexpr uint8_t KDEV_BAR_MAX = 200; // CSS px of browser bar, at most
 
 enum DateFormat   : uint8_t { DATE_OFF=0, DATE_DDMMYYYY=1, DATE_MMDDYYYY=2, DATE_YYYYMMDD=3, DATE_DDMMYYYY_DOT=4 };
 enum TimeFormat   : uint8_t { TIME_HHMMSS=0, TIME_HHMM=1, TIME_12H=2 };
@@ -474,6 +488,19 @@ struct KindleConfig {
     // v15.5 — how large the readings are set, the last of reserved[]. 0 is
     // an older config's and is as large as they fit. See kdSizePct().
     uint8_t  metricSize;      // outdoor step in bits 0-3, indoor in 4-7
+    // v17 tail — APPENDED, not carved out of reserved[] (there is none left).
+    // A config.bin from before this tail is shorter than the struct and goes
+    // through the migrating load, which starts from defaults: 0 in both, the
+    // page as it was. Future fields come out of reserved[] below.
+    //
+    // Which reader the BROWSER page is laid out for, when its address does not
+    // say (?scr=): KDEV_* in KindleSkin.h. 0 = auto, the page asks the
+    // browser for its screen once and reloads at that size.
+    uint8_t  browserDev;
+    // CSS px the reader's browser keeps for its own bar above the page, taken
+    // off the screen's height before the page is fitted to it. 0 = none.
+    uint8_t  browserBar;
+    uint8_t  reserved[14];
 };
 
 struct DeviceConfig {

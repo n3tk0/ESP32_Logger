@@ -1513,6 +1513,7 @@ function kdSnapshot() {
     refresh:kdVal("kd-refresh",""), follow:kdVal("kd-follow","1"),
     pin:kdVal("kd-clockpin","1"), res:kdVal("kd-fbink-res","0"),
     layout:kdVal("kd-layout","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
+    bdev:kdVal("kd-bdev","0"), bbar:kdVal("kd-bbar","0"),
     wkfc:kdVal("kd-wkfc","0"), wkst:kdVal("kd-wkst","0"),
     rulew:kdVal("kd-rulew","0"), rulei:kdVal("kd-rulei","0"), rules:kdVal("kd-rules","0"),
     outsz:kdVal("kd-outsz","100"), insz:kdVal("kd-insz","100"),
@@ -1808,6 +1809,8 @@ function kindleRender(d) {
   // -1 is "the same as the panel", and what a collector too old to send the
   // key means too.
   kdSet("kd-prot",      d.page_rotation == null ? -1 : d.page_rotation);
+  kdSet("kd-bdev",      d.browser_dev || 0);
+  kdSet("kd-bbar",      d.browser_bar || 0);
   kdCsyncSet(d.clock_sync);
   // The week strip and the rules; 0 in each is the page as it always was,
   // and what a collector too old to send them means.
@@ -1834,16 +1837,6 @@ function kindleRender(d) {
                                    : ("600 px wide · this build draws " + w);
   }
 
-  // Stated, not settable. The width is a build-time constant because every
-  // size in the page's stylesheet is derived from it, so a reader on which the
-  // layout looks wrong needs to know where the number came from rather than
-  // hunting for the control that would change it.
-  var pw = document.getElementById("kd-pagew");
-  if (pw && d.page_w) {
-    pw.innerHTML = "The browser page's layout is " + (d.page_w | 0) +
-      " px wide, fixed when the firmware was built; <code>/kindle/probe</code>" +
-      " on the reader itself says what it should be.";
-  }
 
   // The clock is not one of the stored bits (see KSHOW_CLOCK): it comes back
   // on its own, and a collector too old to send it has the clock on.
@@ -1936,6 +1929,8 @@ function kdConfigBody() {
   body.set("clock",         (show & 0x0100) ? 1 : 0);
   body.set("rotation",      kdVal("kd-rot", "0"));
   body.set("page_rotation", kdVal("kd-prot", "-1"));
+  body.set("browser_dev",   kdVal("kd-bdev", "0"));
+  body.set("browser_bar",   kdVal("kd-bbar", "0"));
   body.set("clock_sync",    kdCsyncDays());
   body.set("week_forecast", kdVal("kd-wkfc", "0"));
   body.set("week_style",    kdVal("kd-wkst", "0"));
@@ -2071,6 +2066,8 @@ function kindleDefaults() {
   kdSet("kd-layout", "0");
   kdSet("kd-rot", "0");
   kdSet("kd-prot", "-1");
+  kdSet("kd-bdev", "0");
+  kdSet("kd-bbar", "0");
   kdCsyncSet(1);
   kdSet("kd-wkfc", "0");
   kdSet("kd-wkst", "0");
