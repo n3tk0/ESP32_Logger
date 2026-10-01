@@ -12,10 +12,11 @@
 // the card's copies win over any LittleFS copy: they are the ones the old
 // firmware read and wrote, a LittleFS copy is left from before the card.
 // If that first boot cannot finish the move (card not mounted, a copy
-// failing), it leaves a "pending" marker. From then on settings are read and
-// written on LittleFS, so a later attempt copies only files LittleFS still
-// lacks and never overwrites what was saved in the meantime. A "done" marker
-// ends it. A device on internal storage is done at once: its LittleFS copies
+// failing), it leaves a "pending" marker that records a checksum of each
+// LittleFS copy as it was then. From then on settings are read and written on
+// LittleFS, so a later attempt overwrites a LittleFS file only if it is still
+// that same leftover (or absent), never one saved in the meantime. A "done"
+// marker ends it. A device on internal storage is done at once: its LittleFS copies
 // are the current ones, and a card selected later must not bring back what
 // an older firmware once left on it.
 //
@@ -57,6 +58,19 @@ static void touch(const char* path) {
     if (m) m.close();
 }
 
+// FNV-1a over a LittleFS file, 0 when it does not exist.
+static uint32_t lfsChecksum(const char* path) {
+    File f = LittleFS.open(path, FILE_READ);
+    if (!f) return 0;
+    uint32_t h = 2166136261u;
+    uint8_t buf[256];
+    int n;
+    while ((n = f.read(buf, sizeof(buf))) > 0)
+        for (int i = 0; i < n; i++) { h ^= buf[i]; h *= 16777619u; }
+    f.close();
+    return h ? h : 1;
+}
+
 static void migrateSettingsFromSd() {
     static const char* const FILES[] = {
         "/platform_config.json",
@@ -72,16 +86,32 @@ static void migrateSettingsFromSd() {
         LittleFS.remove(SETTINGS_PENDING);
         return;
     }
-    const bool pending = LittleFS.exists(SETTINGS_PENDING);
+    constexpr size_t N = sizeof(FILES) / sizeof(FILES[0]);
+    // The pending marker holds one checksum per FILES entry: the LittleFS
+    // copy as it was when the move was first put off (0 = absent).
+    uint32_t then[N] = {};
+    bool pending = false;
+    if (File m = LittleFS.open(SETTINGS_PENDING, FILE_READ)) {
+        pending = m.read((uint8_t*)then, sizeof(then)) == sizeof(then);
+        m.close();
+    }
+    auto writePending = [&]() {
+        if (pending) return;
+        for (size_t i = 0; i < N; i++) then[i] = lfsChecksum(FILES[i]);
+        File m = LittleFS.open(SETTINGS_PENDING, FILE_WRITE);
+        if (m) { m.write((const uint8_t*)then, sizeof(then)); m.close(); }
+    };
     fs::FS* sd = sdFs();
     if (!sd || !sdAvailable) {          // card missing: try again next boot
-        if (!pending) touch(SETTINGS_PENDING);
+        writePending();
         return;
     }
     bool all = true;
-    for (const char* path : FILES) {
+    for (size_t i = 0; i < N; i++) {
+        const char* path = FILES[i];
         if (!sd->exists(path)) continue;
-        if (pending && LittleFS.exists(path)) continue;   // saved here since
+        // Saved on LittleFS since the move was put off: keep it.
+        if (pending && lfsChecksum(path) != then[i]) continue;
         if (copySdToLittleFs(*sd, path)) {
             Serial.printf("[storage] %s moved from SD to LittleFS\n", path);
         } else {
@@ -92,8 +122,8 @@ static void migrateSettingsFromSd() {
     if (all) {
         touch(SETTINGS_DONE);
         LittleFS.remove(SETTINGS_PENDING);
-    } else if (!pending) {
-        touch(SETTINGS_PENDING);
+    } else {
+        writePending();
     }
 }
 
