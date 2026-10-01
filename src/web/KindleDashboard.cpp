@@ -1,4 +1,5 @@
 #include "KindleDashboard.h"
+#include "../managers/StorageManager.h"   // configFs(): settings live on LittleFS
 
 #ifdef FEATURE_KINDLE_DASHBOARD
 
@@ -3292,7 +3293,7 @@ void registerKindleDashboard(AsyncWebServer& server) {
     // The two sensor ids seed the defaults, so a device that has never
     // configured a slot gets the page it had before slots existed — built from
     // whichever sensors it was already pointing at.
-    if (activeFS) kdSlotsBegin(*activeFS, outdoorSensorId(), indoorSensorId());
+    if (configFs()) kdSlotsBegin(*configFs(), outdoorSensorId(), indoorSensorId());
 
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
     server.on("/kindle/clear", HTTP_GET, handleKindleClear);

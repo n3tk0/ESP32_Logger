@@ -14,14 +14,13 @@ const char* const EVENT_LOG_LEGACY_PATH = "/reset_log.txt";
 
 /// Which filesystem the log lives on.
 ///
-/// activeFS when there is one, because that is what /api/diag reads back and a
-/// log written where the reader does not look is not a log. LittleFS before
-/// StorageManager has run, so a line written very early in boot — an OTA event,
-/// say — still lands somewhere rather than being dropped.
+/// LittleFS, like every other setting and state file (configFs() in
+/// StorageManager): /api/diag reads it back from there, and with an SD card
+/// only the data log belongs on the card. activeFS only when LittleFS is not
+/// mounted.
 static fs::FS* logFs() {
-    if (activeFS) return activeFS;
     if (littleFsAvailable) return &LittleFS;
-    return nullptr;
+    return activeFS;
 }
 
 void eventLogMigrate() {

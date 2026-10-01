@@ -15,6 +15,7 @@
 #include <time.h>                       // time() — pipelineNowEpoch()
 #include "../utils/MutexGuard.h"        // rtcMutex around the DS1302 exchange
 #include "../core/SdCompat.h"   // sdFs() — SD.h only when FEATURE_SD_STORAGE
+#include "../managers/StorageManager.h" // configFs(): platform_config.json
 #include "../utils/JsonIO.h"
 
 // ---------------------------------------------------------------------------
@@ -245,7 +246,10 @@ bool TaskManager::init(fs::FS& fs) {
     // SDS011 humidity correction from platform_config.json. The data log's
     // file, rotation and retention come from config.datalog (Datalog.h), no
     // longer from the "storage" block there.
-    refreshStorageFromPlatform(fs);
+    // platform_config.json is a setting: on LittleFS (configFs()), while `fs`
+    // is where the data log goes.
+    fs::FS* cfs = configFs();
+    if (cfs) refreshStorageFromPlatform(*cfs);
     storageParam.fs = &fs;
     applyLoggerConfig();
 
@@ -263,7 +267,7 @@ bool TaskManager::init(fs::FS& fs) {
     // and config requests "mirror" mode, start a second StorageTask on the other FS.
     storageParam.mirrorFS = nullptr;
     {
-        File cfgFile2 = fs.open("/platform_config.json", FILE_READ);
+        File cfgFile2 = cfs ? cfs->open("/platform_config.json", FILE_READ) : File();
         if (cfgFile2) {
             JsonDocument doc2;
             if (deserializeJsonFile(doc2, cfgFile2) == DeserializationError::Ok) {

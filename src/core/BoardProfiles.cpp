@@ -2,6 +2,7 @@
 // src/core/BoardProfiles.cpp — see BoardProfiles.h for contract.
 // ============================================================================
 #include "BoardProfiles.h"
+#include "../managers/StorageManager.h"   // configFs(): settings live on LittleFS
 
 #include <string.h>
 #include <Arduino.h>
@@ -379,10 +380,11 @@ constexpr const char* kPath        = "/board_profile.txt";
 constexpr size_t      kMaxFileSize = 256;   // tiny key=value file
 
 const BoardProfile* load() {
-    if (!fsAvailable || !activeFS) return nullptr;
-    if (!activeFS->exists(kPath))  return nullptr;
+    fs::FS* cfs = configFs();
+    if (!cfs) return nullptr;
+    if (!cfs->exists(kPath))  return nullptr;
 
-    File f = activeFS->open(kPath, FILE_READ);
+    File f = cfs->open(kPath, FILE_READ);
     if (!f) return nullptr;
     if (f.size() == 0 || f.size() > kMaxFileSize) { f.close(); return nullptr; }
 
@@ -407,14 +409,15 @@ const BoardProfile* load() {
 
 bool save(const BoardProfile* profile) {
     if (!profile)                return false;
-    if (!fsAvailable || !activeFS) return false;
+    fs::FS* cfs = configFs();
+    if (!cfs) return false;
 
     char body[128];
     int n = snprintf(body, sizeof(body),
                      "profile=%s\nversion=1\n", profile->shortId);
     if (n <= 0 || n >= (int)sizeof(body)) return false;
 
-    return atomicWrite(*activeFS, kPath, [&](File& dst) -> bool {
+    return atomicWrite(*cfs, kPath, [&](File& dst) -> bool {
         return dst.write(reinterpret_cast<const uint8_t*>(body), (size_t)n)
                == (size_t)n;
     }, fsMutex);

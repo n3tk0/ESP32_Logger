@@ -272,8 +272,9 @@ static void _doSleep() {
 // _loadSleepConfig() — read sleep settings from platform_config.json
 // ============================================================================
 static void _loadSleepConfig() {
-    if (!fsAvailable || !activeFS) return;
-    File f = activeFS->open("/platform_config.json", FILE_READ);
+    fs::FS* cfs = configFs();
+    if (!cfs) return;
+    File f = cfs->open("/platform_config.json", FILE_READ);
     if (!f) return;
     // Use a dedicated small doc — sleep section only needs ~256 bytes
     JsonDocument doc;
@@ -342,8 +343,9 @@ static void _manageContinuousPower() {
 // Detect operating mode from /platform_config.json
 // ---------------------------------------------------------------------------
 static PlatformMode _detectPlatformMode() {
-    if (!fsAvailable || !activeFS) return PLATFORM_LEGACY;
-    File f = activeFS->open("/platform_config.json", FILE_READ);
+    fs::FS* cfs = configFs();
+    if (!cfs) return PLATFORM_LEGACY;
+    File f = cfs->open("/platform_config.json", FILE_READ);
     if (!f) return PLATFORM_LEGACY;
     // Use a filter so only the top-level "mode" key is parsed; the rest of
     // platform_config.json (sensors array, etc.) can be many KB and would
@@ -399,8 +401,9 @@ static void _writeResetLog() {
 // M9/2.6 — Check for sensor pin conflicts with hardware config pins
 // ---------------------------------------------------------------------------
 static void _checkPinConflicts() {
-    if (!activeFS) return;
-    File f = activeFS->open("/platform_config.json", FILE_READ);
+    fs::FS* cfs = configFs();
+    if (!cfs) return;
+    File f = cfs->open("/platform_config.json", FILE_READ);
     if (!f) return;
     JsonDocument doc;
     if (deserializeJsonFile(doc, f) != DeserializationError::Ok) { f.close(); return; }
@@ -497,7 +500,7 @@ static void _initPlatform() {
 #endif
 
     // Load sensor configs from /platform_config.json
-    if (activeFS) sensorManager.loadAndInit(*activeFS);
+    if (configFs()) sensorManager.loadAndInit(*configFs());
 
     // Detect sensor pin conflicts with hardware flow sensor pin (M9)
     _checkPinConflicts();
@@ -519,7 +522,7 @@ static void _initPlatform() {
 #ifdef EXPORT_WEBHOOK_ENABLED
     exportManager.addExporter(new WebhookExporter());
 #endif
-    if (activeFS) exportManager.loadAndInit(*activeFS);
+    if (configFs()) exportManager.loadAndInit(*configFs());
     // Spool failed exports to LittleFS (always available, even without SD) (#4.7)
     if (littleFsAvailable) exportManager.setSpoolFS(&LittleFS);
 
@@ -529,7 +532,7 @@ static void _initPlatform() {
 #endif
 
     // Initialise AlertEngine — loads /alerts.json from LittleFS if present
-    if (activeFS && !alertEngine.begin(*activeFS)) {
+    if (configFs() && !alertEngine.begin(*configFs())) {
         Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
     }
 
@@ -848,7 +851,7 @@ void setup() {
                 Serial.println("[Setup] WARNING: mutex creation failed");
             }
             // Skip AlertEngine in safe-mode (minimises surface).
-            if (!g_safeMode && activeFS && !alertEngine.begin(*activeFS)) {
+            if (!g_safeMode && configFs() && !alertEngine.begin(*configFs())) {
                 Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
             }
         }

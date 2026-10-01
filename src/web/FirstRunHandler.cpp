@@ -2,6 +2,7 @@
 // src/web/FirstRunHandler.cpp — see FirstRunHandler.h for contract.
 // ============================================================================
 #include "FirstRunHandler.h"
+#include "../managers/StorageManager.h"   // configFs(): settings live on LittleFS
 
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -26,13 +27,14 @@ namespace {
 // Mirrors how _detectPlatformMode() in ESP_Logger.ino consumes the file —
 // any value other than "continuous" or "hybrid" is interpreted as legacy.
 bool persistPlatformMode(const char* mode) {
-    if (!fsAvailable || !activeFS) return false;
+    fs::FS* cfs = configFs();
+    if (!cfs) return false;
     constexpr const char* PATH        = "/platform_config.json";
     constexpr size_t      MAX_SIZE    = 16 * 1024;
 
     JsonDocument doc;
-    if (activeFS->exists(PATH)) {
-        File f = activeFS->open(PATH, FILE_READ);
+    if (cfs->exists(PATH)) {
+        File f = cfs->open(PATH, FILE_READ);
         if (!f) return false;
         if (f.size() > MAX_SIZE) { f.close(); return false; }
         DeserializationError err = deserializeJsonFile(doc, f);
@@ -41,7 +43,7 @@ bool persistPlatformMode(const char* mode) {
     }
     doc["mode"] = mode;
 
-    return atomicWrite(*activeFS, PATH, [&](File& dst) -> bool {
+    return atomicWrite(*cfs, PATH, [&](File& dst) -> bool {
         size_t want    = measureJson(doc);
         size_t written = serializeJson(doc, static_cast<Print&>(dst));
         return written == want;
