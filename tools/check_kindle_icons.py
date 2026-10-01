@@ -61,12 +61,14 @@ PANELS = [('kindle/icons/600', 'kindle/layout/600x800.conf'),
 # fc_batt.bmp is not a weather glyph and is not in this table: it is a badge
 # knocked out of its own black plate, and its ground is the black.
 # The outlook size with a `w` after it is the same drawing on a white ground,
-# for the week strip's forecast in every style but the filled one.
-ICON_RE = re.compile(r'^fc_(-?\d+)_(\d+)(w?)\.bmp$')
+# for the week strip's forecast in every style but the filled one; with a `d`,
+# on the filled style's darker weekend cells.
+ICON_RE = re.compile(r'^fc_(-?\d+)_(\d+)([wd]?)\.bmp$')
 
 # What each role is, in the words the panel's own comments use for it.
 WHERE = {'outlook': 'outlook columns', 'main': 'headline',
-         'week': 'week strip (unfilled cells)'}
+         'week': 'week strip (unfilled cells)',
+         'weekend': 'week strip (filled weekend cells)'}
 
 
 def pen_index(name):
@@ -113,6 +115,15 @@ def zone_pen(src):
     if not m:
         raise SystemExit('check_kindle_icons: no forecast-zone fill_rect in '
                          'update_dash.sh — has clear_fc_zone changed?')
+    return m.group(1)
+
+
+def weekend_pen(src):
+    """The pen the filled week strip's weekend cells are drawn in."""
+    m = re.search(r'^WK_WE_PEN=([A-Z0-9]+)\s*$', src, re.M)
+    if not m:
+        raise SystemExit('check_kindle_icons: no WK_WE_PEN= in update_dash.sh '
+                         '— has the week strip changed?')
     return m.group(1)
 
 
@@ -354,7 +365,7 @@ def grounds():
     # The week strip's white-ground icons land where the forecast zone was
     # cleared (upright) or the top row was (on its side) — the zone's pen.
     pens = {'outlook': plate_pen(src), 'main': zone_pen(src),
-            'week': zone_pen(src)}
+            'week': zone_pen(src), 'weekend': weekend_pen(src)}
     return pens, {role: pen_index(name) for role, name in pens.items()}
 
 
@@ -364,7 +375,8 @@ def each_icon():
         sizes = layout_sizes(layout)
         role_of = {(sizes['FC_OL_SZ'], ''): 'outlook',
                    (sizes['FC_MAIN_SZ'], ''): 'main',
-                   (sizes['FC_OL_SZ'], 'w'): 'week'}
+                   (sizes['FC_OL_SZ'], 'w'): 'week',
+                   (sizes['FC_OL_SZ'], 'd'): 'weekend'}
         full = os.path.join(ROOT, icon_dir)
         for name in sorted(os.listdir(full)):
             m = ICON_RE.match(name)
@@ -550,8 +562,9 @@ def main(argv):
             print('check_kindle_icons: %s' % p, file=sys.stderr)
         return 1
     print('check_kindle_icons: %d icons, each on the ground it is drawn on '
-          '(outlook %s, headline %s, week strip %s)'
-          % (checked, pens['outlook'], pens['main'], pens['week']))
+          '(outlook %s, headline %s, week strip %s, its weekend %s)'
+          % (checked, pens['outlook'], pens['main'], pens['week'],
+             pens['weekend']))
     return 0
 
 

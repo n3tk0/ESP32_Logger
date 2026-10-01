@@ -606,19 +606,25 @@ cells are drawn; the strip itself is still switched on and off in the Zones
 tab (`KSHOW_WEEK`).
 
 - `week_forecast` in `/api/kindle/config`: 0 the calendar week, 1 the next
-  seven days' forecast (today first), each cell the weekday, the condition
+  seven days' forecast (tomorrow first: today is already in the headline
+  above), each cell the weekday, the condition
   and the high over the low, in the calendar's cells and its month heading's
   height. It needs the forecast module and a forecast no older than six
   hours; otherwise the calendar is drawn. While it is there, the forecast
   band's outlook columns show the +3 h steps whatever the module's outlook
   setting is, so the page does not show the same days twice. Open-Meteo
-  gives all seven days; OpenWeatherMap's free tier stops after five, and the
-  last cells keep only their weekday. `/kindle/data` sends `WK_FC=1` and
+  is asked for nine days (today, the seven, and one spare for a forecast
+  fetched before midnight) and fills every cell; OpenWeatherMap's free tier
+  stops after five days, and the last cells keep only their weekday.
+  `/kindle/data` sends `WK_FC=1`, `WF_NOW=-1` (no cell is today; without it,
+  from an older collector, the panel frames the first cell as before) and
   `WF<i>_NAME/_ICON/_HI/_LO` with their widths.
 - `week_style`: 0 filled (grey cells, the weekend darker, as before), 1
   outlined, 2 only today marked, 3 minimal (today underlined, its date bold).
-  In the forecast, today is framed rather than inverted in every style but
-  minimal. The panel's unfilled styles use the white-ground icons
+  The forecast marks no cell, since none of its days is today, and shades
+  its weekend as the calendar does (`WF<i>_WE=1`): darker cells in the filled
+  style, with the icons grounded on them (`fc_<code>_<size>d.bmp`, ground
+  `WK_WE_PEN` in update_dash.sh), and a darker weekday name in the others. The panel's unfilled styles use the white-ground icons
   `fc_<code>_<size>w.bmp`. Sent to the panel as `WK_STYLE`.
 
 **Dividing lines** set the rules between the sections and between the two

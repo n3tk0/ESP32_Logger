@@ -395,8 +395,8 @@ bool ForecastModule::_fetchOpenMeteo() {
              "&current=temperature_2m,weather_code,wind_speed_10m"
              "&daily=temperature_2m_max,temperature_2m_min,weather_code"
              "&hourly=temperature_2m,weather_code"
-             "&timezone=auto&forecast_days=7&forecast_hours=16",
-             (double)_lat, (double)_lon);
+             "&timezone=auto&forecast_days=%d&forecast_hours=16",
+             (double)_lat, (double)_lon, DAYS_N);
 
     const String body = httpsGet(url);
     if (body.isEmpty()) return false;
@@ -435,7 +435,7 @@ bool ForecastModule::_fetchOpenMeteo() {
     strncpy(d.summary, wmoSummary(d.code), sizeof(d.summary) - 1);
 
     d.daily = (_outlook == OUTLOOK_DAILY);
-    for (int i = 0; i < WEEK_N; i++) {
+    for (int i = 0; i < DAYS_N; i++) {
         // Index 0 is today; the outlook's daily columns are 1..5.
         JsonVariantConst hi = doc["daily"]["temperature_2m_max"][i];
         if (hi.isNull()) break;
@@ -535,7 +535,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
     // holding the forecast — are aggregated out of the whole of the free
     // tier's 40: today and the next four days, the fifth only partly
     // covered. The free tier has no daily endpoint and nothing past five
-    // days, so the last cells of a seven-day week stay empty here.
+    // days, so the last cells of the Kindle's week strip stay empty here.
     bool days = (_outlook == OUTLOOK_DAILY);
 #ifdef FEATURE_KINDLE_DASHBOARD
     days = days || (config.kindle.weekStyle & KWEEK_FORECAST);
@@ -589,7 +589,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
     if (nowLocal < 1000000000 || gmtime_r(&nowLocal, &nowTm) == nullptr) return true;
 
     struct Acc { bool used = false; float hi = -1e9f, lo = 1e9f; int code = -1; int bestGap = 99; };
-    Acc acc[WEEK_N];
+    Acc acc[DAYS_N];
 
     for (JsonObjectConst e : list) {
         const time_t local = (time_t)((long)(e["dt"] | 0L) + tz);
@@ -598,7 +598,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
 
         // Whole local days apart, which knows nothing of years, leap or not.
         const int ahead = (int)(local / 86400 - nowLocal / 86400);
-        if (ahead < 0 || ahead >= WEEK_N) continue;
+        if (ahead < 0 || ahead >= DAYS_N) continue;
 
         Acc& a = acc[ahead];
         const float t = e["main"]["temp"] | NAN;
@@ -621,7 +621,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
         acc[0].code = d.code;
     }
 
-    for (int i = 0; i < WEEK_N; i++) {
+    for (int i = 0; i < DAYS_N; i++) {
         if (!acc[i].used) continue;
         d.days[i].valid = true;
         d.days[i].tempC = acc[i].hi;
