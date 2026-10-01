@@ -229,10 +229,10 @@ with sync_playwright() as p:
     check(pg.is_visible("#kd-date-hint"),
           "another clock style says where the date format applies")
 
-    # The page states the build-time width rather than offering it as a knob.
+    # The browser page's reader starts on auto, with no bar.
     tab(pg, "reader")
-    intro = pg.locator("#kd-pagew").inner_text()
-    check("600" in intro, f"the layout width is stated: {intro.strip()[:60]!r}")
+    check(pg.input_value("#kd-bdev") == "0", "the browser page's reader reflects the device (auto)")
+    check(pg.input_value("#kd-bbar") == "0", "and so does the browser bar (0)")
 
     # ── The cadence, as named choices ───────────────────────────────────────
     # The mock holds 180 s with follow off, which is none of the three presets:
@@ -774,6 +774,30 @@ with sync_playwright() as p:
     got = pg.evaluate(
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(got.get("page_rotation") == -1, "and Same as the panel goes out as -1")
+
+    # The reader the browser page is laid out for, and the bar: both reach the
+    # device, come back on the re-read, and go back to auto.
+    pg.select_option("#kd-bdev", "3")
+    pg.fill("#kd-bbar", "110")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("browser_dev") == 3 and got.get("browser_bar") == 110,
+          "the Paperwhite 4 and its bar reach the device (%r, %r)"
+          % (got.get("browser_dev"), got.get("browser_bar")))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "reader")
+    check(pg.input_value("#kd-bdev") == "3" and pg.input_value("#kd-bbar") == "110",
+          "and they come back on the re-read")
+    pg.select_option("#kd-bdev", "0")
+    pg.fill("#kd-bbar", "0")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("browser_dev") == 0 and got.get("browser_bar") == 0, "and back to auto")
 
     # The week strip and the dividing lines: five selects, five keys, and a
     # re-read that brings every one of them back.

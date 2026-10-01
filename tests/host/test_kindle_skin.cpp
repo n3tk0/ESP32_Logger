@@ -503,6 +503,52 @@ static void test_clamp_leaves_a_valid_config_alone() {
     CHECK(memcmp(&before, &k, sizeof(k)) == 0);
 }
 
+
+// ---------------------------------------------------------------------------
+// The reader the browser page is laid out for. The Paperwhite 4 entry is the
+// one measured on the device (GET /kindle/probe: screen 536x724); the clamp
+// turns a reader nobody has heard of back into auto and holds the bar.
+static void test_browser_device() {
+    CHECK(kdDevice(KDEV_AUTO) == nullptr);
+    CHECK(kdDevice(KDEV_MAX + 1) == nullptr);
+    CHECK(kdDevice(KDEV_PW4)->w == 536 && kdDevice(KDEV_PW4)->h == 724);
+    CHECK(kdDevice(KDEV_K7)->w == 600 && kdDevice(KDEV_K7)->h == 800);
+    for (uint8_t d = 1; d <= KDEV_MAX; d++) {
+        const KdDevice* dv = kdDevice(d);
+        CHECK(dv && dv->w >= 320 && dv->h > dv->w);   // upright, as reported
+    }
+
+    KindleConfig k = defaults();
+    k.browserDev = 9;
+    k.browserBar = 250;
+    kdSkinClamp(k);
+    CHECK(k.browserDev == KDEV_AUTO);
+    CHECK(k.browserBar == KDEV_BAR_MAX);
+
+    KindleConfig ok = defaults();
+    ok.browserDev = KDEV_PW4;
+    ok.browserBar = 110;
+    kdSkinClamp(ok);
+    CHECK(ok.browserDev == KDEV_PW4 && ok.browserBar == 110);
+}
+
+// kdPx() follows the width a render holds, and gives it back afterwards.
+static void test_page_width_scope() {
+    CHECK(kdPx(600) == KINDLE_PAGE_W);
+    {
+        KdPageScope s(536);
+        CHECK(kdPx(600) == 536);
+        CHECK(kdPx(560) == 500);        // 560 * 536 / 600 = 500.3
+        CHECK(kdPx(-2) == -2);          // rounds half away from zero
+        {
+            KdPageScope inner(1072);
+            CHECK(kdPx(600) == 1072);
+        }
+        CHECK(kdPx(600) == 536);
+    }
+    CHECK(kdPx(600) == KINDLE_PAGE_W);
+}
+
 int main() {
     RUN(test_defaults_emit_nothing);
     RUN(test_face_reaches_the_chart_too);
@@ -522,5 +568,7 @@ int main() {
     RUN(test_page_rotation_follows_or_stands_alone);
     RUN(test_rules_and_week_style);
     RUN(test_metric_size);
+    RUN(test_browser_device);
+    RUN(test_page_width_scope);
     return SUMMARY();
 }

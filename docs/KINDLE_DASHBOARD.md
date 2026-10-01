@@ -152,6 +152,41 @@ room light to be read at all.
 Its firmware also predates 5.16.4, so the browser really is the old WebKit —
 there the zero-JavaScript rule below is a requirement rather than a choice.
 
+### Which reader the browser page is for
+
+**Measured on a Paperwhite 4** (firmware 5.18.1.1, `GET /kindle/probe`):
+`devicePixelRatio` 2, `screen` 536×724, and the ruler's 536 bar is the widest
+that fits. That browser **ignores the viewport meta**: a page declared
+`width=600` is drawn 600 CSS px wide in a 536 px window, cut at the right with a
+scroll bar under it. So the page is no longer laid out at one build-time width
+for every reader; each request is laid out at its reader's own screen size,
+and the browser has nothing left to scale.
+
+The width comes from, in order:
+
+1. **`?scr=WxH`** on the address, in the browser's CSS px. The probe prints the
+   `/kindle?scr=…` link for the reader it runs on; bookmark it, and several
+   different readers can show the page at once, each at its own size.
+2. **The Device setting** (`browser_dev` in `/api/kindle/config`, `KDEV_*`):
+   Kindle 4/5/7/Touch/10 600×800, Paperwhite 1/2 758×1024, Paperwhite 3/4,
+   Voyage, Kindle 11 536×724, Paperwhite 5/Signature 618×824, Oasis 2/3 and
+   Paperwhite 12 632×840. Only the Paperwhite 4 is measured; the others are
+   their panels at a plausible ratio, and auto or `?scr=` is what to trust there.
+   **Auto** (0, the default and an older config's) has the page ask the browser
+   for `screen.width`/`screen.height` once and reload with `?scr=`; a browser
+   that runs no script stays at `KINDLE_PAGE_W`.
+3. **`KINDLE_PAGE_W`**, the page this always drew.
+
+The design is 600 × 800, so the page is **fitted**, not stretched: its width is
+the smaller of the screen's width and three-quarters of its usable height, and
+a wider screen gets it centred. The usable height is the screen's less
+**`browser_bar`** (or `?bar=`), the CSS px the browser keeps for its own address
+bar — 0 by default; about 110 on a Paperwhite 4 whose bar stays up.
+
+`kdPx()` reads the width from `kdPageWRef()`, which `handleKindle()` holds for
+the length of one render through a `KdPageScope`; every link and refresh on the
+page carries `?rot=`, `?scr=` and `?bar=` on (`kdRotArg()`).
+
 ### Choosing the layout width
 
 ```ini

@@ -112,19 +112,113 @@ static uint8_t kdRotFor(AsyncWebServerRequest* req, uint8_t stored) {
     return stored;
 }
 
-// The ?rot= this request came with, to carry on: every link and meta refresh
-// back to /kindle from a bookmarked /kindle?rot=90 has to keep the page on its
-// side, or one tap on "refresh" turns it upright. Empty when there was none.
+// ---------------------------------------------------------------------------
+// Which reader the page is laid out for
+// ---------------------------------------------------------------------------
+// THE BROWSER DOES NOT TAKE THE VIEWPORT META. Measured on a Paperwhite 4
+// (firmware 5.18.1.1, GET /kindle/probe): devicePixelRatio 2, screen 536x724,
+// and a page declared width=600 drawn 600 CSS px wide in a 536 px window —
+// cut at the right with a scroll bar under it. So the page is laid out at the
+// reader's own width instead, and the browser has nothing left to scale.
+//
+// That width comes from, in order: ?scr=WxH on the address (what the page's
+// own script adds — see kdAutoScript() — or a bookmark); the Device setting;
+// and failing both, KINDLE_PAGE_W, the page this always drew.
+//
+// FITTED, NOT STRETCHED: the design is 600 x 800, and a screen whose usable
+// height (less ?bar= or the Bar setting, the browser's own toolbar) is
+// shorter than three-quarters of its width gets a narrower page, centred.
+
+/// What one render is laid out at.
+struct KdPage {
+    int  w        = KINDLE_PAGE_W;   ///< the page, CSS px: what kdPx() scales to
+    int  screenW  = 0;               ///< the screen it is centred in; 0 = unknown
+};
+
+/// "536x724" — digits, an x, digits, each a size a screen could be.
+static bool kdParseScr(const String& v, int& w, int& h) {
+    const int x = v.indexOf('x');
+    if (x <= 0) return false;
+    for (unsigned i = 0; i < v.length(); i++)
+        if ((int)i != x && (v[i] < '0' || v[i] > '9')) return false;
+    w = v.substring(0, x).toInt();
+    h = v.substring(x + 1).toInt();
+    return w >= 200 && w <= 4000 && h >= 200 && h <= 4000;
+}
+
+static int kdBarFor(AsyncWebServerRequest* req, const KindleConfig& skin) {
+    if (const String* b = req ? queryArg(req, "bar") : nullptr) {
+        const long v = b->toInt();
+        return v < 0 ? 0 : (v > KDEV_BAR_MAX ? KDEV_BAR_MAX : (int)v);
+    }
+    return skin.browserBar;
+}
+
+static KdPage kdPageFor(AsyncWebServerRequest* req, const KindleConfig& skin) {
+    KdPage pg;
+    int w = 0, h = 0;
+    const String* scr = req ? queryArg(req, "scr") : nullptr;
+    if (!(scr && kdParseScr(*scr, w, h))) {
+        const KdDevice* d = kdDevice(skin.browserDev);
+        if (!d) return pg;
+        w = d->w; h = d->h;
+    }
+    const int usable = h - kdBarFor(req, skin);
+    int pw = w;
+    if (usable > 0 && usable * 600 / 800 < pw) pw = usable * 600 / 800;
+    if (pw < 320)  pw = 320;
+    if (pw > 2400) pw = 2400;
+    pg.w = pw;
+    pg.screenW = w;
+    return pg;
+}
+
+// The ?rot=, ?scr= and ?bar= this request came with, to carry on: every link
+// and meta refresh back to /kindle from a bookmarked /kindle?rot=90 has to keep
+// the page on its side, or one tap on "refresh" turns it upright — and one
+// laid out for this reader's screen has to stay laid out for it. Empty when
+// there were none. Each is checked before it is repeated into a page.
 static String kdRotArg(AsyncWebServerRequest* req, char sep) {
     String a;
-    const String* v = req ? queryArg(req, "rot") : nullptr;
-    if (!v) return a;
-    const long deg = v->toInt();
-    if (kdRotFromDeg(deg, 0xFF) == 0xFF) return a;
-    a += sep;
-    a += F("rot=");
-    a += deg;
+    if (!req) return a;
+    if (const String* v = queryArg(req, "rot")) {
+        const long deg = v->toInt();
+        if (kdRotFromDeg(deg, 0xFF) != 0xFF) {
+            a += sep; sep = '&';
+            a += F("rot=");
+            a += deg;
+        }
+    }
+    int w, h;
+    if (const String* v = queryArg(req, "scr")) {
+        if (kdParseScr(*v, w, h)) {
+            a += sep; sep = '&';
+            a += F("scr=");
+            a += w; a += 'x'; a += h;
+        }
+    }
+    if (const String* v = queryArg(req, "bar")) {
+        const long b = v->toInt();
+        if (b >= 0 && b <= KDEV_BAR_MAX) {
+            a += sep;
+            a += F("bar=");
+            a += b;
+        }
+    }
     return a;
+}
+
+// A reader on auto whose address does not say what it is: ask its browser,
+// once, and come back with the answer on the address — which every link and
+// refresh then carries (kdRotArg). A browser that runs no script stays on the
+// page as it is, at KINDLE_PAGE_W. location.replace, so Back does not return
+// to the page that was only ever a question.
+static void kdAutoScript(String& p, AsyncWebServerRequest* req, const KindleConfig& skin) {
+    if (skin.browserDev != KDEV_AUTO || !req || queryArg(req, "scr")) return;
+    p += F("<script>try{var s=window.screen;if(s&&s.width>199&&s.height>199)"
+           "location.replace('/kindle?scr='+s.width+'x'+s.height+'");
+    p += kdRotArg(req, '&');
+    p += F("')}catch(e){}</script>");
 }
 
 // The left half of the footer. "Measured on site" is the right thing to say
@@ -192,7 +286,7 @@ static void kdFooterNote(char* buf, size_t n) {
 }
 
 static constexpr int PAGE_W  = KINDLE_PAGE_W;
-static constexpr int CHART_W = kdPx(560);
+#define CHART_W kdPx(560)   // a macro: kdPx() follows the page width of each request
 // The chart's height is not a constant any more: it is what the layout had
 // left once the readings above it stopped growing — see KindleFlow.h. 220 is
 // what it is on the ordinary page, and the least it ever is.
@@ -2416,6 +2510,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KindleConfig skin = config.kindle;
     kdSkinClamp(skin);
 
+    // The reader's own width, before the first size is taken — kdPx() reads
+    // it from here until this function returns. See kdPageFor().
+    const KdPage pg = kdPageFor(req, skin);
+    KdPageScope pageScope(pg.w);
+
     // The places and where everything goes, once for the whole page: the
     // stylesheet's sizes and the markup's rows have to come from one answer.
     const uint8_t rot = kdRotFor(req, kdPageRot(skin));
@@ -2429,7 +2528,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
            "<meta name=\"viewport\" content=\"width=");
-    p += PAGE_W;
+    p += pg.screenW ? pg.screenW : pg.w;
     p += F("\"><meta http-equiv=\"refresh\" content=\"");
     // Newest of the two sensors: the page is current if either one is, and
     // waiting on the slower of the pair would show a stale outdoor reading.
@@ -2450,7 +2549,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
                            now > KINDLE_MIN_REAL_TS, cad);
     p += F("\"><title>");
     p += kdT("Weather", "Времето");
-    p += F("</title><style>");
+    p += F("</title>");
+    kdAutoScript(p, req, skin);
+    p += F("<style>");
 
     // The stylesheet: every number in it is a 600-px-layout figure passed
     // through kdPx(). KD_S is a literal fragment, KD_N a scaled number —
@@ -2834,6 +2935,13 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     kdRotCss(p, rot);
 
+    // A screen wider than the page fitted to it: the page in the middle of it.
+    // Only when the screen is known — the page that never asked stays as it was.
+    if (pg.screenW > pg.w) {
+        p += F("body{width:"); p += pg.w; p += F("px;margin:0 auto}");
+        if (rot != KROT_0) { p += F(".rot{left:"); p += (pg.screenW - pg.w) / 2; p += F("px}"); }
+    }
+
     p += F("</style></head><body>");
     // Turned, the page is drawn upright in a box the size of the turned page
     // and the box is rotated onto the screen — see kdRotCss().
@@ -2930,7 +3038,7 @@ void kindleTrackTrends() {
 }
 
 // ---------------------------------------------------------------------------
-// GET /kindle/probe — what to set KINDLE_PAGE_W to
+// GET /kindle/probe — what this reader's browser says its screen is
 // ---------------------------------------------------------------------------
 // The right layout width depends on what the reader's browser reports for its
 // viewport and devicePixelRatio, and that is a question only the device can
@@ -2961,15 +3069,19 @@ static void handleKindleProbe(AsyncWebServerRequest* req) {
            "font-size:12px;padding:2px 4px;white-space:nowrap}"
            "</style></head><body><h1>Layout probe</h1>");
 
-    p += F("<p>This build is <b>KINDLE_PAGE_W=");
+    p += F("<p>Without a Device setting or ?scr=, the page is <b>");
     p += PAGE_W;
-    p += F("</b>.</p><p id=\"r\">If this line does not change, this browser "
+    p += F(" px</b> wide.</p><p id=\"r\">If this line does not change, this browser "
            "runs no JavaScript &mdash; use the ruler below instead.</p>"
            "<script>document.getElementById('r').innerHTML="
            "'innerWidth <b>'+window.innerWidth+'</b> &middot; innerHeight <b>'"
            "+window.innerHeight+'</b><br>devicePixelRatio <b>'"
            "+(window.devicePixelRatio||1)+'</b> &middot; screen '"
-           "+screen.width+'&times;'+screen.height;</script>");
+           "+screen.width+'&times;'+screen.height"
+           // The address to bookmark on this reader: the page laid out for the
+           // screen it just reported, whatever the Device setting says.
+           "+'<br><a href=\"/kindle?scr='+screen.width+'x'+screen.height+'\">"
+           "/kindle?scr='+screen.width+'x'+screen.height+'</a>';</script>");
 
     // Server-side, so it survives a browser that will not run the script.
     p += F("<p>User agent:<br>");

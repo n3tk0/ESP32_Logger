@@ -305,6 +305,9 @@ KINDLE = {
     "clock": 1,
     "rotation": 0,
     "page_rotation": -1,
+    # The browser page's reader: auto, no bar.
+    "browser_dev": 0,
+    "browser_bar": 0,
     "clock_sync": 1,
     # The week strip and the rules, each at the page as it always was.
     "week_forecast": 0,
@@ -1123,6 +1126,7 @@ class H(http.server.SimpleHTTPRequestHandler):
                       "date_format", "pressure_unit", "decimals", "lang",
                       "refresh_sec", "follow_data", "clock_pin_refresh",
                       "fbink_res_w", "layout_mode", "clock", "rotation", "page_rotation", "clock_sync",
+                      "browser_dev", "browser_bar",
                       "week_forecast", "week_style", "rule_weight", "rule_ink",
                       "rule_style", "out_size", "in_size"):
                 if k in body:

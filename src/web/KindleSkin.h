@@ -75,6 +75,32 @@ inline const char* kdFaceStack(const KindleConfig& k) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The reader the browser page is laid out for
+// ---------------------------------------------------------------------------
+/// A reader's screen as its BROWSER reports it — CSS px, which is the panel's
+/// pixels over the browser's devicePixelRatio, not the panel's own count.
+struct KdDevice { uint16_t w, h; };
+
+/// The KDEV_* sizes; nullptr for KDEV_AUTO or anything unknown.
+///
+/// Only the Paperwhite 4 is MEASURED (GET /kindle/probe on firmware 5.18.1.1:
+/// devicePixelRatio 2, screen 536x724; the browser ignores the viewport meta).
+/// The Kindle 7 is its panel at ratio 1. The others are their panels at the
+/// ratio a reader of that density would plausibly use — auto, or ?scr= from
+/// the probe, is what to trust on one of those.
+inline const KdDevice* kdDevice(uint8_t dev) {
+    static const KdDevice DEV[KDEV_MAX] = {
+        {600, 800},    // KDEV_K7
+        {758, 1024},   // KDEV_PW2
+        {536, 724},    // KDEV_PW4
+        {618, 824},    // KDEV_PW5
+        {632, 840},    // KDEV_OASIS
+    };
+    if (dev == KDEV_AUTO || dev > KDEV_MAX) return nullptr;
+    return &DEV[dev - 1];
+}
+
 /// True when `k` asks for nothing the base stylesheet does not already do.
 inline bool kdSkinIsDefault(const KindleConfig& k) {
     return k.face == KFACE_BOOKERLY && k.boldZones == 0 && k.clockStyle == KCLOCK_PLAIN &&
@@ -574,6 +600,9 @@ inline void kdSkinClamp(KindleConfig& k) {
     if (k.rotation > KROT_270)          k.rotation = KROT_0;
     if (k.pageRot > KROT_270 + 1)       k.pageRot = 0;       // the panel's
     if (k.clockOff > 1)                 k.clockOff = 1;
+    // Auto for a reader nobody has heard of; the bar held to what can be meant.
+    if (k.browserDev > KDEV_MAX)        k.browserDev = KDEV_AUTO;
+    if (k.browserBar > KDEV_BAR_MAX)    k.browserBar = KDEV_BAR_MAX;
     // Every day — the default, and an older config's 0 — for a byte nobody
     // recognises: a clock set too often costs nothing, one never set drifts.
     if (k.clockSync > KCLOCK_SYNC_MAX && k.clockSync != KCLOCK_SYNC_OFF) k.clockSync = 0;
