@@ -328,9 +328,10 @@ payload_key_ok() {
         CACHED_AT|CACHED_ON) return 0 ;;
         SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW) return 0 ;;
         # The week strip's look and, when it holds the forecast, its seven
-        # days; and the dividing lines' thickness, pens and style. The pens
-        # are checked where they are used — see rule_pen().
-        WK_STYLE|WK_FC|WF[0-9]_*|RULE_PX|RULE_INK|RULE_SOFT|RULE_STYLE) return 0 ;;
+        # days and which of them is today (WF_NOW); and the dividing lines'
+        # thickness, pens and style. The pens are checked where they are
+        # used — see rule_pen().
+        WK_STYLE|WK_FC|WF_NOW|WF[0-9]_*|RULE_PX|RULE_INK|RULE_SOFT|RULE_STYLE) return 0 ;;
         # The chart's axis: the five values, the five hours, their widths, and
         # where the image's plot area is inside the image.
         CH_Y[0-9]|CH_Y[0-9]W|CH_H[0-9]|CH_H[0-9]W|CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
@@ -4202,7 +4203,7 @@ draw_forecast_body() {
 
 # ── The week strip ───────────────────────────────────────────────────────────
 draw_week() {
-    # WHAT THE STRIP HOLDS: the calendar week, or — WK_FC=1 — the next seven
+    # WHAT THE STRIP HOLDS: the calendar week, or — WK_FC=1 — seven
     # days' forecast in the same cells. The collector decides, because it is
     # the end that knows whether there is a fresh forecast to put there.
     if [ "${WK_FC:-0}" = "1" ]; then
@@ -4291,7 +4292,7 @@ draw_week() {
             wk_npen="GRAY7"
             if [ "$st" = "0" ]; then
                 wk_bg="GRAYE"
-                { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="GRAYD"
+                { [ "$i" = "5" ] || [ "$i" = "6" ]; } && wk_bg="$WK_WE_PEN"
                 fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" "$wk_bg"
             elif [ "$i" = "5" ] || [ "$i" = "6" ]; then
                 wk_npen="GRAY4"
@@ -4302,6 +4303,12 @@ draw_week() {
         wk_x=$((wk_x + WK_CELL_W))
     done
 }
+
+# The filled style's weekend cells, a step darker than the weekdays' GRAYE,
+# in the calendar and the forecast alike. The forecast's weekend icons carry
+# this grey as their ground, fc_<code>_<size>d.bmp — tools/check_kindle_icons.py
+# reads it from here.
+WK_WE_PEN=GRAYD
 
 # How thick the mark on the current day is — the frame round it in the
 # forecast, the bar under it in the minimal calendar: three design pixels at
@@ -4315,18 +4322,26 @@ mark_t() {
 }
 
 # ── The forecast in the week strip ───────────────────────────────────────────
-# Today and the six days after it, where the calendar would be: the weekday,
-# the condition, the high and, grey after it, the low. The cells take the
-# calendar's and its month heading's height together, so nothing else on the
-# page moves when the reader switches between the two.
+# Tomorrow and the six days after it, where the calendar would be: the
+# weekday, the condition, the high and, grey after it, the low. The cells take
+# the calendar's and its month heading's height together, so nothing else on
+# the page moves when the reader switches between the two.
 #
-# TODAY IS FRAMED, NOT INVERTED: a weather icon on a black plate is a white
-# square with nothing in it. The icons carry their own ground (see
-# tools/check_kindle_icons.py), so a filled cell takes the outlook's GRAYE
-# icons and every other style the white-ground ones, fc_<code>_<size>w.bmp.
+# The weekend (WF<i>_WE=1) is darker, as in the calendar: a GRAYD cell with
+# the icons grounded on it, fc_<code>_<size>d.bmp, in the filled style, and a
+# darker weekday name in the others.
+#
+# WF_NOW names the cell that is today, to frame: -1 from a collector whose
+# strip starts tomorrow, and 0 when it is not sent, from an older one whose
+# strip started today. TODAY IS FRAMED, NOT INVERTED: a weather icon on a
+# black plate is a white square with nothing in it.
+#
+# The icons carry their own ground (see tools/check_kindle_icons.py), so a
+# filled cell takes the outlook's GRAYE icons (its weekend the GRAYD ones) and
+# every other style the white-ground ones, fc_<code>_<size>w.bmp.
 draw_week_fc() {
-    local st="${WK_STYLE:-0}" top="${WK_HDG_Y:-$WK_Y}" x="$WK_X" i
-    local h name nw icon hi lo hiw low tsz nh th pad y nx ix hx lx w f sfx=""
+    local st="${WK_STYLE:-0}" top="${WK_HDG_Y:-$WK_Y}" x="$WK_X" i now="${WF_NOW:-0}"
+    local h name nw icon hi lo hiw low tsz nh th pad y nx ix hx lx w f sfx="" we csfx npen
     case "$st" in 0|1|2|3) ;; *) st=0 ;; esac
     [ "$st" = "0" ] || sfx="w"
     h=$(( WK_Y + WK_CELL_H - top ))
@@ -4344,16 +4359,23 @@ draw_week_fc() {
     for i in 0 1 2 3 4 5 6; do
         eval "name=\${WF${i}_NAME:-}; nw=\${WF${i}_NAMEW:-0}; icon=\${WF${i}_ICON:-}"
         eval "hi=\${WF${i}_HI:-}; lo=\${WF${i}_LO:-}; hiw=\${WF${i}_HIW:-0}; low=\${WF${i}_LOW:-0}"
+        eval "we=\${WF${i}_WE:-0}"
+        csfx="$sfx"; npen=GRAY7
 
         case "$st" in
-            0) fill_rect "$x" "$top" "$WK_CELL_W" "$h" GRAYE ;;
+            0) if [ "$we" = "1" ]; then
+                   fill_rect "$x" "$top" "$WK_CELL_W" "$h" "$WK_WE_PEN"; csfx="d"
+               else
+                   fill_rect "$x" "$top" "$WK_CELL_W" "$h" GRAYE
+               fi ;;
             1) fill_rect "$x" "$top" "$RULE_T" "$h" "$RULE_PEN"
                fill_rect "$x" "$top" "$WK_CELL_W" "$RULE_T" "$RULE_PEN"
                fill_rect "$x" "$(( top + h - RULE_T ))" "$WK_CELL_W" "$RULE_T" "$RULE_PEN"
                [ "$i" = "6" ] && \
                    fill_rect "$(( x + WK_CELL_W - RULE_T ))" "$top" "$RULE_T" "$h" "$RULE_PEN" ;;
         esac
-        if [ "$i" = "0" ]; then
+        [ "$st" != "0" ] && [ "$we" = "1" ] && npen=GRAY4
+        if [ "$i" = "$now" ]; then
             if [ "$st" = "3" ]; then
                 fill_rect "$x" "$(( top + h - WK_MARK_T ))" "$WK_CELL_W" "$WK_MARK_T" BLACK
             else
@@ -4367,13 +4389,13 @@ draw_week_fc() {
 
         y=$(( top + pad ))
         centre_in "$x" "$WK_CELL_W" "$(( WK_NAME_SZ * nw / 1000 ))"; nx="$CENTRE_X"
-        if [ "$i" = "0" ]; then draw_text_reg "$nx" "$y" "$WK_NAME_SZ" BLACK "$name"
-        else                    draw_text_reg "$nx" "$y" "$WK_NAME_SZ" GRAY7 "$name"
+        if [ "$i" = "$now" ]; then draw_text_reg "$nx" "$y" "$WK_NAME_SZ" BLACK "$name"
+        else                    draw_text_reg "$nx" "$y" "$WK_NAME_SZ" "$npen" "$name"
         fi
         y=$(( y + nh + 2 ))
         if [ -n "$icon" ]; then
-            f="$ICON_DIR/fc_${icon}_${FC_OL_SZ}${sfx}.bmp"
-            [ -f "$f" ] || f="$ICON_DIR/fc_-1_${FC_OL_SZ}${sfx}.bmp"
+            f="$ICON_DIR/fc_${icon}_${FC_OL_SZ}${csfx}.bmp"
+            [ -f "$f" ] || f="$ICON_DIR/fc_-1_${FC_OL_SZ}${csfx}.bmp"
             centre_in "$x" "$WK_CELL_W" "$FC_OL_SZ"; ix="$CENTRE_X"
             draw_image "$f" "$ix" "$y"
         fi

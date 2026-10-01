@@ -790,11 +790,13 @@ static bool kdWeekFcOn(const KindleConfig& k, uint32_t now) {
     return kdWeekFcStart(k, forecastModule.snapshot(), now) >= 0;
 }
 
-/// The week strip holding the forecast: today and the six days after it, each
-/// cell its weekday, the condition and the high over the low. Today is framed
-/// rather than inverted — an icon drawn in black on black is no icon — and
-/// the cells are one height with the calendar's, month heading included, so
-/// nothing else on the page moves when the reader switches between them.
+/// The week strip holding the forecast: tomorrow and the six days after it,
+/// each cell its weekday, the condition and the high over the low. Not today:
+/// the headline above already says what today is doing, and a cell repeating
+/// it was a day of outlook given away. So no cell is marked either; the
+/// weekend is shaded darker, as in the calendar. The cells
+/// are one height with the calendar's, month heading included, so nothing
+/// else on the page moves when the reader switches between them.
 static void appendWeekFc(String& out, const ForecastModule::Data& fc, int start,
                          uint32_t now, bool rule) {
     static const ForecastModule::Period none;
@@ -806,12 +808,17 @@ static void appendWeekFc(String& out, const ForecastModule::Data& fc, int start,
     if (rule) out += F("<div class=\"rule\"></div>");
     out += F("<table class=\"wk wf\"><tr>");
     for (int i = 0; i < ForecastModule::WEEK_N; i++) {
+        const int di = start + 1 + i;              // tomorrow onwards
         const ForecastModule::Period& d =
-            start + i < ForecastModule::WEEK_N ? fc.days[start + i] : none;
-        out += (i == 0) ? F("<td class=\"wd wd-now\">") : F("<td class=\"wd\">");
+            di < ForecastModule::DAYS_N ? fc.days[di] : none;
+        // The weekend darker, as in the calendar: by the day's own weekday,
+        // or worked out from today for a day the provider did not reach.
+        const int wd = d.valid && d.wday >= 0 ? d.wday
+                     : (haveDay ? (tmv.tm_wday + i + 1) % 7 : -1);
+        out += (wd == 0 || wd == 6) ? F("<td class=\"wd wd-we\">") : F("<td class=\"wd\">");
         out += F("<div class=\"wd-n\">");
         out += d.valid ? forecastPeriodLabel(d)
-                       : (haveDay ? kdWeekdayAhead(tmv.tm_wday, i) : "");
+                       : (haveDay ? kdWeekdayAhead(tmv.tm_wday, i + 1) : "");
         out += F("</div>");
         if (d.valid) {
             appendWeatherIcon(out, d.code, kdPx(30));
@@ -1813,7 +1820,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         kdShellInt(s, "WK_TODAY", wday);
 
         // THE FORECAST IN THE WEEK STRIP, when the reader asked for it and
-        // there is a fresh one: today and the six days after it. The calendar
+        // there is a fresh one: tomorrow and the six days after it. The calendar
         // keys above still go out, for a reader too old to know WK_FC. A day
         // the provider did not cover (OpenWeatherMap stops after five) keeps
         // its name and nothing under it.
@@ -1822,15 +1829,21 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         const int wst = kdWeekFcStart(skin, wfc, now);
         if (wst >= 0) {
             static const ForecastModule::Period none;
-            s->print("WK_FC=1\n");
+            // WF_NOW: the cell to frame as today, none now the strip starts
+            // tomorrow. A script too old to read it frames the first cell.
+            s->print("WK_FC=1\nWF_NOW=-1\n");
             for (int i = 0; i < ForecastModule::WEEK_N; i++) {
+                const int di = wst + 1 + i;        // tomorrow onwards
                 const ForecastModule::Period& d =
-                    wst + i < ForecastModule::WEEK_N ? wfc.days[wst + i] : none;
+                    di < ForecastModule::DAYS_N ? wfc.days[di] : none;
                 char wn[24];
                 kdUpperUtf8(wn, sizeof(wn), d.valid ? forecastPeriodLabel(d)
-                                                    : kdWeekdayAhead(tm.tm_wday, i));
+                                                    : kdWeekdayAhead(tm.tm_wday, i + 1));
                 kdShellVarN(s, "WF%d_NAME", i, wn);
                 s->printf("WF%d_NAMEW=%u\n", i, kdAdvanceMille(wn));
+                // Saturday or Sunday, drawn darker as the calendar's are.
+                const int wd = d.valid && d.wday >= 0 ? d.wday : (tm.tm_wday + i + 1) % 7;
+                s->printf("WF%d_WE=%d\n", i, (wd == 0 || wd == 6) ? 1 : 0);
                 if (d.valid) {
                     char hi[12], lo[12];
                     snprintf(hi, sizeof(hi), "%d°", (int)lroundf(d.tempC));

@@ -91,8 +91,8 @@ public:
         // strncpy(dst, src, sizeof-1) would cut it after 23 — mid-character,
         // which shows on the panel as one broken glyph and nothing else.
         char     summary[40] = {0};
-        /// The next five steps of three hours (+3 h .. +15 h), and the week
-        /// from today (days[0]) to six days ahead — BOTH, whichever the
+        /// The next five steps of three hours (+3 h .. +15 h), and the days
+        /// from today (days[0]) to eight days ahead — BOTH, whichever the
         /// outlook setting is. The outlook columns read one or the other
         /// (outlookAt()); the Kindle's week strip can hold the days while its
         /// outlook columns keep the hours, which is why neither is left out.
@@ -100,7 +100,7 @@ public:
         /// FIVE hours, of which the upright page draws the first three: the
         /// landscape page has the width for all five.
         Period   hours[5];
-        Period   days[7];
+        Period   days[9];
         bool     daily = false;   // the outlook setting when this was fetched
 
         /// Outlook column `i`: the hours, or tomorrow onwards in daily mode.
@@ -112,8 +112,13 @@ public:
 
     /// How many outlook columns a fetch fills. See Data::hours.
     static constexpr int OUTLOOK_N = 5;
-    /// How many days the week holds, today included. See Data::days.
+    /// How many days the Kindle's week strip holds: tomorrow and the six
+    /// after it. Today is already in the headline above it.
     static constexpr int WEEK_N = 7;
+    /// How many days a fetch keeps, today included: the strip's seven after
+    /// today, and one more for a forecast fetched before midnight and read
+    /// after it, whose first day is then yesterday. See Data::days.
+    static constexpr int DAYS_N = WEEK_N + 2;
 
     const char* getId()   const override { return "forecast"; }
     const char* getName() const override { return "Weather forecast"; }
