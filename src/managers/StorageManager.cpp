@@ -72,6 +72,8 @@ static uint32_t lfsChecksum(const char* path) {
     return h ? h : 1;
 }
 
+// Unguarded on purpose: initStorage() runs in setup() before
+// TaskManager::init() creates fsMutex, so no other task touches LittleFS yet.
 static void migrateSettingsFromSd() {
     static const char* const FILES[] = {
         "/platform_config.json",
