@@ -197,13 +197,12 @@ static String kdRotArg(AsyncWebServerRequest* req, char sep) {
             a += w; a += 'x'; a += h;
         }
     }
-    if (const String* v = queryArg(req, "bar")) {
-        const long b = v->toInt();
-        if (b >= 0 && b <= KDEV_BAR_MAX) {
-            a += sep;
-            a += F("bar=");
-            a += b;
-        }
+    // Carried as kdBarFor() reads it — held to 0..KDEV_BAR_MAX — so the page
+    // a link leads to is laid out with the same bar as the one it is on.
+    if (queryArg(req, "bar")) {
+        a += sep;
+        a += F("bar=");
+        a += kdBarFor(req, config.kindle);
     }
     return a;
 }

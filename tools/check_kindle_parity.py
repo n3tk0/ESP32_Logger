@@ -359,8 +359,14 @@ def main():
         problems.append('parity: ChartBmp::imageW/imageH no longer state the BMP size')
     else:
         hiW, loW, hiH, loH = (int(g) for g in m.groups())
-        mw = re.search(r'CHART_W = kdPx\((\d+)\);', open(CPP, encoding='utf-8').read())
+        # A macro now (kdPx() follows each request's page width), formerly a
+        # constexpr: either spelling, and a loud failure when neither is there
+        # rather than a margin check that silently stops comparing anything.
+        mw = re.search(r'(?:CHART_W = |#define CHART_W )kdPx\((\d+)\)',
+                       open(CPP, encoding='utf-8').read())
         loW_design = int(mw.group(1)) if mw else None
+        if loW_design is None:
+            problems.append('parity: CHART_W = kdPx(n) not found in KindleDashboard.cpp')
         for rel, (w, h) in (('kindle/layout/600x800.conf', (loW, loH)),
                             ('kindle/layout/1072x1448.conf', (hiW, hiH))):
             conf = load_conf(os.path.join(ROOT, rel))
