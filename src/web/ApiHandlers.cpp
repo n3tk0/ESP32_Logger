@@ -942,13 +942,9 @@ static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
     }
     doc["grid_cols"] = KZ_GRID_COLS;
 
-    doc["flag_bold"]  = KSLOTF_BOLD;
-    doc["flag_unit"]  = KSLOTF_UNIT;
-    doc["flag_age"]   = KSLOTF_AGE;
-    doc["flag_trend"] = KSLOTF_TREND;
-    doc["flag_heavy"] = KSLOTF_HEAVY;
-    doc["flag_inv"]   = KSLOTF_INV;
-    doc["flag_bar"]   = KSLOTF_BAR;
+    // The place flags (KSLOTF_*) are not sent: they are fixed bits the page
+    // carries itself — www/js/kindle.js, kdFlags — and every byte of this
+    // handler is a byte of the C3 build, which has none to spare.
     doc["auto_decimals"] = KSLOT_DECIMALS_AUTO;
 
     sendJsonResponse(req, doc);

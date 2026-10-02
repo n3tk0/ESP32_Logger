@@ -807,13 +807,17 @@ collector takes the unit off the value before the layout sizes the grid
 (`kdWallUnits()`) and sends it as `Z_<zone>_CAPUNIT`; a tendency arrow goes
 after it. ° and % stay on the value, where they read as part of it. The
 captions are 22 px. The slash beside the headline is black, as the captions
-are, and 28 px after the headline's degree.
+are, 28 px after the headline's degree and about as far before the second
+value (`SLASH_W` 54). Hairlines in the rules' ink separate the grid's places:
+across at the middle of the air between two rows, and down 8 px left of a
+row's second cell.
 
 **The chart's switch draws the outdoor line behind the headline** on this
 page, which has no chart: the last 24 hours' mean, light grey and 5 px thick,
 across the headline's row. The panel fetches it as
 `/kindle/graph.bmp?line=1&w=…&h=…` when the payload says `HERO_LINE=1`, and
-draws it before the figures.
+draws it before the figures; the browser page shows the same image,
+stretched over the row.
 
 The headline's row is as tall as the largest headline, whatever this one
 came out at, and the headline stands on its foot, so a reading that gains a

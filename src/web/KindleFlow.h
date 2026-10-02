@@ -172,21 +172,26 @@ static const unsigned KDF_BAR_ADV = 440;
 /// How good a reading is, 0 (bad) to 100 (good), for the bar beside it; -1
 /// for a metric with no such scale. Humidity is best between 40 and 60 %, and
 /// the rest are best low: an air-quality index of 0..500, CO2 from 400 ppm,
-/// VOCs to 2200 ppb, fine dust to 75 µg/m³ and coarse to 150.
-static inline int kdBarScore(const char* metric, float v) {
-    if (!metric || v != v) return -1;
-    float s;
-    if (!strcmp(metric, "humidity") || !strcmp(metric, "humidity_amb"))
-        s = v < 40.0f ? (v - 10.0f) * 100.0f / 30.0f
-          : v > 60.0f ? (90.0f - v) * 100.0f / 30.0f : 100.0f;
-    else if (!strcmp(metric, "aqi"))                                 s = 100.0f - v / 5.0f;
-    else if (!strcmp(metric, "co2") || !strcmp(metric, "eco2"))      s = (2000.0f - v) / 16.0f;
-    else if (!strcmp(metric, "tvoc"))                                s = 100.0f - v / 22.0f;
-    else if (!strcmp(metric, "pm1") || !strcmp(metric, "pm25"))      s = 100.0f - v * 4.0f / 3.0f;
-    else if (!strcmp(metric, "pm4") || !strcmp(metric, "pm10"))      s = 100.0f - v * 2.0f / 3.0f;
-    else if (!strcmp(metric, "battery_percent"))                     s = v;
-    else return -1;
-    return s < 0.0f ? 0 : (s > 100.0f ? 100 : (int)(s + 0.5f));
+/// VOCs to 2200 ppb, fine dust to 75 µg/m³ and coarse to 150. Whole numbers
+/// and a table: the C3 has no FPU, and this is all it needs.
+static inline int kdBarScore(const char* metric, long v) {
+    struct Scale { const char* m; int16_t good, bad; };
+    static const Scale kScales[] = {
+        { "humidity", 40, 10 }, { "humidity_amb", 40, 10 },
+        { "aqi", 0, 500 }, { "co2", 400, 2000 }, { "eco2", 400, 2000 },
+        { "tvoc", 0, 2200 }, { "pm1", 0, 75 }, { "pm25", 0, 75 },
+        { "pm4", 0, 150 }, { "pm10", 0, 150 }, { "battery_percent", 100, 0 },
+    };
+    if (!metric) return -1;
+    for (const Scale& sc : kScales) {
+        if (strcmp(metric, sc.m) != 0) continue;
+        // Humidity has a band, and is as bad 30 points above it as below.
+        if (sc.good == 40 && v > 60) v = 100 - v;
+        else if (sc.good == 40 && v > 40) v = 40;
+        long s = (sc.bad - v) * 100 / (sc.bad - sc.good);
+        return s < 0 ? 0 : (s > 100 ? 100 : (int)s);
+    }
+    return -1;
 }
 
 /// How wide a value comes out with its unit and arrow, in thousandths of the
@@ -924,6 +929,7 @@ static const int KDF_WALL_FC_TEXT = 24;    ///< the summary, in the heading's pl
 static const int KDF_WALL_FC_TEMP = 58;    ///< the day's high and low, at most
 static const int KDF_WALL_FC_WIND = 18;    ///< the wind and the age, three lines beside the icon
 static const int KDF_WALL_HEAD_GAP = 28;   ///< the headline's degree to the slash
+static const int KDF_WALL_SLASH_W  = 54;   ///< the slash to the second value: its glyph and as much air again
 static const int KDF_IN_V_GAP     = 10;    ///< one indoor reading's foot to the next one's caption
 
 /// The day's high and low as the band prints them, "-00°/-00°", in mille.
@@ -993,7 +999,7 @@ static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
     // Room between the headline's degree and the slash: at 160 px the
     // desk page's 12 set them touching, and "12.4°/67%" read as one figure.
     f.headGap = (uint8_t)KDF_WALL_HEAD_GAP;
-    f.slashW  = 30;
+    f.slashW  = (uint8_t)KDF_WALL_SLASH_W;
     f.subSz   = (uint8_t)KDF_WALL_SUB;
     kdFlowHeadFit(in, f);
     f.grow    = (uint16_t)(f.heroSz * 1000 / 88);
@@ -1333,7 +1339,6 @@ static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out)
             KDF_T("CL_X",          clX, 1),
             KDF_T("CL_Y",          clY, 1),
             KDF_T("CL_W",          clW, 1),
-            KDF_T("LAB_FC_X",      labFcX, 1),
             KDF_T("FC_ICON_X",     fcIconX, 1),
             KDF_T("FC_TEXT_X",     fcTextX, 1),
             KDF_T("FC_TEXT_W",     fcTextW, 1),

@@ -312,8 +312,8 @@ struct ChartBmpCtx {
             if (!hourValid[i] || !hourValid[i+1]) continue;
             int x0 = hourX[i], x1 = hourX[i+1];
             for (int x = x0; x <= x1; x++) {
-                float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
-                int my = outMeanY[i] + (int)(t * (outMeanY[i+1] - outMeanY[i]));
+                int my = outMeanY[i] + (x1 > x0 ? (x - x0) * (outMeanY[i+1] - outMeanY[i])
+                                                    / (x1 - x0) : 0);
                 if (y >= my - half && y <= my + half)
                     setPixel4(row, x, palIdx);
             }

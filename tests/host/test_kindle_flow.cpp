@@ -815,7 +815,9 @@ static void test_wall_page() {
     const KdFlow desk = kdFlowCompute(defaultPage());
     const KdFlow f = kdFlowCompute(wallPage());
     checkWallStacks(f);
-    CHECK(f.heroSz >= 135);   // "-38.8° / 37%", the widest it reads
+    // "-38.8° / 37%", the widest it reads, with the air both sides of the
+    // slash.
+    CHECK(f.heroSz >= 125);
     CHECK_EQ(f.bigSz, KDF_WALL_BIG);
     CHECK(f.gridValSz > desk.gridValSz);
     CHECK(f.inValSz > desk.inValSz);

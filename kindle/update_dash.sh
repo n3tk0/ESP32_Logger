@@ -3096,7 +3096,7 @@ FLOW_KEYS="GROUP_LAB_SZ HERO_Y HERO_SZ BIG_SZ HEAD_GAP SLASH_W SUB_Y SUB_SZ
  OL_N OL0_X OL1_X OL2_X OL3_X OL4_X OL3_Y OL4_Y RULE3_W
  WK_X WK_HDG_X WK_CELL_W WK_HDG_RULE_W FOOT_RULE_Y FOOT_RULE_W FOOT_Y
  STAT_X STAT_Y BATT_Y
- WALL HEAD_W HEAD_RULE_Y IN_VCOL SEP_Y SEP2_X SEP2_Y SEP2_H LAB_FC_X
+ WALL HEAD_W HEAD_RULE_Y IN_VCOL SEP_Y SEP2_X SEP2_Y SEP2_H
  FC_ICON_X FC_TEXT_X FC_TEXT_W FC_TEXT_SZ FC_TEMP_X FC_TEMP_SZ FC_WIND_X FC_WIND_SZ"
 
 #: 1 when the collector's layout is the one loaded. See flow_apply().
@@ -4129,14 +4129,26 @@ draw_zones() {
     # that has no layout to follow.
     [ "${LAYOUT_FLOW:-0}" = "1" ] && grows="${LY_GRID_ROWS:-}"
     set -- ${GRID_ZONES:-}
+    local gcell
     for gcols in $grows; do
         gcw=$(( ${COL_L_W:-270} / gcols ))
         if [ "$gcols" -ge 3 ]; then gvsz="${GRID_VAL_SZ_3:-26}"
         else                        gvsz="${GRID_VAL_SZ:-31}"
         fi
+        # The wall page's hairlines between the places: across at the middle
+        # of the air above every row but the first, and down 8 px left of
+        # each cell after the first — the page's appendWallBody().
+        gcell=$(( ${GRID_LAB_SZ:-10} + 4 + gvsz ))
+        if [ "${WALL:-0}" = "1" ] && [ "$gy" -gt "${GRID_Y:-150}" ]; then
+            draw_hline "$lx" "$(( gy - (${GRID_ROW_H:-46} - gcell) / 2 ))" \
+                       "$(( ${COL_L_W:-270} - 8 ))" GRAYA
+        fi
         gi=0
         while [ "$gi" -lt "$gcols" ] && [ -n "${1:-}" ]; do
             z="$1"; shift
+            if [ "${WALL:-0}" = "1" ] && [ "$gi" -gt 0 ]; then
+                draw_vline "$(( lx + gi * gcw - 8 ))" "$(( gy - 2 ))" "$(( gcell + 4 ))" 1
+            fi
             eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
             eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD; ink=\${Z_${z}_INK:-BLACK}"
             eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"

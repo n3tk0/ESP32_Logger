@@ -1431,6 +1431,37 @@ check "$?" "the wall page sets a unit by its caption and the slash in black"
   exit 0 )
 check "$?" "a place's own style: inverted, extra bold, the bar; the wall forecast and line"
 
+# THE WALL PAGE'S HAIRLINES BETWEEN THE OUTDOOR PLACES: down 8 px left of the
+# second cell of a row, across in the air above every row but the first —
+# appendWallBody()'s, at the same design pixels. The desk page has neither.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  set -- $LY_GRID_ROWS
+  [ "$#" -ge 2 ] && [ "$1" = "2" ] || { echo "rows '$LY_GRID_ROWS'" >&2; exit 1; }
+  reset_log
+  draw_zones >/dev/null 2>&1
+  cell=$(( GRID_LAB_SZ + 4 + GRID_VAL_SZ ))
+  vx=$(( COL_L_X + COL_L_W / 2 - 8 ))
+  grep -q -e "-k${T}top=$(( GRID_Y - 2 )),left=${vx},width=[0-9]*,height=$(( cell + 4 ))" \
+      "$FBINK_LOG" || { echo "no line down at $vx" >&2; exit 2; }
+  hy=$(( GRID_Y + GRID_ROW_H - (GRID_ROW_H - cell) / 2 ))
+  grep -q -e "-k${T}top=${hy},left=${COL_L_X},width=$(( COL_L_W - 8 ))," "$FBINK_LOG" || \
+      { echo "no line across at $hy" >&2; exit 3; }
+  # The desk page: none of either.
+  flow_payload "$WORK/ly.txt" res=600
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"; load_layout
+  [ "${WALL:-0}" = "0" ] || exit 4
+  reset_log
+  draw_zones >/dev/null 2>&1
+  cell=$(( GRID_LAB_SZ + 4 + GRID_VAL_SZ ))
+  grep -q -e "height=$(( cell + 4 ))\$" "$FBINK_LOG" && { echo "desk line down" >&2; exit 5; }
+  exit 0 )
+check "$?" "the wall page draws hairlines between its outdoor places, the desk page none"
+
 # AND IT REPAINTS BY ZONES, AS THE DESK PAGE DOES: the readings above the band,
 # the clock its own rectangle in the band every minute, the forecast beside it
 # — each refreshed once and none of them flashing; the whole screen only on

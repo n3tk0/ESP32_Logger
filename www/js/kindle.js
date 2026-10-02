@@ -200,6 +200,8 @@ var kdOrder   = [];     // [{key, group, role}] from the firmware's own enum
 var kdSensors = [];     // [{id, name, metrics: []}]
 var kdGroups  = { out: "", in: "" };               // the reader's headings
 var kdGroupPh = { out: "OUTSIDE", in: "INSIDE" };  // what "" renders as
+// The place flags — KSLOTF_* in src/web/KindleSlots.h, which /api/kindle/slots
+// does not send.
 var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8, heavy: 16, inv: 32, bar: 64 };
 var kdInks    = [];     // [{id, css}] from the firmware's own enum
 var kdAutoDec = 255;
@@ -351,20 +353,19 @@ function kdPvPlate(z, x, y, w, h) {
          "px;background:#000'></u>";
 }
 function kdPvPlateEnd() { kdPvInvOn = false; }
-// kdBarScore() in KindleFlow.h: how good a reading is, 0..100, or -1.
+// kdBarScore() in KindleFlow.h: how good a reading is, 0..100, or -1 — in
+// whole numbers, as the collector works it out.
+var KD_BAR_SCALES = { humidity:[40, 10], humidity_amb:[40, 10], aqi:[0, 500],
+  co2:[400, 2000], eco2:[400, 2000], tvoc:[0, 2200], pm1:[0, 75], pm25:[0, 75],
+  pm4:[0, 150], pm10:[0, 150], battery_percent:[100, 0] };
 function kdPvBarScore(metric, v) {
-  var s;
-  if (isNaN(v)) return -1;
-  if (metric === "humidity" || metric === "humidity_amb")
-    s = v < 40 ? (v - 10) * 100 / 30 : (v > 60 ? (90 - v) * 100 / 30 : 100);
-  else if (metric === "aqi") s = 100 - v / 5;
-  else if (metric === "co2" || metric === "eco2") s = (2000 - v) / 16;
-  else if (metric === "tvoc") s = 100 - v / 22;
-  else if (metric === "pm1" || metric === "pm25") s = 100 - v * 4 / 3;
-  else if (metric === "pm4" || metric === "pm10") s = 100 - v * 2 / 3;
-  else if (metric === "battery_percent") s = v;
-  else return -1;
-  return s < 0 ? 0 : (s > 100 ? 100 : Math.round(s));
+  var sc = KD_BAR_SCALES[metric];
+  if (!sc || isNaN(v)) return -1;
+  v = Math.trunc(v);
+  if (sc[0] === 40 && v > 60) v = 100 - v;
+  else if (sc[0] === 40 && v > 40) v = 40;
+  var s = Math.trunc((sc[1] - v) * 100 / (sc[1] - sc[0]));
+  return s < 0 ? 0 : (s > 100 ? 100 : s);
 }
 // The place's bar, or -1: switched on, a metric with a scale, a reading.
 function kdPvBarOf(z) {
@@ -471,7 +472,7 @@ var KDF = {
   WALL_X1:582, WALL_W:564, WALL_COL:352, WALL_SEP:376, WALL_RX:394, WALL_LAB:22,
   WALL_HERO:160, WALL_BIG:96, WALL_SUB:22, WALL_BAND:200, WALL_CLOCK:1300,
   WALL_CLOCK_1:1500, WALL_FC_ICON:100, WALL_FC_TEXT:24, WALL_FC_TEMP:58, WALL_FC_WIND:18,
-  WALL_HEAD_GAP:28, IN_V_GAP:10,
+  WALL_HEAD_GAP:28, WALL_SLASH_W:54, IN_V_GAP:10,
   FC_TEMP_ADV:4 * 620 + 2 * 330 + 330 + 2 * 330
 };
 
@@ -844,7 +845,7 @@ function kdFlowWall(inp, f) {
   f.labSz = K.WALL_LAB;
   f.groupY = K.TOP_Y; f.heroY = K.TOP_Y + f.labSz + 8;
   f.colLX = X0; f.colLW = K.WALL_W; f.headW = K.WALL_W;
-  f.heroSz = K.WALL_HERO; f.bigSz = K.WALL_BIG; f.headGap = K.WALL_HEAD_GAP; f.slashW = 30;
+  f.heroSz = K.WALL_HERO; f.bigSz = K.WALL_BIG; f.headGap = K.WALL_HEAD_GAP; f.slashW = K.WALL_SLASH_W;
   f.subSz = K.WALL_SUB;
   kdFlowHeadFit(inp, f);
   f.grow = kdQ(f.heroSz * 1000, 88);
@@ -1178,7 +1179,7 @@ function kdRenderPreview() {
       var by = L.heroY + 18 + Math.round((L.heroSz - 88) / 2);
       x += L.headGap;
       h += kdT(x, by, L.bigSz, "/", { ink:L.wall ? "#000000" : "#aaaaaa" });
-      x += kdTw("/", L.bigSz) + 6;
+      x += L.wall ? L.slashW : kdTw("/", L.bigSz) + 6;
       h += kdT(x, by, L.bigSz, v,
                { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0002), ink:kdPvInk(z.ink),
                  heavy:!!(z.flags & kdFlags.heavy) });
@@ -1205,7 +1206,12 @@ function kdRenderPreview() {
     }
     for (var r = 0; r < rows.length; r++) {
       var cw = Math.floor(L.colLW / rows[r].length), gy = L.gridY + r * L.gridRowH;
-      var vs = L.gridValSz;
+      var vs = L.gridValSz, cellH = L.labSz + 4 + vs;
+      // The wall page's hairlines between the places — appendWallBody().
+      if (L.wall) {
+        if (r) h += kdRl(X, gy - kdQ(L.gridRowH - cellH, 2), L.colLW - 8, 1);
+        for (i = 1; i < rows[r].length; i++) h += kdRl(X + i * cw - 8, gy - 2, 1, cellH + 4);
+      }
       for (i = 0; i < rows[r].length; i++) {
         z = kdSlot(rows[r][i]); x = X + i * cw; v = kdPvValue(z);
         u = kdPvUnit(z);
@@ -2169,8 +2175,6 @@ function kindleRefresh() {
       if (s) {
         kdZones = s.zones || {};
         kdOrder = s.order || [];
-        kdFlags = { bold:s.flag_bold, unit:s.flag_unit, age:s.flag_age, trend:s.flag_trend,
-                    heavy:s.flag_heavy || 0, inv:s.flag_inv || 0, bar:s.flag_bar || 0 };
         kdInks  = s.inks || [];
         kdAutoDec = s.auto_decimals;
         kdGroups  = { out:s.group_out_set || "", in:s.group_in_set || "" };
