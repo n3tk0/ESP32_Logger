@@ -215,6 +215,10 @@ bool     s_sdsAwake   = false;   ///< what we last told it
 uint32_t s_sdsWokeMs  = 0;       ///< when we last told it to work
 uint32_t s_sdsCmdMs   = 0;       ///< when we last sent any command
 uint32_t s_sdsFrameMs = 0;       ///< when the newest valid frame arrived
+/// A frame arrived warmup_s or more after the last wake. Latched, so a sensor
+/// that never sleeps does not depend on millis() since a wake at boot, which
+/// stops meaning anything when millis() wraps.
+bool     s_sdsWarmed  = false;
 /// A read fell due and has not been sent yet: the fan had not run its
 /// warm-up (the first send after boot), so it is taken on the next send.
 bool     s_sdsPending = false;
@@ -381,6 +385,7 @@ static void releaseAll() {
     s_sdsPos  = 0;
     s_sdsAwake   = false;
     s_sdsFrameMs = 0;
+    s_sdsWarmed  = false;
     s_sdsPending = false;
     s_pulses  = 0;
     s_pulseTotal = 0.0f;
@@ -529,6 +534,12 @@ static bool beginDs(EntryState& e, const SensorCfg& s) {
     return true;
 }
 
+/// How much earlier than its warm-up a sleeping SDS011 is woken. Frames come
+/// once a second and the node's loop is not to the millisecond, so a wake at
+/// exactly warmup_s would usually leave the newest frame just short of it at
+/// send time and the read would slip to the next send.
+const uint32_t SDS_WAKE_LEAD_MS = 5000;
+
 /// Put the SDS011 to work (fan and laser on) or to sleep. The datasheet's
 /// "set sleep and work" query, 0xB4 / 0x06, as a set (0x01), for every
 /// sensor (device id FF FF). It answers with an AA C5 frame, which
@@ -545,6 +556,7 @@ static void sdsSetWorking(bool work) {
     if (work && !s_sdsAwake) {
         s_sdsWokeMs = now;
         s_sdsPos    = 0;
+        s_sdsWarmed = false;
     }
     s_sdsAwake = work;
     if (!work) {
@@ -698,7 +710,7 @@ void nodeSensorsSetWait(void (*wait)(uint32_t ms)) { s_waitConv = wait; }
 /// buffer holds many; the latest is the one to send. Frame: AA C0 pm25L pm25H
 /// pm10L pm10H id1 id2 sum AB, values in tenths of a ug/m3 — matching the
 /// collector's SDS011 plugin.
-static void drainSds() {
+static void drainSds(uint8_t warmupS) {
     while (s_sdsPort.available()) {
         const uint8_t b = (uint8_t)s_sdsPort.read();
         if (s_sdsPos == 0 && b != 0xAA) continue;
@@ -712,25 +724,27 @@ static void drainSds() {
         s_sdsPm25 = (float)((s_sdsFrame[3] << 8) | s_sdsFrame[2]) / 10.0f;
         s_sdsPm10 = (float)((s_sdsFrame[5] << 8) | s_sdsFrame[4]) / 10.0f;
         s_sdsFrameMs = millis();
+        // Unsigned is right here: the wake was at most a warm-up and some
+        // seconds ago whenever this is still being decided.
+        if (!s_sdsWarmed && s_sdsAwake &&
+            (uint32_t)(s_sdsFrameMs - s_sdsWokeMs) >= (uint32_t)warmupS * 1000u)
+            s_sdsWarmed = true;
     }
 }
 
 /// Has the fan run its warm-up, and is the newest frame from after it? A
 /// frame from the first seconds after waking is the sensor still clearing
 /// the chamber, and a frame older than a few seconds is from before a stall.
-static bool sdsWarm(const SensorCfg& s) {
-    if (!s_sdsAwake || !isfinite(s_sdsPm25)) return false;
-    const uint32_t now = millis();
-    // Signed: a frame from before the wake is a negative age, not a huge one.
-    return (int32_t)(s_sdsFrameMs - s_sdsWokeMs) >= (int32_t)s.warmup_s * 1000 &&
-           (uint32_t)(now - s_sdsFrameMs) < 5000u;
+static bool sdsWarm() {
+    if (!s_sdsAwake || !s_sdsWarmed || !isfinite(s_sdsPm25)) return false;
+    return (uint32_t)(millis() - s_sdsFrameMs) < 5000u;
 }
 
 /// A due read that has waited this long past its warm-up with no usable frame
 /// is given up: the sensor is unplugged or stalled, and keeping it awake for
 /// ever waiting on it would undo the point of sleeping it.
 static bool sdsGiveUp(const SensorCfg& s) {
-    return (uint32_t)(millis() - s_sdsWokeMs) > (uint32_t)s.warmup_s * 1000u + 30000u;
+    return (uint32_t)(millis() - s_sdsWokeMs) > (uint32_t)s.warmup_s * 1000u + SDS_WAKE_LEAD_MS + 30000u;
 }
 
 /// One entry's values, in the order sensorTypeMetricIds() lists them (for a
@@ -783,8 +797,8 @@ static uint8_t readEntry(uint8_t si, const SensorCfg& s, float altitude, bool bh
             return 1;
         }
         case SensorType::Sds011:
-            drainSds();
-            if (!sdsWarm(s)) return 2;          // both stay NAN: not yet
+            drainSds(s.warmup_s);
+            if (!sdsWarm()) return 2;           // both stay NAN: not yet
             v[0] = s_sdsPm25;
             v[1] = s_sdsPm10;
             // Used up: the next send needs a frame of its own, never this one
@@ -931,12 +945,12 @@ void nodeSensorsIdle(const NodeConfig& cfg, uint32_t nextTick, uint32_t msToNext
 
         // Frames are taken as they come, so each one's arrival time is real
         // (the warm-up test needs it) and the port's buffer never overflows.
-        if (s_sdsAwake) drainSds();
+        if (s_sdsAwake) drainSds(s.warmup_s);
 
         const bool sleeps = nodecfg::sdsSleeps(cfg, s);
         const bool wanted = !sleeps || s_sdsPending ||
                             (nodecfg::sensorDue(cfg, i, nextTick) &&
-                             msToNext <= (uint32_t)s.warmup_s * 1000u);
+                             msToNext <= (uint32_t)s.warmup_s * 1000u + SDS_WAKE_LEAD_MS);
         const uint32_t now = millis();
         if (wanted && !s_sdsAwake) {
             sdsSetWorking(true);

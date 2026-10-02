@@ -160,7 +160,11 @@ static inline void useField(const PinUse& u, char out[EN_CFG_FIELD_LEN]) {
 ///                 ds18b20 count 1..8, metric 1..10 of [a-z0-9_] from a letter
 ///                 pulse per_pulse > 0, debounce_us <= 1 s
 ///                 sds011 warmup_s 10..120
-///                 interval_s 0 or >= the node's interval_s
+///                 (interval_s is not checked against the node's: one at
+///                 or below it means every send — see sensorEvery(). The
+///                 node's interval is changed without a validation pass by
+///                 the collector's interval push, which must not be able to
+///                 turn a saved config invalid.)
 ///               no sds011/pulse on a sleeping ESP-NOW node
 ///               one entry per type, except ds18b20
 ///               not bmx280 and bme688 together
@@ -282,14 +286,6 @@ static inline bool validate(const NodeConfig& c, Validation& out) {
                 break;
             default:
                 break;
-        }
-
-        // 0 = every send. Anything else no shorter than the node's own
-        // interval: the node only reads when it sends, so a shorter one could
-        // not be honoured and would only look as if it were.
-        if (s.interval_s != 0 && s.interval_s < c.interval_s) {
-            sensorFieldPath(f, sizeof(f), i, "interval_s");
-            return fail(out, f, "0 or at least the node's %u s", (unsigned)c.interval_s);
         }
 
         sensorFieldPath(f, sizeof(f), i, "type");

@@ -347,11 +347,16 @@ static void test_sensor_interval_rules() {
     ACCEPT(c);
     c.sensors[0].interval_s = 65535;
     ACCEPT(c);
-    // Below the node's: it only reads when it sends, so it could not be kept.
+    // Below the node's is every send, and accepted: the collector's interval
+    // push raises the node's interval without validating, and must not be
+    // able to turn a stored config invalid.
     c.sensors[0].interval_s = 59;
-    REJECT(c, "sensors[0].interval_s", "at least the node's 60 s");
-    c.sensors[0].interval_s = 10;
-    REJECT(c, "sensors[0].interval_s", "at least the node's 60 s");
+    ACCEPT(c);
+    CHECK_EQ((int)sensorEvery(c, c.sensors[0]), 1);
+    c.sensors[0].interval_s = 120;
+    c.interval_s = 300;
+    ACCEPT(c);
+    CHECK_EQ((int)sensorEvery(c, c.sensors[0]), 1);
 
     // sds011 warm-up: 10..120.
     c = wifiBase();

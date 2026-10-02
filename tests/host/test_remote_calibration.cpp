@@ -161,6 +161,11 @@ static void test_history_goes_after_the_derived() {
     CHECK(fabsf(out[3].value - 10.0f) < 0.001f);   // oldest history first
     CHECK(fabsf(out[4].value - 11.0f) < 0.001f);
     CHECK_EQ(remoteIngest.historyPending(), 3);
+
+    // readLatest() is the same without the history, and takes none of it.
+    n = s.readLatest(out, 5);
+    CHECK_EQ(n, 3);
+    CHECK_EQ(remoteIngest.historyPending(), 3);
 }
 
 int main() {

@@ -70,7 +70,7 @@ en: {
   rx: "RX pin (sensor TX)", tx: "TX pin (sensor RX)", mode: "Mode", rain: "Rain gauge", flow: "Flow meter",
   perPulse: "Per pulse", ppRain: "mm of rain per bucket tip", ppFlow: "litres per pulse",
   debounce: "Debounce", us: "microseconds",
-  sInt: "Read every (s)", sIntHint: "Empty or 0: every send ({n} s). Rounded up to whole sends.",
+  sInt: "Read every (s)", sIntHint: "Empty, 0 or up to {n}: every send ({n} s). Longer is rounded up to whole sends.",
   warmup: "Warm-up (s)", warmupHint: "Sleeps between readings more than twice this apart.",
   seaNote: "pressure_sea counts toward the budget even at altitude 0.",
   t_bmx280: "BME280 / BMP280", t_bme688: "BME688", t_ds18b20: "DS18B20 (1-Wire)",
@@ -116,7 +116,7 @@ en: {
   e_dupType: "Only one {t}.", e_sleep: "{t} needs the node awake — turn off Deep sleep.",
   e_rx16: "GPIO16 has no interrupt; the SDS011's RX needs one.",
   e_count: "1 to 8 probes.", e_metric: "Up to 10 characters.", e_pos: "Must be greater than 0.",
-  e_sInt: "0, or at least the node's {n} s.", e_warmup: "10 to 120 s."
+  e_sInt: "A whole number from 0 to 65535.", e_warmup: "10 to 120 s."
 },
 bg: {
   title: "Настройка на възела", stepOf: "Стъпка {n} от {m}",
@@ -157,7 +157,7 @@ bg: {
   rx: "RX пин (TX на сензора)", tx: "TX пин (RX на сензора)", mode: "Режим", rain: "Дъждомер", flow: "Разходомер",
   perPulse: "На импулс", ppRain: "мм дъжд на едно преобръщане", ppFlow: "литри на импулс",
   debounce: "Потискане на трептене", us: "микросекунди",
-  sInt: "Мери на всеки (s)", sIntHint: "Празно или 0: при всяко пращане ({n} s). Закръгля се нагоре до цели пращания.",
+  sInt: "Мери на всеки (s)", sIntHint: "Празно, 0 или до {n}: при всяко пращане ({n} s). По-дългото се закръгля нагоре до цели пращания.",
   warmup: "Загряване (s)", warmupHint: "Спи между замервания, които са на повече от два пъти това.",
   seaNote: "pressure_sea се брои в лимита и при височина 0.",
   t_bmx280: "BME280 / BMP280", t_bme688: "BME688", t_ds18b20: "DS18B20 (1-Wire)",
@@ -203,7 +203,7 @@ bg: {
   e_dupType: "Само един {t}.", e_sleep: "{t} изисква възелът да е буден — изключете „Дълбок сън“.",
   e_rx16: "GPIO16 няма прекъсване; RX на SDS011 се нуждае от такова.",
   e_count: "От 1 до 8 сонди.", e_metric: "До 10 символа.", e_pos: "Трябва да е по-голямо от 0.",
-  e_sInt: "0 или поне {n} s на възела.", e_warmup: "От 10 до 120 s."
+  e_sInt: "Цяло число от 0 до 65535.", e_warmup: "От 10 до 120 s."
 }
 };
 var lang = "en";
@@ -259,11 +259,11 @@ function metricsOf(s) {
 }
 function newSensor(type) {
   switch (type) {
-    case "ds18b20": return { type: type, pin: null, count: 1, metric: "probe_temp" };
-    case "bh1750": return { type: type, addr: 0x23 };
-    case "sds011": return { type: type, rx: null, tx: null, warmup_s: 30 };
-    case "pulse": return { type: type, pin: null, mode: "rain", per_pulse: 0.2794, debounce_us: 5000 };
-    default: return { type: type, addr: 0 };
+    case "ds18b20": return { type: type, pin: null, count: 1, metric: "probe_temp", interval_s: 0 };
+    case "bh1750": return { type: type, addr: 0x23, interval_s: 0 };
+    case "sds011": return { type: type, rx: null, tx: null, warmup_s: 30, interval_s: 0 };
+    case "pulse": return { type: type, pin: null, mode: "rain", per_pulse: 0.2794, debounce_us: 5000, interval_s: 0 };
+    default: return { type: type, addr: 0, interval_s: 0 };
   }
 }
 
@@ -425,7 +425,7 @@ function issues() {
     if (ty === "sds011" && hw() === "esp8266" && s[i].rx === 16) add(f + ".rx", t("e_rx16"));
     if (ty === "sds011" && !(s[i].warmup_s >= 10 && s[i].warmup_s <= 120 && s[i].warmup_s % 1 === 0)) add(f + ".warmup_s", t("e_warmup"));
     var si = s[i].interval_s || 0;
-    if (!(si % 1 === 0 && (si === 0 || si >= e.interval_s && si <= 65535))) add(f + ".interval_s", t("e_sInt", { n: e.interval_s }));
+    if (!(si % 1 === 0 && si >= 0 && si <= 65535)) add(f + ".interval_s", t("e_sInt"));
     if (ty === "pulse") {
       if (!(s[i].per_pulse > 0)) add(f + ".per_pulse", t("e_pos"));
       if (!(s[i].debounce_us >= 0)) add(f + ".debounce_us", t("e_pos"));

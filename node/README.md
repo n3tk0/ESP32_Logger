@@ -116,8 +116,8 @@ than nine values, so update the collector before giving a node a ninth metric.
 ### How often each sensor is read
 
 The node sends every `interval_s`. Each sensor entry has its own `interval_s`
-as well: 0 (the default) reads it on every send; anything else, at least the
-node's interval, reads it only every so many sends — rounded up, so a node at
+as well: 0 (the default), or anything up to the node's interval, reads it on
+every send; a longer one reads it only every so many sends — rounded up, so a node at
 60 s with a sensor at 90 s reads that sensor every second send. A send carries
 only what was read for it, so the collector stores no repeated values. The
 first send after a boot reads every sensor.

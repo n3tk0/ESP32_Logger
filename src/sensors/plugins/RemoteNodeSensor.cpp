@@ -135,7 +135,7 @@ int RemoteNodeSensor::_derive(SensorReading* out, int n, int maxOut,
     return n;
 }
 
-int RemoteNodeSensor::readAll(SensorReading* out, int maxOut) {
+int RemoteNodeSensor::readLatest(SensorReading* out, int maxOut) {
     int n = remoteIngest.drainLatest(_node, out, maxOut, _staleAfterMs);
 
     // The derived metrics want the temperature and gas resistance as the
@@ -145,7 +145,11 @@ int RemoteNodeSensor::readAll(SensorReading* out, int maxOut) {
     const float rawTemp = t >= 0 ? out[t].value : NAN;
     const float rawGas  = g >= 0 ? out[g].value : NAN;
     _calibrate(out, n);
-    n = _derive(out, n, maxOut, rawTemp, rawGas);
+    return _derive(out, n, maxOut, rawTemp, rawGas);
+}
+
+int RemoteNodeSensor::readAll(SensorReading* out, int maxOut) {
+    int n = readLatest(out, maxOut);
 
     // Queued history last, in whatever room is left — behind the live values
     // and their derived ones, so an outage's backlog never pushes the current

@@ -25,6 +25,7 @@
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
 #ifdef FEATURE_REMOTE_NODES
 #include "../sensors/RemoteIngest.h"
+#include "../sensors/plugins/RemoteNodeSensor.h"
 #include "../nodes/NodeCfgStore.h"   // per-node "cfg" in the status lists
 #include "NodeCfgApi.h"              // /api/nodes/config, /api/nodes/handover
 #include "NodeFwApi.h"               // /api/nodes/fw*, docs/NODE_OTA.md §2.3
@@ -1262,7 +1263,15 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
     if (wireMutex) {
         tookMutex = (xSemaphoreTake(wireMutex, pdMS_TO_TICKS(300)) == pdTRUE);
     }
-    int n = s->readAll(readings, SensorManager::MAX_METRICS_PER_TICK);
+    int n;
+#ifdef FEATURE_REMOTE_NODES
+    // A remote sensor's readAll() drains the node's queued history, which
+    // this reply would show once and storage would never see.
+    if (strcmp(s->getType(), "remote") == 0)
+        n = static_cast<RemoteNodeSensor*>(s)->readLatest(readings, SensorManager::MAX_METRICS_PER_TICK);
+    else
+#endif
+        n = s->readAll(readings, SensorManager::MAX_METRICS_PER_TICK);
     if (tookMutex) xSemaphoreGive(wireMutex);
 
     if (n <= 0) {

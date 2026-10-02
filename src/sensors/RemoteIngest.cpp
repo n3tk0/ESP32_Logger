@@ -119,8 +119,10 @@ int RemoteIngest::historyRoom() const {
 
 uint32_t RemoteIngest::staleLimitMs(uint32_t staleAfterMs, uint32_t gapA, uint32_t gapB) {
     if (staleAfterMs == 0) return 0;
-    if (gapA == 0 || gapB == 0) return staleAfterMs;   // not two gaps seen yet
-    const uint32_t gap = gapA < gapB ? gapA : gapB;
+    if (gapA == 0) return staleAfterMs;                 // no gap seen yet
+    // One gap seen: that one. Two: the shorter, so an outage between two
+    // readings does not stretch the limit for the next.
+    const uint32_t gap = (gapB == 0 || gapA < gapB) ? gapA : gapB;
     // A gap is at most interval_s (65535 s) in practice; cap the product so a
     // pathological one cannot wrap round to a short limit.
     const uint32_t lim = gap > 0x40000000u ? 0xFFFFFFFFu : gap / 2u * 5u;

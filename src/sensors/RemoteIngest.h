@@ -159,7 +159,8 @@ public:
     /// than it posts (a per-sensor interval_s, docs/NODE_CONFIG.md §1.1), and
     /// one node-wide limit would call a PM reading taken every 30 minutes
     /// dead between readings. The SHORTER of the last two gaps, so one outage
-    /// does not stretch the limit for the next one. 0 when staleAfterMs is 0.
+    /// does not stretch the limit for the next one (the one gap, while only
+    /// one has been seen). 0 when staleAfterMs is 0.
     static uint32_t staleLimitMs(uint32_t staleAfterMs, uint32_t gapA, uint32_t gapB);
 
     /// millis() since the most recent put() for `nodeId`, or UINT32_MAX when

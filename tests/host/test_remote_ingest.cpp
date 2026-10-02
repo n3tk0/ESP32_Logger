@@ -230,9 +230,9 @@ static void test_staleness_still_marks_the_live_value() {
 }
 
 // A metric that arrives less often than the node posts (a sensor with its own,
-// longer interval_s) is judged by its own gap, not the node-wide limit — but
-// only once two gaps have been seen, and by the shorter of them, so one outage
-// does not stretch the limit for the next.
+// longer interval_s) is judged by its own gap, not the node-wide limit — by
+// the shorter of the last two, so one outage does not stretch the limit for
+// the next.
 static void test_staleness_follows_a_metrics_own_gap() {
     RemoteIngest& ri = fresh();
     const uint32_t tenMin = 600000;
@@ -253,7 +253,8 @@ static void test_staleness_follows_a_metrics_own_gap() {
     CHECK_EQ((int)out[0].quality, (int)QUALITY_ERROR);
 
     CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 0, 0), tenMin);       // nothing seen
-    CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 60000, 0), tenMin);   // one gap only
+    CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 60000, 0), tenMin);   // a short gap
+    CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 1800000, 0), 4500000u);   // one gap seen
     CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 60000, 60000), tenMin);
     CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 1800000, 7200000), 4500000u);
     CHECK_EQ(RemoteIngest::staleLimitMs(0, 1800000, 1800000), 0u);   // disabled stays so

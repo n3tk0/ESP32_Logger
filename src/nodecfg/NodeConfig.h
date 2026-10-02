@@ -231,9 +231,9 @@ struct SensorCfg {
     float     per_pulse   = 0.2794f;   // the common 0.011" tipping bucket
     uint32_t  debounce_us = 10000;
 
-    /// Every type: how often this entry is read, in seconds. 0 = on every
-    /// send (the node's own interval_s). Otherwise at least the node's
-    /// interval, and rounded UP to a whole number of sends — see sensorEvery().
+    /// Every type: how often this entry is read, in seconds. 0, or anything
+    /// up to the node's own interval_s, = on every send. Longer is rounded UP
+    /// to a whole number of sends — see sensorEvery().
     /// A pulse counter counts all the time; this is how often it reports.
     uint16_t  interval_s  = 0;
 

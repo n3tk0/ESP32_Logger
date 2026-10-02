@@ -843,7 +843,9 @@ void loop() {
                 portalRun(s_cfg, s_link, battVolts);
             }
         }
-        nodeSensorsIdle(s_cfg, s_wakeCount, periodMs - (millis() - t0));
+        // The button wait above can run past the period: 0, never a wrap.
+        const uint32_t el = millis() - t0;
+        nodeSensorsIdle(s_cfg, s_wakeCount, el < periodMs ? periodMs - el : 0);
         delay(50);
     }
 }

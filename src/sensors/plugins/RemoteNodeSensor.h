@@ -53,6 +53,12 @@ public:
     bool read(SensorReading& out) override;
     int  readAll(SensorReading* out, int maxOut) override;
 
+    /// What readAll() returns minus the queued history: the live values, as
+    /// corrected, and the derived ones. Consumes nothing — for
+    /// /api/sensors/read_now, where history handed back would be shown once
+    /// and never stored.
+    int  readLatest(SensorReading* out, int maxOut);
+
     const char* getType() const override { return "remote"; }
     const char* getName() const override { return "Remote node"; }
 

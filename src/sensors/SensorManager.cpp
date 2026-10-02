@@ -1,4 +1,7 @@
 #include "SensorManager.h"
+
+#include <memory>
+#include <new>
 #include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
@@ -467,8 +470,11 @@ void SensorManager::toJson(JsonArray arr) const {
     // paused for one short window and removes the partial-result hazard
     // where one sensor gets values and another doesn't because the 20 ms
     // try-take expired mid-loop.
-    struct Slot { JsonObject obj; ISensor* sensor; const char* metrics[8]; int mcount; int idx; };
-    Slot slots[16];
+    struct Slot { JsonObject obj; ISensor* sensor; const char* metrics[MAX_METRIC_NAMES]; int mcount; int idx; };
+    // On the heap: sixteen slots of twenty names are ~1.6 KB, and this runs on
+    // the AsyncTCP worker's stack. Freed when the function returns.
+    std::unique_ptr<Slot[]> slots(new (std::nothrow) Slot[16]);
+    if (!slots) return;
     int  slotCount = 0;
 
     for (int i = 0; i < _count && slotCount < 16; i++) {
@@ -496,7 +502,7 @@ void SensorManager::toJson(JsonArray arr) const {
         sl.obj    = o;
         sl.sensor = s;
         sl.idx    = i;
-        sl.mcount = s->getMetrics(sl.metrics, 8);
+        sl.mcount = s->getMetrics(sl.metrics, MAX_METRIC_NAMES);
 
         JsonArray ma = o["metrics"].to<JsonArray>();
         for (int m = 0; m < sl.mcount; m++) ma.add(sl.metrics[m]);

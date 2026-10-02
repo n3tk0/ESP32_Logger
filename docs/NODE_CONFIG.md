@@ -117,9 +117,9 @@ Decoding details (`src/nodecfg/NodeConfigJson.h`, shared by every side):
 | `pulse` | `pin`, `mode` (`rain`/`flow`), `per_pulse`, `debounce_us` | rain_rate mm/h + rain_total mm, or flow_rate L/min + flow_total L | 2 | **no** |
 
 Every entry also takes **`interval_s`**: how often it is read, in seconds.
-`0` (the default, and what an entry without the key gets) reads it on every
-send; anything else must be at least the node's own `interval_s`, and is
-rounded **up** to a whole number of sends (`nodecfg::sensorEvery()`): a node
+`0` (the default, and what an entry without the key gets) or anything up to the
+node's own `interval_s` reads it on every send; a longer one is rounded **up**
+to a whole number of sends (`nodecfg::sensorEvery()`): a node
 at 60 s with an entry at 90 s reads it every second send. A send carries only
 the values read for it, and the first send after a boot (send 0) reads every
 entry. A pulse counter counts all the time; its `interval_s` is how often it
@@ -159,7 +159,9 @@ Rejected, with a machine-readable `field` and a human `reason`:
 - more than 8 sensor entries, or a total metric count > 12
   (`nodecfg::MAX_METRICS`; the collector's `MAX_METRICS_PER_TICK` is sized
   for those plus the battery, the derived metrics and some history);
-- an entry's `interval_s` other than 0 and below the node's `interval_s`;
+- (not an entry's `interval_s` below the node's: that reads on every send,
+  and the collector's interval push changes the node's interval without a
+  validation pass, so it must not be able to make a stored config invalid);
 - an sds011 `warmup_s` outside 10–120;
 - `bmx280` and `bme688` together (same metric names);
 - two entries of the same `type` except `ds18b20` (one entry per bus pin);

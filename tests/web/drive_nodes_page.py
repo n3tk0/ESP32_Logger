@@ -383,7 +383,9 @@ with sync_playwright() as p:
     sent = e1[-1]["config"] if e1 else {}
     check(sorted(sent.keys()) == ["name", "sensors"],
           "the ESP-NOW node got its name and its sensor list, nothing else (%r)" % sorted(sent.keys()))
-    check(sent.get("sensors", [{}, {}])[1:] == [{"type": "ds18b20", "pin": 5, "count": 3, "metric": "probe_temp"}],
+    # interval_s: 0 comes with every new entry, so it cannot inherit the
+    # interval of the same-type entry that sat at its index before.
+    check(sent.get("sensors", [{}, {}])[1:] == [{"type": "ds18b20", "pin": 5, "count": 3, "metric": "probe_temp", "interval_s": 0}],
           "with D3 sent as GPIO5 (%r)" % sent.get("sensors"))
     b1 = row(pg, "en:1").locator(".node-row-name").inner_text().lower()
     check("pending rev 4 → 5" in b1, "and it is now pending the rev it was sent (%r)" % b1)

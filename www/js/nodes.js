@@ -835,13 +835,16 @@ function ndMarkEmptyPins(d, i) {
 
 function ndSensorDefaults(type) {
   switch (type) {
-    case "bmx280": case "bme688": return { type: type, addr: 0 };
-    case "bh1750": return { type: type, addr: 0x23 };
-    case "ds18b20": return { type: type, pin: null, count: 1, metric: "probe_temp" };
+    // interval_s on every one: a new entry left without it would keep the
+    // interval of the same-type entry that sat at its index before (the
+    // decoder keeps what a document leaves out), while the field shows empty.
+    case "bmx280": case "bme688": return { type: type, addr: 0, interval_s: 0 };
+    case "bh1750": return { type: type, addr: 0x23, interval_s: 0 };
+    case "ds18b20": return { type: type, pin: null, count: 1, metric: "probe_temp", interval_s: 0 };
     case "sds011": return { type: type, rx: null, tx: null, warmup_s: 30, interval_s: 0 };
-    case "pulse": return { type: type, pin: null, mode: "rain", per_pulse: 0.2794, debounce_us: 5000 };
+    case "pulse": return { type: type, pin: null, mode: "rain", per_pulse: 0.2794, debounce_us: 5000, interval_s: 0 };
   }
-  return { type: type };
+  return { type: type, interval_s: 0 };
 }
 
 function nodesCfgAddSensor(cfgKey) {
