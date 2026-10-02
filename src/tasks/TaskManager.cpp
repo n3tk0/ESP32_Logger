@@ -1,4 +1,5 @@
 #include "TaskManager.h"
+#include "Heartbeat.h"
 #include "SensorTask.h"
 #include "SlowSensorTask.h"
 #include "ProcessingTask.h"
@@ -434,11 +435,13 @@ bool TaskManager::checkHealth(char* why, size_t whyCap) {
             if (why) snprintf(why, whyCap, "watchdog: %s deleted", names[i]);
             return false;
         }
-        uint32_t hb = g_taskHeartbeat[i];
-        if (now - hb > MAX_SILENCE_MS) {
-            Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, now - hb);
+        // Signed: a task may stamp a newer millis() after `now` was read
+        // (see Heartbeat.h) — that is a live task, not 49 days of silence.
+        const uint32_t silent = heartbeatSilentMs(now, g_taskHeartbeat[i]);
+        if (silent > MAX_SILENCE_MS) {
+            Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, (unsigned long)silent);
             if (why) snprintf(why, whyCap, "watchdog: %s silent %lus", names[i],
-                              (unsigned long)((now - hb) / 1000));
+                              (unsigned long)(silent / 1000));
             return false;
         }
     }
