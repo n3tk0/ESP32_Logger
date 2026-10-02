@@ -2606,27 +2606,8 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
     }
     if (f.sepH > 0) kdWallRule(p, f.sepX, f.sepY, 0, f.sepH);
 
-    // ── The indoor readings, one under the other — or across the page under
-    // the grid, each in an equal cell with its caption on the heading's line ──
-    if (f.inValSz1 && f.inHrow) {
-        uint8_t used[KZ_INDOOR_COUNT];
-        const int n = kdIndoorUsed(zones, visible, used);
-        const int m = n < 3 ? n : 3;
-        const int cw = m ? f.inW / m : f.inW;
-        kdWallRule(p, 18, f.inRuleY, 564, 0);
-        for (int i = 0; i < m; i++) {
-            const KdResolved& r = res[used[i]];
-            const KindleSlot& sl = zones.z[used[i]];
-            const int x = f.inX + i * cw;
-            kdWallAt(p, "lab", x, f.inLabY, cw);
-            if (i == 0) appendEscaped(p, kdGroupInLabel(zones));
-            else        appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
-            p += F("</div>");
-            kdWallAt(p, "cv", x, f.inValY, cw);
-            appendValue(p, r, sl, "iv");
-            p += F("</div>");
-        }
-    } else if (f.inValSz1) {
+    // ── The indoor readings, one under the other ──
+    if (f.inValSz1) {
         uint8_t used[KZ_INDOOR_COUNT];
         const int n = kdIndoorUsed(zones, visible, used);
         kdWallAt(p, "lab", f.inX, f.inLabY, f.inW);

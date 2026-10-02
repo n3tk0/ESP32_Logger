@@ -40,7 +40,7 @@ FIELDS = ['topBot', 'grow', 'labSz', 'heroSz', 'bigSz', 'headGap', 'slashW', 'su
           'labChartX', 'grX', 'grW', 'keyInX', 'keyBand', 'olN', 'olX', 'wkX', 'wkY',
           'wkCellW', 'wkHdgY', 'wkRule', 'footY', 'statX', 'battX', 'battY',
           # The wall page
-          'wall', 'headW', 'headRuleY', 'inVcol', 'inHrow', 'sep2X', 'sep2Y', 'sep2H',
+          'wall', 'headW', 'headRuleY', 'inVcol', 'sep2X', 'sep2Y', 'sep2H',
           'labFcX', 'labFcY', 'fcIconX', 'fcIconY', 'fcTextX', 'fcTextY', 'fcTextW',
           'fcTextSz', 'fcTempX', 'fcTempY', 'fcTempSz', 'fcWindX', 'fcWindY', 'fcWindSz']
 

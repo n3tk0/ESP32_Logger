@@ -398,7 +398,6 @@ struct KdFlow {
     int16_t headW;           ///< what a lone headline is centred in
     int16_t headRuleY;       ///< the rule under the headline's row; 0 for none
     bool    inVcol;          ///< the indoor readings one under the other
-    bool    inHrow;          ///< the wall page's indoor readings across it, under the grid
     int16_t sep2X, sep2Y, sep2H;   ///< the hairline between the clock and the forecast
     int16_t labFcX, labFcY;  ///< the forecast's heading
     int16_t fcIconX, fcIconY;
@@ -504,7 +503,12 @@ static inline void kdFlowHeadFit(const KdFlowIn& in, KdFlow& f) {
 
 /// The grid between `gridTop` and `bot`, f.colLW across: every way of breaking
 /// its readings into rows tried, and the one that sets them largest kept.
-static inline void kdFlowGrid(const KdFlowIn& in, int gridTop, int bot, KdFlow& f) {
+///
+/// `only`, when set, is the one number of rows to use rather than a search:
+/// the wall page's grid is laid out by how many readings it has, not by what
+/// sets them largest.
+static inline void kdFlowGrid(const KdFlowIn& in, int gridTop, int bot, KdFlow& f,
+                              int only = 0) {
     f.gridNRows = 0;
     for (int i = 0; i < 6; i++) f.gridRows[i] = 0;
     f.gridY = (int16_t)gridTop;
@@ -518,8 +522,8 @@ static inline void kdFlowGrid(const KdFlowIn& in, int gridTop, int bot, KdFlow& 
         // rest of its row white.
         const int cap   = f.heroSz;
         const int rMin  = (n + 2) / 3;
-        int best = -1, bestR = rMin;
-        for (int r = rMin; r <= n; r++) {
+        int best = -1, bestR = only ? only : rMin;
+        for (int r = only ? only : rMin; r <= (only ? only : n); r++) {
             uint8_t rows[6];
             kdFlowSplit(n, r, rows);
             const int pitch = areaH / r;
@@ -533,7 +537,7 @@ static inline void kdFlowGrid(const KdFlowIn& in, int gridTop, int bot, KdFlow& 
                 }
             }
             v = kdfMin(v, cap);
-            if (r == rMin) {
+            if (r == rMin && !only) {
                 // The ordinary page's sizes — three across at 27, fewer at 34 —
                 // were measured in a browser against the widest each gets, so
                 // this arrangement never sets smaller than that. The estimate
@@ -935,56 +939,6 @@ static inline void kdFlowIndoorV(const KdFlowIn& in, int top, int bot, KdFlow& f
     f.inValSz  = (uint8_t)s;
 }
 
-/// OR ACROSS THE PAGE, UNDER THE GRID, when that sets the smallest reading
-/// on the page larger. Four outdoor readings in the 352 px column beside the
-/// indoor one come out at ~47 — "1010 hPa", "14 µg/m³" are too wide for two
-/// to a row there, and four rows are too short. The grid across the whole
-/// width, two to a row, and the indoor three on one line under it, set
-/// everything larger than that.
-///
-/// The row: the heading over the first reading and each other's caption on
-/// the same line, the three at one size in equal cells. Tried for every size
-/// down from what its width allows, the grid given what is left above it;
-/// the size where the two meet is the best this arrangement does, and it is
-/// kept only if its smallest reading beats the column's.
-static inline void kdFlowWallRow(const KdFlowIn& in, int midTop, int midBot, KdFlow& f) {
-    const int m = in.nIn > 3 ? 3 : in.nIn;
-    if (m == 0 || in.nGrid == 0) return;
-    const int smallA = kdfMin(f.gridValSz, m > 1 ? f.inValSz : f.inValSz1);
-    int aMax = 0;
-    for (int i = 0; i < m; i++) aMax = kdfMax(aMax, in.inAdv[i] ? in.inAdv[i] : 1000);
-    const int cellW = KDF_WALL_W / m;
-    const int head  = f.labSz + 8;           // the captions' line, to the values
-    const int ruleGap = 14;                  // the grid, the rule, the row
-    int s = kdfMin(f.heroSz, (cellW - KDF_CELL_PAD) * 1000 / aMax);
-    KdFlow g = f;
-    g.colLW = (int16_t)KDF_WALL_W;
-    int bestS = 0, bestScore = 0;
-    for (; s >= 20; s--) {
-        const int rowTop = midBot - head - s;
-        kdFlowGrid(in, midTop, rowTop - ruleGap, g);
-        const int score = kdfMin((int)g.gridValSz, s);
-        if (score > bestScore) { bestScore = score; bestS = s; }
-        if (g.gridValSz >= s) break;         // smaller only loses from here
-    }
-    if (bestScore <= smallA) return;
-
-    const int rowTop = midBot - head - bestS;
-    f.colLW = (int16_t)KDF_WALL_W;
-    kdFlowGrid(in, midTop, rowTop - ruleGap, f);
-    const int sz = kdfMax(20, bestS * kdfPct(in.inPct) / 100);
-    f.inVcol   = false;
-    f.inHrow   = true;
-    f.inX      = 18;
-    f.inW      = (int16_t)KDF_WALL_W;
-    f.inRuleY  = (int16_t)(rowTop - ruleGap / 2);
-    f.inLabY   = (int16_t)rowTop;
-    f.inValY   = f.inVal2Y = f.inVal3Y = (int16_t)(rowTop + head);
-    f.inValSz1 = f.inValSz = (uint8_t)sz;
-    f.inW1Pm   = (uint16_t)(1000 / m);
-    f.sepH     = 0;
-}
-
 static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
     const int X0 = 18, X1 = KDF_WALL_X1;
     f.wall  = true;
@@ -1033,7 +987,11 @@ static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
     f.topBot = f.rule3Y;
     const bool both = in.nGrid > 0 && in.nIn > 0;
     f.colLW = (int16_t)(both ? KDF_WALL_COL : KDF_WALL_W);
-    kdFlowGrid(in, midTop, midBot, f);
+    // ONE ARRANGEMENT PER COUNT, as large as its cells allow: two one under
+    // the other, then two to a row — four 2 x 2, six three rows of two, an
+    // odd one alone on the last row.
+    const int nG = in.nGrid > 6 ? 6 : in.nGrid;
+    kdFlowGrid(in, midTop, midBot, f, nG <= 2 ? nG : (nG + 1) / 2);
     f.inX = (int16_t)(in.nGrid > 0 ? KDF_WALL_RX : X0);
     f.inW = (int16_t)(in.nGrid > 0 ? X1 - KDF_WALL_RX : KDF_WALL_W);
     f.inRuleY = (int16_t)midTop;
@@ -1041,16 +999,18 @@ static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
     f.sepX = (int16_t)KDF_WALL_SEP;
     f.sepY = (int16_t)midTop;
     f.sepH = (int16_t)(both ? midBot - midTop : 0);
-    if (both) kdFlowWallRow(in, midTop, midBot, f);
 
     // ── The clock ──
     const bool beside = in.clock && in.forecast;
     kdFlowClockSizes(beside ? KDF_WALL_CLOCK : KDF_WALL_CLOCK_1, f);
-    f.clW = (int16_t)(beside ? KDF_WALL_COL : KDF_WALL_W);
     // Alone, in the middle of the band — by "00:00", as the clock's own
-    // centring goes by a sample of the time.
-    f.clX = (int16_t)(beside ? X0
-                             : X0 + kdfMax(0, (KDF_WALL_W - f.clSize * 2740 / 1000) / 2));
+    // centring goes by a sample of the time — and its box as wide as that,
+    // in the middle too: the box is what the boxed style fills and what the
+    // panel refreshes, so starting it there and keeping the band's width ran
+    // it 85 px past the right edge of the screen.
+    const int clIn = beside ? 0 : kdfMax(0, (KDF_WALL_W - f.clSize * 2740 / 1000) / 2);
+    f.clX = (int16_t)(X0 + clIn);
+    f.clW = (int16_t)((beside ? KDF_WALL_COL : KDF_WALL_W) - 2 * clIn);
     f.clY = (int16_t)(f.rule3Y + kdfMax(0, (KDF_WALL_BAND - f.clH) / 2));
     f.sep2X = (int16_t)KDF_WALL_SEP;
     f.sep2Y = (int16_t)(f.rule3Y + 12);
@@ -1345,7 +1305,6 @@ static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out)
         };
         kdfPutTable(w, f, kWall, sizeof(kWall) / sizeof(kWall[0]));
         KDF_R("IN_VCOL",      f.inVcol ? 1 : 0);
-        KDF_R("IN_HROW",      f.inHrow ? 1 : 0);
         KDF_R("OL_N",         0);
     } else if (f.colLW != KDF_COL_L) {
         // Upright with nothing in the right column: the outdoor one is wider.

@@ -785,20 +785,16 @@ an older config holds) or 1 for a wall.
 | row | what is in it |
 |---|---|
 | top | the outdoor headline and the value beside it across the whole page, up to 160 and 96 px, and the line under them |
-| middle | the grid on the left, 352 px; the indoor readings one under the other on the right, the first with no caption, the others at seven tenths of it. Or the grid across the page and the indoor readings on one line under it (below) |
+| middle | the grid on the left, 352 px, laid out by how many readings it has (below); the indoor readings one under the other on the right, the first with no caption, the others at seven tenths of it |
 | band | the clock (124 px), and beside it the forecast: icon and condition, the day's high and low, wind and age. Either alone has the band to itself |
 | footer | as on the desk page |
 
-**Or the indoor readings across the page, under the grid.** Four outdoor
-readings beside the indoor column come out at about 47 px: "1010 hPa" and
-"14 µg/m³" are too wide to go two to a 352 px row, and four rows are too
-short. So `kdFlowWallRow()` also tries the grid across the whole width with the
-indoor three on one line under it, ruled off, each at one size in an equal
-cell with its caption on the heading's line, and keeps whichever arrangement
-sets the smallest reading on the page larger. With pressure, dew point, PM2.5
-and PM10 outside and temperature, humidity and AQI inside, that is every one
-of the seven at 66 px rather than 47 to 81; with the default two places it is
-76 to 81 rather than 56 to 95. The panel gets `IN_HROW=1`.
+**The grid is laid out by how many readings it has**, not by a search for
+the largest: two one under the other, four 2 x 2, six three rows of two, an
+odd one alone on the last row. Each is then as large as its cell allows, all
+at one size and never above the headline. Two readings come out at about 95 px;
+four or six with "1010 hPa" among them at about 47, the width half the column
+leaves for the widest.
 
 The headline's row is as tall as the largest headline, whatever this one
 came out at, and the headline stands on its foot, so a reading that gains a
@@ -811,10 +807,13 @@ the heaviest black ones unless they have been set.
 
 Upright only: turned to 90° or 270°, the page is the desk one on its side.
 The FBInk script asks for it with `?wall=1`, and only a script that does gets
-it (`WALL=1`, `HEAD_W`, `HEAD_RULE_Y`, `IN_VCOL`, `IN_HROW`, `SEP_Y`, `SEP2_*`, and the
+it (`WALL=1`, `HEAD_W`, `HEAD_RULE_Y`, `IN_VCOL`, `SEP_Y`, `SEP2_*`, and the
 forecast's `FC_*_X`, `FC_*_SZ` and `FC_TEXT_W` as `LY_*` keys); an older
 script keeps drawing the desk page. Its clock is inside the forecast's
-rectangle, so the forecast tier draws it again.
+rectangle, so the forecast tier draws it again. The tiers are the desk
+page's: the readings above the band, the clock's own rectangle each minute
+and the forecast each repaint only themselves, without flashing, and the
+whole screen flashes only on the full tier (`FULL_EVERY`).
 
 ## Appearance
 

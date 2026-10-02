@@ -567,14 +567,15 @@ function kdFlowOutdoor(inp, bot, f) {
 }
 
 // The grid between gridTop and bot, f.colLW across — kdFlowGrid().
-function kdFlowGrid(inp, gridTop, bot, f) {
+// `only`: the one number of rows to use rather than a search (the wall page).
+function kdFlowGrid(inp, gridTop, bot, f, only) {
   var K = KDF, r, c;
   f.gridRows = []; f.gridY = gridTop; f.gridRowH = 0; f.gridValSz = 0;
   var n = Math.min(6, inp.nGrid);
   if (n > 0) {
     var areaH = bot - gridTop, cap = f.heroSz;
-    var rMin = kdQ(n + 2, 3), best = -1, bestR = rMin;
-    for (r = rMin; r <= n; r++) {
+    var rMin = kdQ(n + 2, 3), best = -1, bestR = only || rMin;
+    for (r = only || rMin; r <= (only || n); r++) {
       var rows = kdFlowSplit(n, r), pitch = kdQ(areaH, r);
       var v = pitch - f.labSz - 4 - K.GRID_GAP, at = 0;
       for (var k = 0; k < r; k++) {
@@ -584,7 +585,7 @@ function kdFlowGrid(inp, gridTop, bot, f) {
         }
       }
       v = Math.min(v, cap);
-      if (r === rMin) {
+      if (r === rMin && !only) {
         var floorV = rows[0] >= 3 ? 27 : 34;
         v = Math.max(v, Math.min(floorV, pitch - f.labSz - 4 - K.GRID_GAP));
       }
@@ -779,37 +780,6 @@ function kdFlowIndoorV(inp, top, bot, f) {
   f.inValSz1 = s1; f.inValSz = s;
 }
 
-// Or across the page under the grid: kdFlowWallRow() in KindleFlow.h.
-function kdFlowWallRow(inp, midTop, midBot, f) {
-  var K = KDF, m = Math.min(3, inp.nIn), i;
-  if (m === 0 || inp.nGrid === 0) return;
-  var smallA = Math.min(f.gridValSz, m > 1 ? f.inValSz : f.inValSz1), aMax = 0;
-  for (i = 0; i < m; i++) aMax = Math.max(aMax, inp.inAdv[i] || 1000);
-  var cellW = kdQ(K.WALL_W, m), head = f.labSz + 8, ruleGap = 14;
-  var s = Math.min(f.heroSz, kdQ((cellW - K.CELL_PAD) * 1000, aMax));
-  var g = { colLW: K.WALL_W, heroSz: f.heroSz, labSz: f.labSz, grow: f.grow, gridRows: [] };
-  var bestS = 0, bestScore = 0;
-  for (; s >= 20; s--) {
-    kdFlowGrid(inp, midTop, midBot - head - s - ruleGap, g);
-    var score = Math.min(g.gridValSz, s);
-    if (score > bestScore) { bestScore = score; bestS = s; }
-    if (g.gridValSz >= s) break;
-  }
-  if (bestScore <= smallA) return;
-  var rowTop = midBot - head - bestS;
-  f.colLW = K.WALL_W;
-  kdFlowGrid(inp, midTop, rowTop - ruleGap, f);
-  var sz = Math.max(20, kdQ(bestS * kdPct(inp.inPct), 100));
-  f.inVcol = false; f.inHrow = true;
-  f.inX = 18; f.inW = K.WALL_W;
-  f.inRuleY = rowTop - kdQ(ruleGap, 2);
-  f.inLabY = rowTop;
-  f.inValY = f.inVal2Y = f.inVal3Y = rowTop + head;
-  f.inValSz1 = f.inValSz = sz;
-  f.inW1Pm = kdQ(1000, m);
-  f.sepH = 0;
-}
-
 function kdFlowWall(inp, f) {
   var K = KDF, X0 = 18, X1 = K.WALL_X1, i;
   f.wall = true; f.chart = false; f.week = false;
@@ -834,18 +804,19 @@ function kdFlowWall(inp, f) {
   f.topBot = f.rule3Y;
   var both = inp.nGrid > 0 && inp.nIn > 0;
   f.colLW = both ? K.WALL_COL : K.WALL_W;
-  kdFlowGrid(inp, midTop, midBot, f);
+  // One arrangement per count: kdFlowWall() in KindleFlow.h.
+  var nG = Math.min(6, inp.nGrid);
+  kdFlowGrid(inp, midTop, midBot, f, nG <= 2 ? nG : kdQ(nG + 1, 2));
   f.inX = inp.nGrid > 0 ? K.WALL_RX : X0;
   f.inW = inp.nGrid > 0 ? X1 - K.WALL_RX : K.WALL_W;
   f.inRuleY = midTop;
   kdFlowIndoorV(inp, midTop, midBot, f);
   f.sepX = K.WALL_SEP; f.sepY = midTop; f.sepH = both ? midBot - midTop : 0;
-  f.inHrow = false;
-  if (both) kdFlowWallRow(inp, midTop, midBot, f);
   var beside = inp.clock && inp.forecast;
   kdFlowClockSizes(beside ? K.WALL_CLOCK : K.WALL_CLOCK_1, f);
-  f.clW = beside ? K.WALL_COL : K.WALL_W;
-  f.clX = beside ? X0 : X0 + Math.max(0, kdQ(K.WALL_W - kdQ(f.clSize * 2740, 1000), 2));
+  var clIn = beside ? 0 : Math.max(0, kdQ(K.WALL_W - kdQ(f.clSize * 2740, 1000), 2));
+  f.clX = X0 + clIn;
+  f.clW = (beside ? K.WALL_COL : K.WALL_W) - 2 * clIn;
   f.clY = f.rule3Y + Math.max(0, kdQ(K.WALL_BAND - f.clH, 2));
   f.sep2X = K.WALL_SEP; f.sep2Y = f.rule3Y + 12; f.sep2H = beside ? K.WALL_BAND - 24 : 0;
   var fx = inp.clock ? K.WALL_RX : X0, fw = X1 - fx;
@@ -860,7 +831,7 @@ function kdFlowWall(inp, f) {
 
 // The forecast's current conditions where the layout file has them.
 function kdFlowFcDesk(f) {
-  f.wall = false; f.headRuleY = 0; f.inVcol = false; f.inHrow = false; f.sep2X = f.sep2Y = f.sep2H = 0;
+  f.wall = false; f.headRuleY = 0; f.inVcol = false; f.sep2X = f.sep2Y = f.sep2H = 0;
   f.labFcX = 18; f.labFcY = f.rule3Y + 6;
   f.fcIconX = 18; f.fcIconY = f.rule3Y + 28;
   f.fcTextX = 78; f.fcTextY = f.rule3Y + 28; f.fcTextW = 0; f.fcTextSz = 31;
@@ -876,7 +847,7 @@ function kdFlowComputeAt(inp, footY) {
   if (inp.land) { kdFlowLand(inp, footY, f); f.headW = f.colLW; kdFlowFcDesk(f); return f; }
   kdFlowUpright(inp, f);
   if (inp.wall) {
-    f.inVcol = false; f.inHrow = false; f.sep2X = f.sep2Y = f.sep2H = 0;
+    f.inVcol = false; f.sep2X = f.sep2Y = f.sep2H = 0;
     kdFlowWall(inp, f);
     return f;
   }
@@ -1042,10 +1013,6 @@ function kdPvBoxesWall(L) {
   b.inrow = L.sepH > 0 ? [L.sepX + 4, midTop, 586 - L.sepX - 4, midH]
                        : (L.inValSz1 ? [10, midTop, 580, midH] : [L.sepX + 4, midTop, 200, 6]);
   if (L.inValSz1 && !L.sepH) b.grid = [10, midTop, 580, 6];
-  if (L.inHrow) {
-    b.grid  = [10, midTop, 580, L.inRuleY - 4 - midTop];
-    b.inrow = [10, L.inRuleY + 2, 580, L.rule3Y - 6 - L.inRuleY];
-  }
   if (band) {
     var split = L.sep2H > 0 ? L.sep2X : (L.clock ? 590 : 10);
     b.clock = L.clock ? [10, L.rule3Y + 4, split - 14, L.footY - L.rule3Y - 8]
@@ -1207,8 +1174,6 @@ function kdRenderPreview() {
   var ilive = L.inside, IX = L.inX, IW = L.inW;
   if (ilive.length) {
     if ((L.clock || L.land) && !L.wall) h += kdRl(IX, L.inRuleY, IW, 1, true);
-    // On the wall page across it under the grid: ruled off, in equal cells.
-    if (L.inHrow) h += kdRl(IX, L.inRuleY, IW, 1);
     h += kdT(IX, L.inLabY, L.labSz, kdGroups["in"] || kdGroupPh["in"],
              { ink:capInk, bold:capB });
     // The first field's share is what it needs to be set larger, not a
@@ -1230,7 +1195,7 @@ function kdRenderPreview() {
         var fw = kdTw(v, ivs) + kdTw(kdPvUnit(z), Math.round(ivs * (kdPvUnit(z) === "°" ? 0.34 : 0.42)));
         if (fw < IW) x = IX + Math.floor((IW - fw) / 2);
       }
-      if (!big) h += kdT(x, L.inHrow ? L.inLabY : iy - L.labSz - 4, L.labSz, kdPvCaption(z),
+      if (!big) h += kdT(x, iy - L.labSz - 4, L.labSz, kdPvCaption(z),
                          { ink:capInk, bold:capB });
       h += kdT(x, iy, ivs, v,
                { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0010), ink:kdPvInk(z.ink) });

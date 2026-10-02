@@ -194,12 +194,12 @@ int main(int argc, char** argv) {
                "\"battY\":%d",
                f.olX[0], f.olX[1], f.olX[2], f.olX[3], f.olX[4], f.wkX, f.wkY, f.wkCellW,
                f.wkHdgY, f.wkRule ? "true" : "false", f.footY, f.statX, f.battX, f.battY);
-        printf(",\"wall\":%s,\"headW\":%d,\"headRuleY\":%d,\"inVcol\":%s,\"inHrow\":%s,\"sep2X\":%d,"
+        printf(",\"wall\":%s,\"headW\":%d,\"headRuleY\":%d,\"inVcol\":%s,\"sep2X\":%d,"
                "\"sep2Y\":%d,\"sep2H\":%d,\"labFcX\":%d,\"labFcY\":%d,\"fcIconX\":%d,"
                "\"fcIconY\":%d,\"fcTextX\":%d,\"fcTextY\":%d,\"fcTextW\":%d,\"fcTextSz\":%d,"
                "\"fcTempX\":%d,\"fcTempY\":%d,\"fcTempSz\":%d,\"fcWindX\":%d,\"fcWindY\":%d,"
                "\"fcWindSz\":%d",
-               f.wall ? "true" : "false", f.headW, f.headRuleY, f.inVcol ? "true" : "false", f.inHrow ? "true" : "false",
+               f.wall ? "true" : "false", f.headW, f.headRuleY, f.inVcol ? "true" : "false",
                f.sep2X, f.sep2Y, f.sep2H, f.labFcX, f.labFcY, f.fcIconX, f.fcIconY,
                f.fcTextX, f.fcTextY, f.fcTextW, f.fcTextSz, f.fcTempX, f.fcTempY,
                f.fcTempSz, f.fcWindX, f.fcWindY, f.fcWindSz);

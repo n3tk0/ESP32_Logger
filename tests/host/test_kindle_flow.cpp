@@ -779,20 +779,18 @@ static void checkWallStacks(const KdFlow& f) {
     CHECK(f.headRuleY < f.gridY);
     if (f.gridNRows)
         CHECK(f.gridY + (f.gridNRows - 1) * f.gridRowH + f.labSz + 4 + f.gridValSz
-              <= (f.inHrow ? f.inRuleY : f.rule3Y));
-    if (f.inHrow) {
-        CHECK(!f.inVcol);
-        CHECK(f.inRuleY < f.inLabY);
-        CHECK(f.inLabY + f.labSz < f.inValY);
-        CHECK_EQ(f.inValSz, f.inValSz1);
-        CHECK_EQ(f.sepH, 0);
-        CHECK_EQ(f.colLW, KDF_WALL_W);
-    } else if (f.inValSz1) {
+              <= f.rule3Y);
+    if (f.inValSz1) {
         CHECK(f.inVcol);
         CHECK(f.inVal3Y >= f.inVal2Y && f.inVal2Y > f.inValY);
     }
     CHECK(f.inValY + f.inValSz1 <= f.rule3Y);
-    if (f.clock) CHECK(f.clY + f.clH <= f.footY);
+    if (f.clock) {
+        CHECK(f.clY + f.clH <= f.footY);
+        // Its box on the screen, and in the middle of the band when alone.
+        CHECK(f.clX >= 18 && f.clX + f.clW <= 582);
+        if (!f.sep2H) CHECK_EQ(f.clX - 18, 582 - (f.clX + f.clW));
+    }
     if (f.forecast) CHECK(f.fcWindY + f.fcWindSz <= f.footY);
     if (f.clock || f.forecast) CHECK(f.rule3Y < f.footY);
 }
@@ -819,28 +817,37 @@ static void test_wall_page() {
     CHECK_EQ(w.heroY + w.heroSz, f.heroY + f.heroSz);
 }
 
-// Four outdoor places beside the indoor column came out at ~47 ("1010 hPa",
-// "14 ug/m3" two to a 352 px row, or four rows in 294 px). Across the page
-// with the indoor row under them, all seven are larger.
-static void test_wall_four_places_take_the_width() {
+// THE GRID IS LAID OUT BY HOW MANY READINGS IT HAS: two one under the other,
+// four 2 x 2, six three rows of two, an odd one alone on the last row. The
+// indoor readings stay a column of their own on the right whatever it holds.
+static void test_wall_grid_by_count() {
+    static const uint8_t want[7][3] = {
+        {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {2, 1, 0}, {2, 2, 0}, {2, 2, 1}, {2, 2, 2}};
+    for (int g = 1; g <= 6; g++) {
+        KdFlowIn in = wallPage();
+        in.nGrid = (uint8_t)g;
+        for (int i = 0; i < g; i++) in.gridAdv[i] = (uint16_t)advPress();
+        const KdFlow f = kdFlowCompute(in);
+        checkWallStacks(f);
+        CHECK_EQ(f.gridNRows, g <= 2 ? g : (g + 1) / 2);
+        for (int r = 0; r < f.gridNRows; r++) CHECK_EQ(f.gridRows[r], want[g][r]);
+        CHECK_EQ(f.colLW, KDF_WALL_COL);
+        CHECK(f.inVcol);
+        CHECK_EQ(f.inX, KDF_WALL_RX);
+    }
+
+    // Pressure, dew point, PM2.5 and PM10: 2 x 2, each cell as large as the
+    // widest of them allows across half the column.
     KdFlowIn in = wallPage();
     in.nGrid = 4;
     in.gridAdv[2] = (uint16_t)kdFlowWorstAdvance("pm25", "6", "\xC2\xB5g/m\xC2\xB3", false);
     in.gridAdv[3] = (uint16_t)kdFlowWorstAdvance("pm10", "14", "\xC2\xB5g/m\xC2\xB3", false);
     const KdFlow f = kdFlowCompute(in);
-    checkWallStacks(f);
-    CHECK(f.inHrow);
-    CHECK_EQ(f.gridRows[0], 2);
-    CHECK_EQ(f.gridRows[1], 2);
-    CHECK(f.gridValSz >= 60);
-    CHECK(f.inValSz >= 60);
-
-    // Without the indoor readings the grid has the page to itself.
-    in.nIn = 0;
-    const KdFlow o = kdFlowCompute(in);
-    checkWallStacks(o);
-    CHECK(!o.inHrow);
-    CHECK(o.gridValSz >= f.gridValSz);
+    CHECK_EQ(f.gridNRows, 2);
+    const int cell = KDF_WALL_COL / 2 - KDF_CELL_PAD;
+    int widest = 0;
+    for (int i = 0; i < 4; i++) widest = kdfMax(widest, (int)in.gridAdv[i]);
+    CHECK_EQ(f.gridValSz, cell * 1000 / widest);
 
     // Every combination of places and bands stacks.
     for (int g = 0; g <= 6; g++)
@@ -866,7 +873,6 @@ static void test_wall_panel_keys() {
     const int n = kdFlowPanelKeys(f, 600, kv);
     CHECK(n <= KDF_PANEL_KEYS);
     CHECK_EQ(keyOf(kv, n, "WALL"), 1);
-    CHECK_EQ(keyOf(kv, n, "IN_HROW"), f.inHrow ? 1 : 0);
     CHECK_EQ(keyOf(kv, n, "IN_VCOL"), f.inVcol ? 1 : 0);
     CHECK_EQ(keyOf(kv, n, "HEAD_RULE_Y"), f.headRuleY);
     CHECK_EQ(keyOf(kv, n, "COL_L_W"), f.colLW);
@@ -893,7 +899,7 @@ int main() {
     RUN(test_panel_keys);
     RUN(test_page_css);
     RUN(test_wall_page);
-    RUN(test_wall_four_places_take_the_width);
+    RUN(test_wall_grid_by_count);
     RUN(test_wall_panel_keys);
     return SUMMARY();
 }

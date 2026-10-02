@@ -3077,7 +3077,7 @@ FLOW_KEYS="GROUP_LAB_SZ HERO_Y HERO_SZ BIG_SZ HEAD_GAP SLASH_W SUB_Y SUB_SZ
  OL_N OL0_X OL1_X OL2_X OL3_X OL4_X OL3_Y OL4_Y RULE3_W
  WK_X WK_HDG_X WK_CELL_W WK_HDG_RULE_W FOOT_RULE_Y FOOT_RULE_W FOOT_Y
  STAT_X STAT_Y BATT_Y
- WALL HEAD_W HEAD_RULE_Y IN_VCOL IN_HROW SEP_Y SEP2_X SEP2_Y SEP2_H LAB_FC_X
+ WALL HEAD_W HEAD_RULE_Y IN_VCOL SEP_Y SEP2_X SEP2_Y SEP2_H LAB_FC_X
  FC_ICON_X FC_TEXT_X FC_TEXT_W FC_TEXT_SZ FC_TEMP_X FC_TEMP_SZ FC_WIND_X FC_WIND_SZ"
 
 #: 1 when the collector's layout is the one loaded. See flow_apply().
@@ -3092,7 +3092,7 @@ flow_apply() {
     # that sent them — a landscape page's LAND=1 on the upright one after it.
     unset IN_W1 IN_STACK IN_COL IN_VAL3_Y IN_VAL2_Y FC_BAND LAND TOPROW_Y KEY_BAND OL_N \
           OL3_X OL4_X OL3_Y OL4_Y \
-          WALL HEAD_W HEAD_RULE_Y IN_VCOL IN_HROW SEP_Y SEP2_X SEP2_Y SEP2_H FC_TEXT_W 2>/dev/null
+          WALL HEAD_W HEAD_RULE_Y IN_VCOL SEP_Y SEP2_X SEP2_Y SEP2_H FC_TEXT_W 2>/dev/null
     LAB_INK=GRAY7
     case "${LY_GR_H:-}" in ''|*[!0-9]*) FLOW_SIG=""; return 0 ;; esac
     # The grid's rows are a list of counts, each divided into the column's
@@ -4090,113 +4090,88 @@ draw_zones() {
            [ "${WALL:-0}" != "1" ]; then
             draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYD"
         fi
-        # OR ACROSS THE WALL PAGE UNDER THE GRID (IN_HROW): ruled off from it,
-        # the heading over the first reading and each other's caption on the
-        # same line, the three at one size in equal cells.
-        if [ "${IN_HROW:-0}" = "1" ]; then
-            draw_hline "$rx" "${IN_RULE_Y:-0}" "$rw" "GRAYA"
-            cw=$(( n >= 3 ? rw / 3 : rw / n ))
-            i=0
-            for z in $IN_ZONES; do
-                [ "$i" -lt 3 ] || break
-                eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
-                eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD; ink=\${Z_${z}_INK:-BLACK}"
-                eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
-                cx=$(( rx + i * cw ))
-                if [ "$i" = "0" ]; then
-                    draw_text_reg "$cx" "${IN_LAB_Y:-0}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_IN"
-                else
-                    draw_text_reg "$cx" "${IN_LAB_Y:-0}" "${GRID_LAB_SZ:-10}" \
-                                  "${LAB_INK:-GRAY7}" "$lab"
-                fi
-                draw_field "$cx" "${IN_VAL_Y:-0}" "${IN_VAL_SZ:-28}" "$bold" "$val" \
-                           "$unit" "$arrow" "$vadv" "$uadv" "$ink"
-                i=$((i + 1))
-            done
-        else
-            draw_text_reg "$rx" "${IN_LAB_Y:-134}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_IN"
+        draw_text_reg "$rx" "${IN_LAB_Y:-134}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_IN"
 
-            # The first field gets more of the row, not an equal share: it is set
-            # larger, so equal columns crowd it against its neighbour while leaving
-            # the small ones space they do not need.
-            local w1
-            if [ -n "${IN_W1:-}" ]; then
-                # The collector's layout: what the first field needs of the row,
-                # in thousandths, rather than a fixed share.
-                w1=$(( rw * IN_W1 / 1000 ))
-            elif [ "$n" -ge 3 ]; then w1=$(( rw * 42 / 100 ))
-            elif [ "$n" -eq 2 ]; then w1=$(( rw * 58 / 100 ))
-            else w1="$rw"
-            fi
-            cw=$(( n > 1 ? (rw - w1) / (n - 1) : rw ))
-
-            # ALL THREE VALUES SIT ON ONE BOTTOM EDGE. The first has no caption —
-            # the heading above already says which room this is — so it is half
-            # again as tall and starts higher.
-            local big="${IN_VAL_SZ_1:-52}" small="${IN_VAL_SZ:-28}"
-            local big_y="${IN_VAL_Y:-158}"
-            local small_y="${IN_VAL2_Y:-$(( big_y + big - small ))}"
-            # OR THE FIRST ON A LINE OF ITS OWN, the others under it sharing the
-            # whole width — the collector's choice, when it sets the first larger.
-            local stack=0
-            if [ "${IN_STACK:-0}" = "1" ] && [ "$n" -gt 1 ]; then
-                stack=1
-                w1="$rw"
-                cw=$(( rw / (n - 1) ))
-            fi
-            # OR THREE AS TWO COLUMNS: the first on the left, the other two one
-            # above the other beside it, the lower one on the first one's bottom
-            # line — the collector's IN_COL.
-            local col=0 low_y
-            if [ "${IN_COL:-0}" = "1" ] && [ "$n" -eq 3 ] && [ "$stack" = "0" ]; then
-                col=1
-                low_y="${IN_VAL3_Y:-$(( big_y + big - small ))}"
-            fi
-            # OR ONE UNDER THE OTHER, each at the column's left edge with its
-            # caption over it — the wall page's IN_VCOL.
-            local vcol=0
-            if [ "${IN_VCOL:-0}" = "1" ]; then
-                vcol=1; col=0; stack=0
-                low_y="${IN_VAL3_Y:-$small_y}"
-            fi
-
-            i=0
-            for z in $IN_ZONES; do
-                eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
-                eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD; ink=\${Z_${z}_INK:-BLACK}"
-                eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
-                if [ "$i" = "0" ]; then
-                    cx="$rx"; vsz="$big"; y="$big_y"
-                    # Alone, it stands in the middle of the column.
-                    if [ "$n" -eq 1 ] && [ -n "$val" ] && [ "$vadv" -gt 0 ] 2>/dev/null; then
-                        field_w "$big" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$bold"
-                        centre_in "$rx" "$rw" "$FIELD_W"
-                        cx="$CENTRE_X"
-                    fi
-                elif [ "$vcol" = "1" ]; then
-                    cx="$rx"; vsz="$small"
-                    if [ "$i" = "1" ]; then y="$small_y"; else y="$low_y"; fi
-                    draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
-                                  "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
-                elif [ "$col" = "1" ]; then
-                    cx=$(( rx + w1 )); vsz="$small"
-                    if [ "$i" = "1" ]; then y="$small_y"; else y="$low_y"; fi
-                    draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
-                                  "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
-                elif [ "$stack" = "1" ]; then
-                    cx=$(( rx + (i - 1) * cw )); vsz="$small"; y="$small_y"
-                    draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
-                                  "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
-                else
-                    cx=$(( rx + w1 + (i - 1) * cw )); vsz="$small"; y="$small_y"
-                    draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
-                                  "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
-                fi
-                draw_field "$cx" "$y" "$vsz" "$bold" "$val" "$unit" "$arrow" \
-                           "$vadv" "$uadv" "$ink"
-                i=$((i + 1))
-            done
+        # The first field gets more of the row, not an equal share: it is set
+        # larger, so equal columns crowd it against its neighbour while leaving
+        # the small ones space they do not need.
+        local w1
+        if [ -n "${IN_W1:-}" ]; then
+            # The collector's layout: what the first field needs of the row,
+            # in thousandths, rather than a fixed share.
+            w1=$(( rw * IN_W1 / 1000 ))
+        elif [ "$n" -ge 3 ]; then w1=$(( rw * 42 / 100 ))
+        elif [ "$n" -eq 2 ]; then w1=$(( rw * 58 / 100 ))
+        else w1="$rw"
         fi
+        cw=$(( n > 1 ? (rw - w1) / (n - 1) : rw ))
+
+        # ALL THREE VALUES SIT ON ONE BOTTOM EDGE. The first has no caption —
+        # the heading above already says which room this is — so it is half
+        # again as tall and starts higher.
+        local big="${IN_VAL_SZ_1:-52}" small="${IN_VAL_SZ:-28}"
+        local big_y="${IN_VAL_Y:-158}"
+        local small_y="${IN_VAL2_Y:-$(( big_y + big - small ))}"
+        # OR THE FIRST ON A LINE OF ITS OWN, the others under it sharing the
+        # whole width — the collector's choice, when it sets the first larger.
+        local stack=0
+        if [ "${IN_STACK:-0}" = "1" ] && [ "$n" -gt 1 ]; then
+            stack=1
+            w1="$rw"
+            cw=$(( rw / (n - 1) ))
+        fi
+        # OR THREE AS TWO COLUMNS: the first on the left, the other two one
+        # above the other beside it, the lower one on the first one's bottom
+        # line — the collector's IN_COL.
+        local col=0 low_y
+        if [ "${IN_COL:-0}" = "1" ] && [ "$n" -eq 3 ] && [ "$stack" = "0" ]; then
+            col=1
+            low_y="${IN_VAL3_Y:-$(( big_y + big - small ))}"
+        fi
+        # OR ONE UNDER THE OTHER, each at the column's left edge with its
+        # caption over it — the wall page's IN_VCOL.
+        local vcol=0
+        if [ "${IN_VCOL:-0}" = "1" ]; then
+            vcol=1; col=0; stack=0
+            low_y="${IN_VAL3_Y:-$small_y}"
+        fi
+
+        i=0
+        for z in $IN_ZONES; do
+            eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
+            eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD; ink=\${Z_${z}_INK:-BLACK}"
+            eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
+            if [ "$i" = "0" ]; then
+                cx="$rx"; vsz="$big"; y="$big_y"
+                # Alone, it stands in the middle of the column.
+                if [ "$n" -eq 1 ] && [ -n "$val" ] && [ "$vadv" -gt 0 ] 2>/dev/null; then
+                    field_w "$big" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$bold"
+                    centre_in "$rx" "$rw" "$FIELD_W"
+                    cx="$CENTRE_X"
+                fi
+            elif [ "$vcol" = "1" ]; then
+                cx="$rx"; vsz="$small"
+                if [ "$i" = "1" ]; then y="$small_y"; else y="$low_y"; fi
+                draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
+                              "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
+            elif [ "$col" = "1" ]; then
+                cx=$(( rx + w1 )); vsz="$small"
+                if [ "$i" = "1" ]; then y="$small_y"; else y="$low_y"; fi
+                draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
+                              "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
+            elif [ "$stack" = "1" ]; then
+                cx=$(( rx + (i - 1) * cw )); vsz="$small"; y="$small_y"
+                draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
+                              "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
+            else
+                cx=$(( rx + w1 + (i - 1) * cw )); vsz="$small"; y="$small_y"
+                draw_text_reg "$cx" "$(( y - ${GRID_LAB_SZ:-10} - 4 ))" \
+                              "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
+            fi
+            draw_field "$cx" "$y" "$vsz" "$bold" "$val" "$unit" "$arrow" \
+                       "$vadv" "$uadv" "$ink"
+            i=$((i + 1))
+        done
     fi
 
     # ── The hairline between the columns ────────────────────────────────────
@@ -4966,6 +4941,20 @@ plan_minute() {
     echo "${out# }"
 }
 
+# Did one of the tiers in $1 already draw the clock this minute? It lives in
+# the readings' rectangle, so the sensors tier draws it — except on the wall
+# page, where it is in the band at the foot and the forecast tier does.
+# Drawing it twice is a second repaint of the same pixels; not drawing it at
+# all leaves the wall clock a minute behind every time the readings update.
+clock_covered() {
+    if [ "${WALL:-0}" = "1" ]; then
+        case " $1 " in *" forecast "*) return 0 ;; esac
+    else
+        case " $1 " in *" sensors "*) return 0 ;; esac
+    fi
+    return 1
+}
+
 # Is there anything at all to do in minute $1?
 #
 # THE SAME QUESTION plan_minute ANSWERS, asked without forking. A suspend is
@@ -5548,12 +5537,11 @@ while true; do
         *" forecast "*) redraw_forecast ;;
     esac
 
-    # The clock last, and only when the sensors tier has not already drawn it —
-    # it lives inside that rectangle, so drawing it twice in one minute is a
-    # second repaint of the same pixels.
+    # The clock last, and only when the tier whose rectangle it lives in has
+    # not already drawn it — see clock_covered().
     case " $TIERS " in
-        *" sensors "*) ;;
         *" clock "*)
+            clock_covered "$TIERS" && continue
             if flash_due "$MINUTE" "$CLOCK_EVERY" "$CLOCK_FLASH_EVERY"; then
                 redraw_clock "$NOW_TIME" 1
             else
