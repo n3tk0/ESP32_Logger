@@ -235,30 +235,29 @@ static void test_a_wide_reading_fits_its_column() {
     KdFlowIn plain = defaultPage();
     CHECK_EQ(f.inValSz1, kdFlowCompute(plain).inValSz1);
 
-    // The temperature sized for -40..+40 and the humidity for two figures,
-    // as the collector sends them: one layout all year, "21.7° / 37%" and
-    // "-38.8° / 5%" alike. 70 and 38 on the ordinary page — the humidity
-    // used to go down to 28, and could not be read.
+    // The humidity sized for two figures keeps the layout's 44 whatever it
+    // reads, and the headline, by what it prints, takes what is left: 77 for
+    // "21.7°", 67 for "-38.8°". It used to be the other way round, and the
+    // humidity went down to 28 and could not be read.
     const char* temps[] = { "-38.8", "-0.4", "8.4", "21.7", "39.9" };
     const char* hums[]  = { "5", "37", "99" };
-    KdFlowIn year = defaultPage();
-    year.heroAdv   = (uint16_t)kdFlowWorstAdvance("temperature", "21.7", "\xC2\xB0", false);
-    year.bigAdv    = (uint16_t)kdFlowFieldAdvance("37", "%", false);
-    year.bigFitAdv = (uint16_t)kdFlowPairAdvance("humidity", "37", "%", false);
-    const KdFlow y = kdFlowCompute(year);
-    CHECK_EQ(y.heroSz, KDF_HERO_KEEP);
-    CHECK(y.bigSz >= 38 && y.bigSz >= kdFlowCompute(plain).inValSz);
-    CHECK(y.heroSz * (int)year.heroAdv / 1000 + y.headGap + y.slashW
-          + y.bigSz * (int)year.bigFitAdv / 1000 <= y.colLW);
     for (const char* t : temps) for (const char* hu : hums) {
         KdFlowIn k = defaultPage();
-        k.heroAdv   = (uint16_t)kdFlowWorstAdvance("temperature", t, "\xC2\xB0", false);
+        k.heroAdv   = (uint16_t)kdFlowFieldAdvance(t, "\xC2\xB0", false);
         k.bigAdv    = (uint16_t)kdFlowFieldAdvance(hu, "%", false);
         k.bigFitAdv = (uint16_t)kdFlowPairAdvance("humidity", hu, "%", false);
         const KdFlow kf = kdFlowCompute(k);
-        CHECK_EQ(kf.heroSz, y.heroSz);
-        CHECK_EQ(kf.bigSz, y.bigSz);
+        CHECK_EQ(kf.bigSz, 44);
+        CHECK(kf.heroSz > kf.bigSz && kf.heroSz <= 88);
+        CHECK(kf.heroSz * (int)k.heroAdv / 1000 + kf.headGap + kf.slashW
+              + kf.bigSz * (int)k.bigFitAdv / 1000 <= kf.colLW);
     }
+    KdFlowIn year = defaultPage();
+    year.heroAdv   = (uint16_t)kdFlowFieldAdvance("21.7", "\xC2\xB0", false);
+    year.bigAdv    = (uint16_t)kdFlowFieldAdvance("37", "%", false);
+    year.bigFitAdv = (uint16_t)kdFlowPairAdvance("humidity", "37", "%", false);
+    const KdFlow y = kdFlowCompute(year);
+    CHECK_EQ(y.heroSz, 77);
     // "100%" is wider than it was sized for: both give a little, it fits.
     KdFlowIn fog = year;
     fog.bigAdv = (uint16_t)kdFlowFieldAdvance("100", "%", false);

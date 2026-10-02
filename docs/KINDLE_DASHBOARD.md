@@ -687,16 +687,14 @@ the panel's bold faces have figures that wide, and a four-figure pressure
 sized by 0.5 was cut at its cell's right edge.
 
 The headline and the value beside it share one line in a 270 px column, and
-"23.5° / 1013 hPa" does not fit it at 88 and 44. The line is sized for the
-widest it will be, not for this minute's reading: the headline as
-"-00.0°" (any outdoor temperature from -40 to +40) and the value beside it
-as two figures, "00%". The value beside it keeps its size and the headline
-gives way, as far as 70 px; then the value beside it, down to 28; then the
-headline, down to 40. On the ordinary page that is 70 and 38 (36 to 39 as
-the page grows), all year, whatever the reading. Only a value wider than it
-was sized for — "100%" in fog — makes the two give a little more, in turn.
-A headline with nothing beside it keeps its 88: "-00.0°" fits the column
-at that size.
+"23.5° / 1013 hPa" does not fit it at 88 and 44. The value beside the
+headline keeps its size and the headline gives way. The value is sized for
+two figures, "00%", so "5%" and "37%" are one size: 44 on the ordinary page,
+48 as the page grows. The headline, by what it prints, takes what is left,
+down to 40: 77 for "21.7°", 67 for "-38.8°", and 88 for "8.4°", which fits
+as it is. Only a value wider than it was sized for ("100%" in fog) makes the
+two give way in turn, down to 28 for the value. The humidity used to give
+way first, and "21.7° / 37%" took it down to 28, where it could not be read.
 
 On the panel the unit, the slash and the second value go after the figures
 as the face actually draws them: the script reads the advances of 0-9, '.'

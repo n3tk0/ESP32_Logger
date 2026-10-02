@@ -1312,12 +1312,12 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     in.inColOk  = inCol;
     // The headline and the value beside it, so the flow can fit the two on
     // one line — as the page draws them: the second only when it is switched
-    // on and has a reading. The headline BY THE WIDEST IT GETS, "-00.0°",
-    // and the second by two figures (kdFlowPairAdvance()) and by what it
-    // prints: the line keeps one layout from -40 to +40, and the second value
-    // keeps its size beside it — see kdFlowHeadFit().
+    // on and has a reading. The headline BY WHAT IT PRINTS; the second by
+    // that and by the two figures it is sized for (kdFlowPairAdvance()), so
+    // it keeps its size and the headline takes what is left — see
+    // kdFlowHeadFit().
     if (zones.z[KZ_HERO].used() && res[KZ_HERO].ok)
-        in.heroAdv = kdPlaceAdvance(skin, zones.z[KZ_HERO], res[KZ_HERO]);
+        in.heroAdv = kdHeadAdvance(skin, zones.z[KZ_HERO], res[KZ_HERO]);
     if ((skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() && res[KZ_BIG].ok) {
         in.bigAdv    = kdHeadAdvance(skin, zones.z[KZ_BIG], res[KZ_BIG]);
         in.bigFitAdv = kdHeadAdvance(skin, zones.z[KZ_BIG], res[KZ_BIG], true);

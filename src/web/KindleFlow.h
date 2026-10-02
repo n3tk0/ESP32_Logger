@@ -445,21 +445,16 @@ static inline void kdFlowClockSizes(int gc, KdFlow& f) {
 /// wider than the 270 px the column has, and the pressure ran off its right
 /// edge.
 ///
-/// SIZED FOR THE WIDEST IT WILL BE, NOT FOR WHAT IT READS NOW. The headline
-/// comes in as kdFlowWorstAdvance(), "-00.0°" for a temperature, and the
-/// value beside it as kdFlowPairAdvance(), "00%": the line is laid out once
-/// for -40 to +40 and does not jump when the reading crosses 10 or zero.
-/// Sized by what they printed, "21.7° / 37%" took the humidity down to 28
-/// and it could not be read; the value beside the headline now keeps its
-/// size and the headline gives way, as far as KDF_HERO_KEEP; then the value
-/// beside it, down to KDF_BIG_MIN; then the headline again, down to
-/// KDF_HERO_MIN. "-00.0° / 00%" in 270 px comes out at 70 and 38: the
-/// headline about the indoor row's first value, the humidity a little
-/// larger than its second ones. Only a value wider than it was sized for —
-/// "100%" — takes from itself, and the headline stays where it was.
-static const int KDF_BIG_MIN   = 28;
-static const int KDF_HERO_MIN  = 40;
-static const int KDF_HERO_KEEP = 70;
+/// THE VALUE BESIDE THE HEADLINE KEEPS ITS SIZE; THE HEADLINE GIVES WAY.
+/// Sized by what they printed with the second one giving way first,
+/// "21.7° / 37%" took the humidity down to 28 and it could not be read. Now
+/// the value beside it is sized for two figures (kdFlowPairAdvance(), "00%"),
+/// so "5%" and "37%" are one size, and keeps the layout's 44; the headline,
+/// by what it prints, takes what is left, down to KDF_HERO_MIN: 76 for
+/// "21.7°", 66 for "-38.8°". Only a value wider than it was sized for —
+/// "100%" — then makes the two give way in turn.
+static const int KDF_BIG_MIN  = 28;
+static const int KDF_HERO_MIN = 40;
 static inline void kdFlowHeadFit(const KdFlowIn& in, KdFlow& f) {
     if (!in.heroAdv) return;
     const int heroA = in.heroAdv;
@@ -467,8 +462,7 @@ static inline void kdFlowHeadFit(const KdFlowIn& in, KdFlow& f) {
     const int bigS  = bigA ? (in.bigFitAdv ? in.bigFitAdv : bigA) : 0;
     int hero = f.heroSz, big = f.bigSz;
     const int room = f.colLW - (bigA ? f.headGap + f.slashW : 0);
-    const int keep = kdfMin(hero, KDF_HERO_KEEP);
-    while (hero > keep && hero * heroA / 1000 + big * bigS / 1000 > room) hero--;
+    while (hero > KDF_HERO_MIN && hero * heroA / 1000 + big * bigS / 1000 > room) hero--;
     while (bigA && big > KDF_BIG_MIN && hero * heroA / 1000 + big * bigS / 1000 > room) big--;
     // Wider than it was sized for ("100%"), or still too wide: the two give
     // way in turn, so neither is the only one to pay.

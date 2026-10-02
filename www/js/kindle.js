@@ -409,7 +409,7 @@ function kdScaleG(v, g) { return kdQ(v * g + 500, 1000); }
 var KDF = {
   FOOT_Y:764, WEEK_H:88, FC_H:124, TOP_Y:20, CHART_ABOVE:26, CHART_BELOW:24,
   CHART_MIN:220, TOP_MIN:262, TOP_GROWN:386, COL_L:270, COL_R:252, CL_Y:26,
-  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6, FIG_SIZE:620, BIG_MIN:28, HERO_MIN:40, HERO_KEEP:70,
+  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6, FIG_SIZE:620, BIG_MIN:28, HERO_MIN:40,
   GROW_MAX:1180, GROW_CLOCK:1146, GROW_BIG:1090, GROW_SUB:1120,
   LAND_FOOT_Y:564, LAND_X1:782, LAND_COL:300, LAND_SEP:328, LAND_CLOCK:840,
   LAND_ROW_W:77, IN_H:102, LAND_GROW_MIN:640, OL_PITCH:92
@@ -540,8 +540,7 @@ function kdFlowHeadFit(inp, f) {
   var hA = inp.heroAdv, bA = inp.bigAdv || 0, hero = f.heroSz, big = f.bigSz;
   var bS = bA ? (inp.bigFitAdv || bA) : 0, bW = Math.max(bA, bS);
   var room = f.colLW - (bA ? f.headGap + f.slashW : 0);
-  var keep = Math.min(hero, KDF.HERO_KEEP);
-  while (hero > keep && kdQ(hero * hA, 1000) + kdQ(big * bS, 1000) > room) hero--;
+  while (hero > KDF.HERO_MIN && kdQ(hero * hA, 1000) + kdQ(big * bS, 1000) > room) hero--;
   while (bA && big > KDF.BIG_MIN && kdQ(hero * hA, 1000) + kdQ(big * bS, 1000) > room) big--;
   var turn = false;
   while (kdQ(hero * hA, 1000) + (bA ? kdQ(big * bW, 1000) : 0) > room) {
@@ -799,9 +798,9 @@ function kdFlowInput(show) {
     return firstIn ? kdFlowFirstInAdvance(z.metric, v, kdPvUnit(z), arrow)
                    : kdFlowWorstAdvance(z.metric, v, kdPvUnit(z), arrow);
   }
-  // The value beside the headline by what it prints and by the two figures
-  // it is sized for, as the collector measures it for kdFlowHeadFit(); the
-  // headline itself by the widest it gets, like the grid.
+  // The headline and the value beside it by what they print, and the value
+  // also by the two figures it is sized for, as the collector measures them
+  // for kdFlowHeadFit().
   function head(key, sized) {
     var z = kdSlot(key), v = kdPvValue(z);
     if (v === "") return 0;
@@ -810,7 +809,7 @@ function kdFlowInput(show) {
                  : kdFlowFieldAdvance(v, kdPvUnit(z), arrow);
   }
   var i, a;
-  inp.heroAdv = adv("hero");
+  inp.heroAdv = head("hero");
   inp.bigAdv = (show & 0x0001) ? head("big") : 0;
   inp.bigFitAdv = (show & 0x0001) ? head("big", true) : 0;
   if (show & 0x0002) {
