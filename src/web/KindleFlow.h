@@ -1172,147 +1172,193 @@ static inline int kdFlowPanel(int v, unsigned resW) {
 /// the 600 px file's. The landscape page sends its x too.
 static const int KDF_PANEL_BASE = 50;
 static const int KDF_PANEL_KEYS = KDF_PANEL_BASE + 48;
-static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out) {
-    int n = 0;
+/// One key into kdFlowPanelKeys()'s list. Out of line on purpose: the list
+/// is over a hundred keys, and the bounds check and the scaling written out at
+/// each of them cost the all-features C3 build kilobytes it does not have.
+struct KdfPut { KdFlowKV* out; int n; unsigned resW; };
+static inline __attribute__((noinline)) void kdfPut(KdfPut& w, const char* k, int v) {
     // Bounded: a key added below without KDF_PANEL_KEYS growing with it is
     // dropped (and fails test_panel_keys) rather than written past `out`.
-    #define KDF_K(k, v)  do { if (n < KDF_PANEL_KEYS) { out[n].key = (k); \
-                              out[n].value = kdFlowPanel((v), resW); } n++; } while (0)
-    #define KDF_R(k, v)  do { if (n < KDF_PANEL_KEYS) { out[n].key = (k); \
-                              out[n].value = (v); } n++; } while (0)
-    KDF_K("GROUP_LAB_SZ", f.labSz);
-    KDF_K("HERO_Y",       f.heroY);
-    KDF_K("HERO_SZ",      f.heroSz);
-    KDF_K("BIG_SZ",       f.bigSz);
-    KDF_K("HEAD_GAP",     f.headGap);
-    KDF_K("SLASH_W",      f.slashW);
-    KDF_K("SUB_Y",        f.subY);
-    KDF_K("SUB_SZ",       f.subSz);
-    KDF_K("GRID_Y",       f.gridY);
-    KDF_K("GRID_ROW_H",   f.gridRowH);
-    KDF_K("GRID_LAB_SZ",  f.labSz);
-    KDF_K("GRID_VAL_SZ",  f.gridValSz);
-    KDF_K("GRID_VAL_SZ_3", f.gridValSz);
-    KDF_K("SEP_H",        f.sepH);
-    KDF_K("CL_SIZE",      f.clSize);
-    KDF_K("CL_H",         f.clH);
-    KDF_K("CL_SZ_BOXED",  f.clBoxed);
-    KDF_K("CL_SZ_RULED",  f.clRuled);
-    KDF_K("CL_RULED_PAD", f.clRuledPad);
-    KDF_K("CL_SZ_DATED",  f.clDated);
-    KDF_K("CL_DATE_SZ",   f.clDateSz);
-    KDF_K("CL_DATE_GAP",  f.clDateGap);
-    KDF_K("IN_RULE_Y",    f.inRuleY);
-    KDF_K("IN_LAB_Y",     f.inLabY);
-    KDF_K("IN_VAL_Y",     f.inValY);
-    KDF_K("IN_VAL2_Y",    f.inVal2Y);
-    KDF_K("IN_VAL_SZ",    f.inValSz);
-    KDF_K("IN_VAL_SZ_1",  f.inValSz1);
-    KDF_R("IN_W1",        f.inW1Pm);
+    if (w.n < KDF_PANEL_KEYS) { w.out[w.n].key = k; w.out[w.n].value = v; }
+    w.n++;
+}
+static inline __attribute__((noinline)) void kdfPutK(KdfPut& w, const char* k, int v) {
+    kdfPut(w, k, kdFlowPanel(v, w.resW));
+}
+
+/// The keys that are a field as it stands, as a table rather than a call each:
+/// the field's place in KdFlow and its width, and whether it is a size the
+/// panel scales (KDF_K) or a count or switch it takes as it is (KDF_R).
+struct KdfKey { const char* key; uint16_t off; uint8_t size; uint8_t scaled; };
+#define KDF_T(k, fld, sc) \
+    { (k), (uint16_t)offsetof(KdFlow, fld), (uint8_t)sizeof(((KdFlow*)0)->fld), (sc) }
+static inline __attribute__((noinline)) void kdfPutTable(KdfPut& w, const KdFlow& f,
+                                                         const KdfKey* t, int n) {
+    const uint8_t* b = (const uint8_t*)&f;
+    for (int i = 0; i < n; i++) {
+        int v;
+        if (t[i].size == 1) {
+            v = b[t[i].off];
+        } else {
+            int16_t h;
+            memcpy(&h, b + t[i].off, sizeof(h));
+            v = h;
+        }
+        if (t[i].scaled) kdfPutK(w, t[i].key, v);
+        else             kdfPut(w, t[i].key, v);
+    }
+}
+
+static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out) {
+    KdfPut w = {out, 0, resW};
+    #define KDF_K(k, v)  kdfPutK(w, (k), (v))
+    #define KDF_R(k, v)  kdfPut(w, (k), (v))
+    static const KdfKey kBase[] = {
+        KDF_T("GROUP_LAB_SZ",  labSz, 1),
+        KDF_T("HERO_Y",        heroY, 1),
+        KDF_T("HERO_SZ",       heroSz, 1),
+        KDF_T("BIG_SZ",        bigSz, 1),
+        KDF_T("HEAD_GAP",      headGap, 1),
+        KDF_T("SLASH_W",       slashW, 1),
+        KDF_T("SUB_Y",         subY, 1),
+        KDF_T("SUB_SZ",        subSz, 1),
+        KDF_T("GRID_Y",        gridY, 1),
+        KDF_T("GRID_ROW_H",    gridRowH, 1),
+        KDF_T("GRID_LAB_SZ",   labSz, 1),
+        KDF_T("GRID_VAL_SZ",   gridValSz, 1),
+        KDF_T("GRID_VAL_SZ_3", gridValSz, 1),
+        KDF_T("SEP_H",         sepH, 1),
+        KDF_T("CL_SIZE",       clSize, 1),
+        KDF_T("CL_H",          clH, 1),
+        KDF_T("CL_SZ_BOXED",   clBoxed, 1),
+        KDF_T("CL_SZ_RULED",   clRuled, 1),
+        KDF_T("CL_RULED_PAD",  clRuledPad, 1),
+        KDF_T("CL_SZ_DATED",   clDated, 1),
+        KDF_T("CL_DATE_SZ",    clDateSz, 1),
+        KDF_T("CL_DATE_GAP",   clDateGap, 1),
+        KDF_T("IN_RULE_Y",     inRuleY, 1),
+        KDF_T("IN_LAB_Y",      inLabY, 1),
+        KDF_T("IN_VAL_Y",      inValY, 1),
+        KDF_T("IN_VAL2_Y",     inVal2Y, 1),
+        KDF_T("IN_VAL_SZ",     inValSz, 1),
+        KDF_T("IN_VAL_SZ_1",   inValSz1, 1),
+        KDF_T("IN_W1",         inW1Pm, 0),
+        KDF_T("IN_VAL3_Y",     inVal3Y, 1),
+        KDF_T("RULE2_Y",       rule2Y, 1),
+        KDF_T("GR_Y",          grY, 1),
+        KDF_T("GR_H",          grH, 1),
+        KDF_T("RULE3_Y",       rule3Y, 1),
+        KDF_T("LAB_FC_Y",      labFcY, 1),
+        KDF_T("FC_ICON_Y",     fcIconY, 1),
+        KDF_T("FC_TEXT_Y",     fcTextY, 1),
+        KDF_T("FC_TEMP_Y",     fcTempY, 1),
+        KDF_T("FC_WIND_Y",     fcWindY, 1),
+        KDF_T("WK_HDG_Y",      wkHdgY, 1),
+        KDF_T("WK_Y",          wkY, 1),
+    };
+    kdfPutTable(w, f, kBase, sizeof(kBase) / sizeof(kBase[0]));
     KDF_R("IN_STACK",     f.inStack ? 1 : 0);
     KDF_R("IN_COL",       f.inCol ? 1 : 0);
-    KDF_K("IN_VAL3_Y",    f.inVal3Y);
-    KDF_K("RULE2_Y",      f.rule2Y);
     KDF_K("LAB_CHART_Y",  f.rule2Y + 6);
-    KDF_K("GR_Y",         f.grY);
-    KDF_K("GR_H",         f.grH);
     KDF_K("KEY_Y",        f.grY + f.grH + 2);
-    KDF_K("RULE3_Y",      f.rule3Y);
-    KDF_K("LAB_FC_Y",     f.labFcY);
-    KDF_K("FC_ICON_Y",    f.fcIconY);
-    KDF_K("FC_TEXT_Y",    f.fcTextY);
-    KDF_K("FC_TEMP_Y",    f.fcTempY);
-    KDF_K("FC_WIND_Y",    f.fcWindY);
     KDF_K("OL0_Y",        f.rule3Y + 12);
     KDF_K("OL1_Y",        f.rule3Y + 12);
     KDF_K("OL2_Y",        f.rule3Y + 12);
     KDF_K("WK_HDG_RULE_Y", f.wkHdgY - 5);
-    KDF_K("WK_HDG_Y",     f.wkHdgY);
-    KDF_K("WK_Y",         f.wkY);
     KDF_R("FC_BAND",      f.forecast ? 1 : 0);
 
     if (f.land) {
         const int X1 = KDF_LAND_X1;
         KDF_R("LAND",         1);
-        KDF_K("TOP_Y",        f.groupY);
-        KDF_K("COL_L_X",      f.colLX);
-        KDF_K("COL_L_W",      f.colLW);
-        KDF_K("COL_R_X",      f.inX);
-        KDF_K("COL_R_W",      f.inW);
-        KDF_K("SEP_X",        f.sepX);
-        KDF_K("CL_X",         f.clX);
-        KDF_K("CL_Y",         f.clY);
-        KDF_K("CL_W",         f.clW);
-        KDF_K("TOPROW_Y",     f.topRowY);
-        KDF_K("RULE2_X",      f.rule2X);
+        static const KdfKey kLand[] = {
+            KDF_T("TOP_Y",         groupY, 1),
+            KDF_T("COL_L_X",       colLX, 1),
+            KDF_T("COL_L_W",       colLW, 1),
+            KDF_T("COL_R_X",       inX, 1),
+            KDF_T("COL_R_W",       inW, 1),
+            KDF_T("SEP_X",         sepX, 1),
+            KDF_T("CL_X",          clX, 1),
+            KDF_T("CL_Y",          clY, 1),
+            KDF_T("CL_W",          clW, 1),
+            KDF_T("TOPROW_Y",      topRowY, 1),
+            KDF_T("RULE2_X",       rule2X, 1),
+            KDF_T("LAB_CHART_X",   labChartX, 1),
+            KDF_T("GR_X",          grX, 1),
+            KDF_T("KEY_IN_X",      keyInX, 1),
+            KDF_T("OL_N",          olN, 0),
+            KDF_T("OL0_X",         olX[0], 1),
+            KDF_T("OL1_X",         olX[1], 1),
+            KDF_T("OL2_X",         olX[2], 1),
+            KDF_T("OL3_X",         olX[3], 1),
+            KDF_T("OL4_X",         olX[4], 1),
+            KDF_T("WK_X",          wkX, 1),
+            KDF_T("WK_HDG_X",      wkX, 1),
+            KDF_T("WK_CELL_W",     wkCellW, 1),
+            KDF_T("FOOT_RULE_Y",   footY, 1),
+            KDF_T("STAT_X",        statX, 1),
+            KDF_T("BATT_X",        battX, 1),
+            KDF_T("BATT_Y",        battY, 1),
+        };
+        kdfPutTable(w, f, kLand, sizeof(kLand) / sizeof(kLand[0]));
         KDF_R("RULE2_W",      0);
-        KDF_K("LAB_CHART_X",  f.labChartX);
-        KDF_K("GR_X",         f.grX);
         // The image's own width, which /kindle/graph.bmp rounds to 8.
         KDF_R("GR_W",         kdFlowPanel(f.grW, resW) & ~7);
-        KDF_K("KEY_IN_X",     f.keyInX);
         KDF_R("KEY_BAND",     f.keyBand ? 1 : 0);
-        KDF_R("OL_N",         f.olN);
-        KDF_K("OL0_X",        f.olX[0]);
-        KDF_K("OL1_X",        f.olX[1]);
-        KDF_K("OL2_X",        f.olX[2]);
-        KDF_K("OL3_X",        f.olX[3]);
-        KDF_K("OL4_X",        f.olX[4]);
         KDF_K("OL3_Y",        f.rule3Y + 12);
         KDF_K("OL4_Y",        f.rule3Y + 12);
         KDF_K("RULE3_W",      X1 - 18);
-        KDF_K("WK_X",         f.wkX);
-        KDF_K("WK_HDG_X",     f.wkX);
-        KDF_K("WK_CELL_W",    f.wkCellW);
         KDF_R("WK_HDG_RULE_W", 0);
-        KDF_K("FOOT_RULE_Y",  f.footY);
         KDF_K("FOOT_RULE_W",  X1 - 18);
         KDF_K("FOOT_Y",       f.footY + 8);
-        KDF_K("STAT_X",       f.statX);
         KDF_K("STAT_Y",       f.footY + 8);
-        KDF_K("BATT_X",       f.battX);
-        KDF_K("BATT_Y",       f.battY);
     } else if (f.wall) {
         // Everything that moves, as on its side — and the inks and weights,
         // which the script derives from WALL=1.
         KDF_R("WALL",         1);
-        KDF_K("TOP_Y",        f.groupY);
-        KDF_K("COL_L_X",      f.colLX);
-        KDF_K("COL_L_W",      f.colLW);
-        KDF_K("HEAD_W",       f.headW);
-        KDF_K("HEAD_RULE_Y",  f.headRuleY);
-        KDF_K("COL_R_X",      f.inX);
-        KDF_K("COL_R_W",      f.inW);
+        static const KdfKey kWall[] = {
+            KDF_T("TOP_Y",         groupY, 1),
+            KDF_T("COL_L_X",       colLX, 1),
+            KDF_T("COL_L_W",       colLW, 1),
+            KDF_T("HEAD_W",        headW, 1),
+            KDF_T("HEAD_RULE_Y",   headRuleY, 1),
+            KDF_T("COL_R_X",       inX, 1),
+            KDF_T("COL_R_W",       inW, 1),
+            KDF_T("SEP_X",         sepX, 1),
+            KDF_T("SEP_Y",         sepY, 1),
+            KDF_T("SEP2_X",        sep2X, 1),
+            KDF_T("SEP2_Y",        sep2Y, 1),
+            KDF_T("SEP2_H",        sep2H, 1),
+            KDF_T("CL_X",          clX, 1),
+            KDF_T("CL_Y",          clY, 1),
+            KDF_T("CL_W",          clW, 1),
+            KDF_T("LAB_FC_X",      labFcX, 1),
+            KDF_T("FC_ICON_X",     fcIconX, 1),
+            KDF_T("FC_TEXT_X",     fcTextX, 1),
+            KDF_T("FC_TEXT_W",     fcTextW, 1),
+            KDF_T("FC_TEXT_SZ",    fcTextSz, 1),
+            KDF_T("FC_TEMP_X",     fcTempX, 1),
+            KDF_T("FC_TEMP_SZ",    fcTempSz, 1),
+            KDF_T("FC_WIND_X",     fcWindX, 1),
+            KDF_T("FC_WIND_SZ",    fcWindSz, 1),
+            KDF_T("BATT_X",        battX, 1),
+            KDF_T("BATT_Y",        battY, 1),
+        };
+        kdfPutTable(w, f, kWall, sizeof(kWall) / sizeof(kWall[0]));
         KDF_R("IN_VCOL",      f.inVcol ? 1 : 0);
         KDF_R("IN_HROW",      f.inHrow ? 1 : 0);
-        KDF_K("SEP_X",        f.sepX);
-        KDF_K("SEP_Y",        f.sepY);
-        KDF_K("SEP2_X",       f.sep2X);
-        KDF_K("SEP2_Y",       f.sep2Y);
-        KDF_K("SEP2_H",       f.sep2H);
-        KDF_K("CL_X",         f.clX);
-        KDF_K("CL_Y",         f.clY);
-        KDF_K("CL_W",         f.clW);
         KDF_R("OL_N",         0);
-        KDF_K("LAB_FC_X",     f.labFcX);
-        KDF_K("FC_ICON_X",    f.fcIconX);
-        KDF_K("FC_TEXT_X",    f.fcTextX);
-        KDF_K("FC_TEXT_W",    f.fcTextW);
-        KDF_K("FC_TEXT_SZ",   f.fcTextSz);
-        KDF_K("FC_TEMP_X",    f.fcTempX);
-        KDF_K("FC_TEMP_SZ",   f.fcTempSz);
-        KDF_K("FC_WIND_X",    f.fcWindX);
-        KDF_K("FC_WIND_SZ",   f.fcWindSz);
-        KDF_K("BATT_X",       f.battX);
-        KDF_K("BATT_Y",       f.battY);
     } else if (f.colLW != KDF_COL_L) {
         // Upright with nothing in the right column: the outdoor one is wider.
-        KDF_K("COL_L_W",      f.colLW);
-        KDF_K("BATT_X",       f.battX);
+        static const KdfKey kNarrow[] = {
+            KDF_T("COL_L_W",       colLW, 1),
+            KDF_T("BATT_X",        battX, 1),
+        };
+        kdfPutTable(w, f, kNarrow, sizeof(kNarrow) / sizeof(kNarrow[0]));
     }
     #undef KDF_K
     #undef KDF_R
-    return n > KDF_PANEL_KEYS ? -1 : n;      // -1: the table outgrew its count
+    #undef KDF_T
+    return w.n > KDF_PANEL_KEYS ? -1 : w.n;  // -1: the table outgrew its count
 }
 
 /// The grid's rows, as the panel reads them: "2", "1 1", "3 2".

@@ -2493,7 +2493,7 @@ static void appendLandBody(String& p, const KindleConfig& skin, uint32_t now,
 // ---------------------------------------------------------------------------
 /// Where a block on the wall page starts: the layout's design pixel, less the
 /// body's padding, which the box everything is placed in sits inside.
-static void kdWallAt(String& p, const char* cls, int x, int y, int w = 0) {
+static void kdWallAt(String& p, const char* cls, int x, int y, int w = 0, int h = 0) {
     p += F("<div class=\"wa");
     if (cls && *cls) { p += ' '; p += cls; }
     p += F("\" style=\"left:");
@@ -2502,21 +2502,14 @@ static void kdWallAt(String& p, const char* cls, int x, int y, int w = 0) {
     p += kdPx(y - 14);
     p += F("px");
     if (w > 0) { p += F(";width:"); p += kdPx(w); p += F("px"); }
+    if (h > 0) { p += F(";height:"); p += kdPx(h); p += F("px"); }
     p += F("\">");
 }
 
 /// A hairline of the wall page: across when `w`, down when `h`.
 static void kdWallRule(String& p, int x, int y, int w, int h) {
-    p += F("<div class=\"");
-    p += w ? F("wr") : F("wv");
-    p += F("\" style=\"left:");
-    p += kdPx(x - 18);
-    p += F("px;top:");
-    p += kdPx(y - 14);
-    p += F("px;");
-    p += w ? F("width:") : F("height:");
-    p += kdPx(w ? w : h);
-    p += F("px\"></div>");
+    kdWallAt(p, w ? "wr" : "wv", x, y, w, w ? 0 : h);
+    p += F("</div>");
 }
 
 #ifdef MODULE_FORECAST_ENABLED
@@ -2682,23 +2675,25 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
     const int w = kdPx(kdRulePx(skin));
     const char* st  = style[kdRuleStyle(skin) % 3];
     const char* ink = kdRuleCss(kdRuleInk(skin), false);
-    p += F(".wl{position:relative;width:"); p += kdPx(564); p += F("px}");
-    p += F(".wa{position:absolute;white-space:nowrap;overflow:hidden}");
-    p += F(".wl .lab,.wl .head,.wl .sub,.wl .cv,.wfc{line-height:1;margin:0}");
-    p += F(".wl .lab,.wl .sub{color:#000}");
-    p += F(".wl .grid{margin-top:0}.wl .grid td{height:auto;vertical-align:top}");
-    p += F(".wl .grid .lab{margin-bottom:"); p += kdPx(4); p += F("px}");
-    p += F(".wl .v1,.wl .v2,.wl .gv,.wl .iv{font-weight:700}");
     // The second value black like the first — and the inks a place was given
-    // after it, so they still win.
-    p += F(".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}");
-    p += F(".wr{position:absolute;height:0;border-top:"); p += w; p += F("px ");
-    p += st; p += ' '; p += ink; p += '}';
-    p += F(".wv{position:absolute;width:0;border-left:"); p += w; p += F("px ");
-    p += st; p += ' '; p += ink; p += '}';
-    p += F(".wl .fc-t{font-weight:700;margin:0;font-size:"); p += kdPx(f.fcTempSz); p += F("px}");
-    p += F(".wfw{color:#444;font-size:"); p += kdPx(f.fcWindSz); p += F("px}");
-    p += F(".foot{margin-top:0}");
+    // after it, so they still win. The rules' .wa is absolute, sized inline.
+    p += F(".wa{position:absolute;white-space:nowrap;overflow:hidden}"
+           ".wl .lab,.wl .head,.wl .sub,.wl .cv,.wfc{line-height:1;margin:0}"
+           ".wl .lab,.wl .sub{color:#000}"
+           ".wl .grid{margin-top:0}.wl .grid td{height:auto;vertical-align:top}"
+           ".wl .v1,.wl .v2,.wl .gv,.wl .iv{font-weight:700}"
+           ".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}"
+           ".wa.wr{height:0;overflow:visible}.wa.wv{width:0;overflow:visible}"
+           ".foot{margin-top:0}.wl .fc-t{font-weight:700;margin:0}.wfw{color:#444}"
+           ".wl{position:relative;width:");
+    p += kdPx(564);
+    p += F("px}.wl .grid .lab{margin-bottom:"); p += kdPx(4);
+    p += F("px}.wr{border-top:"); p += w; p += F("px ");
+    p += st; p += ' '; p += ink;
+    p += F("}.wv{border-left:"); p += w; p += F("px ");
+    p += st; p += ' '; p += ink;
+    p += F("}.wl .fc-t{font-size:"); p += kdPx(f.fcTempSz);
+    p += F("px}.wfw{font-size:"); p += kdPx(f.fcWindSz); p += F("px}");
 }
 
 /// The page turned a quarter or a half: drawn upright in a box the size of
