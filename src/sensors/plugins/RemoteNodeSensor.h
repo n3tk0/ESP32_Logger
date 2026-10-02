@@ -88,7 +88,8 @@ private:
     // answer before the next drain. Pointers handed out must stay valid,
     // so these are owned storage rather than pointers into RemoteIngest.
     // A node's own twelve (nodecfg::MAX_METRICS), an ESP-NOW node's three
-    // battery metrics and the derived dew_point and iaq: 17, and room over.
+    // battery metrics and the derived dew_point, iaq and tvoc_est: 18, and
+    // room over.
     static constexpr int MAX_METRICS = 20;
     mutable char _metricNames[MAX_METRICS][16] = {};
     mutable int  _metricCount = 0;
@@ -99,7 +100,7 @@ private:
     int       _calCount = 0;
 
     void _calibrate(SensorReading* out, int n) const;
-    /// Append dew_point and iaq to the n live readings in `out`; returns the
+    /// Append dew_point, iaq and tvoc_est to the n live readings in `out`; returns the
     /// new count.
     int  _derive(SensorReading* out, int n, int maxOut, float rawTemp, float rawGas);
 
@@ -107,6 +108,7 @@ private:
     // was fed (by its time and value) so a mailbox repeat is not fed twice.
     GasIaq   _iaq;
     float    _iaqLast  = 0.0f;
+    float    _tvocLast = NAN;   // tvoc_est from that same reading
     float    _iaqGas   = 0.0f;
     uint32_t _iaqTs    = 0;
     bool     _iaqValid = false;

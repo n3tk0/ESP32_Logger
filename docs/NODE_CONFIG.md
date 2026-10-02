@@ -134,8 +134,9 @@ read that falls due before the warm-up is done (the first send after a boot)
 goes out on the next send instead, and one with no usable frame 30 s past
 the warm-up is skipped. A shorter period keeps it running.
 
-The collector derives `dew_point` (from temperature and humidity) and `iaq`
-(from gas_resistance and humidity) for every node that sends those, the way
+The collector derives `dew_point` (from temperature and humidity), `iaq`
+(from gas_resistance and humidity) and `tvoc_est` (a TVOC estimate in ppb from
+gas_resistance against the same baseline) for every node that sends those, the way
 its own BME280/BME688 plugins do (`RemoteNodeSensor`); they are not node
 metrics and do not count in the node's budget. The `iaq` gas baseline is
 kept on the collector's LittleFS per node (`/config/iaqn_<hash>.bin`, saved at

@@ -119,6 +119,7 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
     float p   = _calPressure.apply(_bme.pressure / 100.0f);
     float g   = _calGas.apply(rawGas);
     float iaq = _iaq.update(h, rawGas, _warmedUp());  // 0..500 (lower = cleaner)
+    float tvoc = _iaq.tvocPpb(rawGas);                 // ppb, estimate
     _maybeSaveBaseline();
 
     // Dew point pairs the RH with the temperature it was measured AT — the raw
@@ -141,6 +142,7 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
     if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "pressure",       p,   "hPa");
     if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "gas_resistance", g,   "Ohm");
     if (n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "iaq",            iaq, "");
+    if (isfinite(tvoc) && n < maxOut) out[n++] = SensorReading::make(0, _id, getType(), "tvoc_est", tvoc, "ppb");
     // Dew point stays unconditional: it is an ambient property in its own
     // right, not a restatement of the humidity. Both are dropped rather than
     // emitted as NaN when the inputs are out of range — a NaN would land in

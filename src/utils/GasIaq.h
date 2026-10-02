@@ -3,9 +3,10 @@
 //
 // The indoor-air-quality index the collector publishes as `iaq` (0..500,
 // lower = cleaner, the BSEC convention) from a BME680/BME688's gas
-// resistance and humidity. Shared by BME688Sensor (a wired sensor) and
-// RemoteNodeSensor (a node's BME688, whose gas_resistance arrives over the
-// network), so the two cannot drift apart.
+// resistance and humidity, and the TVOC estimate it publishes as
+// `tvoc_est` (ppb) from the same resistance. Shared by BME688Sensor (a
+// wired sensor) and RemoteNodeSensor (a node's BME688, whose gas_resistance
+// arrives over the network), so the two cannot drift apart.
 //
 // No Bosch BSEC: a self-calibrating clean-air baseline tracks the upper
 // envelope of the MOX resistance, and the index combines a humidity score
@@ -14,6 +15,8 @@
 // Header-only and free of Arduino, so a host test can include it.
 // ============================================================================
 #pragma once
+
+#include <math.h>
 
 struct GasIaq {
     /// Clean-air resistance ceiling (Ω); 0 = not seeded yet.
@@ -53,4 +56,24 @@ struct GasIaq {
         if (iaq > 500.0f) iaq = 500.0f;
         return iaq;
     }
+
+    /// TVOC estimate (ppb) from a RAW gas reading against the current
+    /// baseline; call after update() so the two agree. A MOX element follows
+    /// Rs/R0 ≈ (C/C0)^-β, so C ≈ C0·(R0/Rs)^(1/β), with β ≈ 0.6 and clean air
+    /// taken as C0 = 50 ppb. Rough: the element sums every reducing gas and
+    /// has no absolute reference, so the trend is right and the level only
+    /// approximate (a factor of two either way is unremarkable). Humidity is
+    /// left out on purpose — it is half of what moves `iaq`, not a VOC.
+    /// Examples: Rs = R0 → 50, R0/2 → ~160, R0/5 → ~730, R0/10 → ~2300.
+    float tvocPpb(float rawGasOhm) const {
+        if (!(baseline > 0.0f) || !(rawGasOhm > 0.0f)) return NAN;
+        float ratio = baseline / rawGasOhm;     // ≥1 when polluted
+        if (ratio < 1.0f) ratio = 1.0f;         // cleaner than the ceiling
+        float ppb = TVOC_CLEAN_PPB * powf(ratio, 1.0f / TVOC_BETA);
+        return ppb > TVOC_MAX_PPB ? TVOC_MAX_PPB : ppb;
+    }
+
+    static constexpr float TVOC_CLEAN_PPB = 50.0f;
+    static constexpr float TVOC_BETA      = 0.6f;
+    static constexpr float TVOC_MAX_PPB   = 5000.0f;
 };

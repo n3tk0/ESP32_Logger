@@ -1200,6 +1200,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .aqi-poor { color:var(--err); }
 .aqi-breakdown { display:flex; flex-direction:column; gap:8px; }
 .aqi-bar { display:grid; grid-template-columns:64px 1fr 56px; align-items:center; gap:10px; font-size:12px; }
+.aqi-bar[hidden] { display:none; }
 .aqi-bar-name { font-weight:500; }
 .aqi-bar-track { height:6px; background:var(--panel-3); border-radius:3px; overflow:hidden; }
 .aqi-bar-fill { height:100%; border-radius:3px; transition:width .4s; }

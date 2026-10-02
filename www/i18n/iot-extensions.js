@@ -21,7 +21,7 @@ I18n.register("iotExt", {
 
     // Overview cards
     cardAqiTitle: "Air Quality Index",
-    assignPmSensor: "Assign PM sensor",
+    assignPmSensor: "Assign air-quality sensor",
     cardEnvironmentTitle: "Environment",
     assignSensor: "Assign sensor",
     temp: "Temp",
@@ -51,6 +51,7 @@ I18n.register("iotExt", {
     aqiGood: "Good",
     aqiModerate: "Moderate",
     aqiPoor: "Poor",
+    tvocEstHint: "Estimated from the BME680 gas reading: the trend is reliable, the level approximate.",
 
     // Sensor diagnostics grid
     reads: "Reads",
@@ -198,7 +199,7 @@ I18n.register("iotExt", {
 
     // Overview cards
     cardAqiTitle: "Индекс на качество на въздуха",
-    assignPmSensor: "Задай PM сензор",
+    assignPmSensor: "Задай сензор за въздух",
     cardEnvironmentTitle: "Среда",
     assignSensor: "Задай сензор",
     temp: "Темп.",
@@ -228,6 +229,7 @@ I18n.register("iotExt", {
     aqiGood: "Добро",
     aqiModerate: "Умерено",
     aqiPoor: "Лошо",
+    tvocEstHint: "Оценка от газовия сензор на BME680: тенденцията е вярна, стойността е ориентировъчна.",
 
     // Sensor diagnostics grid
     reads: "Отчитания",

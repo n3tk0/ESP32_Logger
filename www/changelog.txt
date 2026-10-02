@@ -5,6 +5,7 @@
 - [Fixed] Kindle: the Typeface setting now applies to the FBInk panel too, not only the browser page (Futura, Helvetica, Caecilia and the rest when the Kindle has their font files; Bookerly otherwise), and a change is picked up and redrawn on the next fetch.
 - [Added] Kindle browser page per device: the page is laid out at the reader's own screen size (auto-detected, or a Device setting: Kindle 7, Paperwhite 1/2, 3/4, 5, Oasis) instead of a fixed 600 px, so it fits the Paperwhite 4 (536×724) without being cut off, and several Kindles can show it at once; a Browser bar setting keeps the page clear of the browser's address bar.
 - [Fixed] Kindle panel with a wide typeface (Futura): the clock no longer breaks onto a second line (e.g. at 00:36). The script reads the bold face's own figure widths from its font file and sets the time just small enough to fit its box, centring it by its real width.
+- [Added] Air Quality card: with a BME680/688 (wired or on a node) it shows an estimated TVOC ("TVOC ≈", new tvoc_est metric in ppb) when there is no TVOC sensor, and the dial shows the BME's IAQ when there is no PM sensor; sensors are found by their readings, so a node's PM sensor or BME680 now fills the card, and the eCO₂ row appears only with an SGP30/ENS160 or a real CO₂ sensor (then labelled CO₂).
 - [Changed] Change log rewritten: the 4.2 - 4.7 intermediate releases are now documented, and 4.0 - 4.1 are summarised under v4.0.0.
 
 ## v5.0.0 - Kindle Display, remote nodes and firmware optimisation

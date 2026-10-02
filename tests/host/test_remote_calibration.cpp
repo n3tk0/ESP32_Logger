@@ -124,17 +124,21 @@ static void test_dew_point_and_iaq_are_derived() {
 
     SensorReading out[16];
     int n = s.readAll(out, 16);
-    CHECK_EQ(n, 6);
+    CHECK_EQ(n, 7);
     CHECK(fabsf(valueOf(out, n, "dew_point") - Psychro::dewPointC(21.0f, 40.0f)) < 0.001f);
     // The first reading seeds the baseline: ratio 1, humidity in the comfort
     // band, so the cleanest index there is.
     GasIaq ref;
     const float iaq0 = ref.update(40.0f, 50000.0f);
     CHECK(fabsf(valueOf(out, n, "iaq") - iaq0) < 0.001f);
+    // At the baseline: the clean-air TVOC estimate.
+    CHECK(fabsf(valueOf(out, n, "tvoc_est") - GasIaq::TVOC_CLEAN_PPB) < 0.001f);
+    CHECK_STREQ(out[indexOf(out, n, "tvoc_est")].unit, "ppb");
+    CHECK_EQ((int)out[indexOf(out, n, "tvoc_est")].timestamp, (int)T0);
     CHECK_EQ((int)out[indexOf(out, n, "dew_point")].timestamp, (int)T0);
     CHECK_STREQ(out[indexOf(out, n, "dew_point")].unit, "C");
     const char* names[16];
-    CHECK_EQ(s.getMetrics(names, 16), 6);
+    CHECK_EQ(s.getMetrics(names, 16), 7);
 
     // The mailbox hands the same gas reading back on every tick: it is not
     // fed to the baseline again, so the index does not move.
@@ -147,6 +151,26 @@ static void test_dew_point_and_iaq_are_derived() {
     const float iaq1 = ref.update(40.0f, 25000.0f);
     CHECK(iaq1 > iaq0);
     CHECK(fabsf(valueOf(out, n, "iaq") - iaq1) < 0.001f);
+    CHECK(fabsf(valueOf(out, n, "tvoc_est") - ref.tvocPpb(25000.0f)) < 0.001f);
+    CHECK(valueOf(out, n, "tvoc_est") > GasIaq::TVOC_CLEAN_PPB);
+}
+
+static void test_tvoc_estimate() {
+    GasIaq g;
+    CHECK(isnan(g.tvocPpb(50000.0f)));                // no baseline yet
+    g.baseline = 100000.0f;
+    CHECK(isnan(g.tvocPpb(0.0f)));
+    CHECK(fabsf(g.tvocPpb(100000.0f) - 50.0f) < 0.01f);
+    CHECK(fabsf(g.tvocPpb(200000.0f) - 50.0f) < 0.01f);  // cleaner than the ceiling
+    // R0/2 → 50·2^(1/0.6) ≈ 159, R0/10 → ≈ 2321, R0/100 → the cap.
+    CHECK(fabsf(g.tvocPpb(50000.0f) - 158.7f) < 0.5f);
+    CHECK(fabsf(g.tvocPpb(10000.0f) - 2320.8f) < 1.0f);
+    CHECK(g.tvocPpb(1000.0f) == GasIaq::TVOC_MAX_PPB);
+    // Humidity plays no part: only update() looks at it.
+    GasIaq a, b;
+    a.update(20.0f, 80000.0f); a.update(20.0f, 40000.0f);
+    b.update(70.0f, 80000.0f); b.update(70.0f, 40000.0f);
+    CHECK(a.tvocPpb(40000.0f) == b.tvocPpb(40000.0f));
 }
 
 static void test_no_humidity_no_derived() {
@@ -162,6 +186,7 @@ static void test_no_humidity_no_derived() {
     CHECK_EQ(n, 2);
     CHECK_EQ(indexOf(out, n, "dew_point"), -1);
     CHECK_EQ(indexOf(out, n, "iaq"), -1);
+    CHECK_EQ(indexOf(out, n, "tvoc_est"), -1);
 }
 
 static void test_history_goes_after_the_derived() {
@@ -269,6 +294,7 @@ int main() {
     RUN(test_backlog_is_corrected_too);
     RUN(test_no_calibration_is_identity);
     RUN(test_dew_point_and_iaq_are_derived);
+    RUN(test_tvoc_estimate);
     RUN(test_no_humidity_no_derived);
     RUN(test_history_goes_after_the_derived);
     RUN(test_gas_baseline_holds_while_warming);

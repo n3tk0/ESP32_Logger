@@ -57,7 +57,7 @@
 // measured at that same temperature, and then re-expressed as an RH at the
 // ambient reference temperature. See utils/Psychrometrics.h.
 //
-// Produces up to 7 metrics:
+// Produces up to 8 metrics:
 //   "temperature"      °C
 //   "humidity"         %    — RH at the sensing element (self-heated); this is
 //                             the raw device figure, kept for continuity
@@ -68,6 +68,10 @@
 //                      kept on LittleFS across restarts (/config/iaq_<hash>.bin).
 //                      NOTE: heuristic, not a Bosch-BSEC gas classification — it
 //                      indicates overall air quality, not the specific gas type.
+//   "tvoc_est"         ppb  — TVOC ESTIMATE from the gas resistance against the
+//                      same baseline (GasIaq::tvocPpb). Named apart from a real
+//                      TVOC sensor's "tvoc" so the two never mix in storage,
+//                      MQTT or the Kindle; the level is approximate.
 //   "dew_point"        °C   — true ambient dew point; invariant under heating
 //   "humidity_amb"     %    — RH implied by that dew point at the ambient
 //                             reference temperature. This is the figure to
@@ -102,11 +106,11 @@ public:
     bool        isBlocking() const override { return true; }  // performReading() blocks up to 1 s
     int getMetrics(const char** out, int maxOut) const override {
         static const char* m[] = { "temperature", "humidity", "pressure", "gas_resistance",
-                                   "iaq", "dew_point", "humidity_amb" };
+                                   "iaq", "tvoc_est", "dew_point", "humidity_amb" };
         // Mirrors readAll(): the last entry only exists when a correction is
         // configured. Advertising a metric that never arrives would leave a
         // permanently empty MQTT discovery entity and an empty CSV column.
-        int n = _correctionConfigured() ? 7 : 6; if (n > maxOut) n = maxOut;
+        int n = _correctionConfigured() ? 8 : 7; if (n > maxOut) n = maxOut;
         for (int i = 0; i < n; i++) out[i] = m[i];
         return n;
     }

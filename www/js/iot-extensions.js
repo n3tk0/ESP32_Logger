@@ -215,7 +215,7 @@
                   '<circle class="aqi-fill" id="aqi-arc" cx="60" cy="60" r="50" stroke-dasharray="314" stroke-dashoffset="220"/>' +
                 '</svg>' +
                 '<div class="aqi-center">' +
-                  '<div class="aqi-label">AQI</div>' +
+                  '<div class="aqi-label" id="aqi-gauge-label">AQI</div>' +
                   '<div class="aqi-score" id="aqi-score">—</div>' +
                   '<div class="aqi-quality" id="aqi-quality">—</div>' +
                 '</div>' +
@@ -223,8 +223,8 @@
               '<div class="aqi-breakdown" id="aqi-breakdown">' +
                 '<div class="aqi-bar"><div class="aqi-bar-name">PM2.5</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-pm25" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-pm25v">—</div></div>' +
                 '<div class="aqi-bar"><div class="aqi-bar-name">PM10</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-pm10" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-pm10v">—</div></div>' +
-                '<div class="aqi-bar"><div class="aqi-bar-name">TVOC</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-tvoc" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-tvocv">—</div></div>' +
-                '<div class="aqi-bar"><div class="aqi-bar-name">eCO₂</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-eco2" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-eco2v">—</div></div>' +
+                '<div class="aqi-bar"><div class="aqi-bar-name" id="aqi-tvoc-name">TVOC</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-tvoc" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-tvocv">—</div></div>' +
+                '<div class="aqi-bar" id="aqi-eco2-row" hidden><div class="aqi-bar-name" id="aqi-eco2-name">eCO₂</div><div class="aqi-bar-track"><div class="aqi-bar-fill" id="aqi-eco2" style="width:0%;background:var(--ok)"></div></div><div class="aqi-bar-val" id="aqi-eco2v">—</div></div>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -585,49 +585,84 @@
   }
 
   function ovFillAQI(data) {
+    // Sensors are found by the metrics they report, not by their type, so a
+    // node's PM sensor or BME680 (type "remote") counts as much as a wired
+    // one. The assigned sensor, when there is one, is asked first for every
+    // metric; the others fill in what it does not have.
     var binding = _getBinding("aqi");
-    var pm = null, voc = null, co2 = null;
-    if (Array.isArray(data)) {
-      data.forEach(function (s) {
-        if (!s) return;   // guard against null/undefined entries in the payload
-        if (binding && s.id === binding && s.readings) { pm = s.readings; return; }
-        if (!binding && !pm  && s.readings && (s.type === "sds011" || s.type === "pms5003" || s.type === "sps30")) pm  = s.readings;
-        if (!voc && s.readings && (s.type === "sgp30"  || s.type === "ens160"))  voc = s.readings;
-        if (!co2 && s.readings && (s.type === "scd4x"  || s.type === "scd30"))   co2 = s.readings;
-      });
+    var list = Array.isArray(data) ? data.filter(function (s) { return s && s.readings; }) : [];
+    if (binding) {
+      list.sort(function (a, b) { return (b.id === binding) - (a.id === binding); });
     }
-    // Compute a simple AQI from PM2.5 (EPA linear interpolation simplified)
-    var pm25 = pm && (pm.pm25 || pm.pm2_5);
-    var aqi = pm25 ? Math.min(500, Math.round((pm25 / 35.4) * 100)) : null;
-    var score = document.getElementById("aqi-score");
+    var pick = function (metrics) {
+      for (var i = 0; i < list.length; i++) {
+        for (var j = 0; j < metrics.length; j++) {
+          var v = list[i].readings[metrics[j]];
+          if (typeof v === "number" && isFinite(v)) return { metric: metrics[j], value: v };
+        }
+      }
+      return null;
+    };
+    var pm25 = pick(["pm25", "pm2_5"]);
+    var pm10 = pick(["pm10"]);
+    // A real TVOC sensor wins over the estimate from a BME680's gas reading.
+    var tvoc = pick(["tvoc"]) || pick(["tvoc_est"]);
+    // eCO₂ only from a sensor that reports it (SGP30/ENS160) or a real CO₂
+    // sensor; a BME680 alone gets no row rather than its TVOC restated.
+    var co2  = pick(["co2"]) || pick(["eco2"]);
+    var iaq  = pick(["iaq"]);
+
+    // The gauge: an AQI from PM2.5 (EPA linear interpolation simplified);
+    // without a PM sensor, the BME680's IAQ (0..500, BSEC bands).
+    var score = null, level = 0, pct = 0, gaugeLabel = "AQI";
+    if (pm25) {
+      score = Math.min(500, Math.round((pm25.value / 35.4) * 100));
+      level = score < 50 ? 0 : score < 100 ? 1 : 2;
+      pct = Math.min(1, score / 300);
+    } else if (iaq) {
+      score = Math.round(iaq.value);
+      level = score <= 100 ? 0 : score <= 200 ? 1 : 2;
+      pct = Math.min(1, score / 500);
+      gaugeLabel = "IAQ";
+    }
+    var scoreEl = document.getElementById("aqi-score");
     var quality = document.getElementById("aqi-quality");
     var badge = document.getElementById("aqi-badge");
     var arc = document.getElementById("aqi-arc");
-    if (aqi !== null && score) {
-      score.textContent = aqi;
-      var label = aqi < 50 ? ieT("iotExt.aqiGood") : aqi < 100 ? ieT("iotExt.aqiModerate") : ieT("iotExt.aqiPoor");
-      var cls   = aqi < 50 ? "aqi-good" : aqi < 100 ? "aqi-mod" : "aqi-poor";
+    var gl = document.getElementById("aqi-gauge-label");
+    if (gl) gl.textContent = gaugeLabel;
+    if (score !== null && scoreEl) {
+      scoreEl.textContent = score;
+      var label = [ieT("iotExt.aqiGood"), ieT("iotExt.aqiModerate"), ieT("iotExt.aqiPoor")][level];
+      var cls   = ["aqi-good", "aqi-mod", "aqi-poor"][level];
+      var color = ["var(--ok)", "var(--warn)", "var(--err)"][level];
       if (quality) { quality.textContent = label; quality.className = "aqi-quality " + cls; }
-      if (badge)   { badge.textContent = label.toUpperCase(); badge.className = "badge " + (aqi < 50 ? "ok" : aqi < 100 ? "warn" : "err"); }
+      if (badge)   { badge.textContent = label.toUpperCase(); badge.className = "badge " + ["ok", "warn", "err"][level]; }
       if (arc) {
-        var pct = Math.min(1, aqi / 300);
         arc.setAttribute("stroke-dashoffset", (314 * (1 - pct)).toFixed(1));
-        arc.style.stroke = aqi < 50 ? "var(--ok)" : aqi < 100 ? "var(--warn)" : "var(--err)";
+        arc.style.stroke = color;
       }
     }
-    var fill = function (barId, valId, raw, max, unit) {
+    var fill = function (barId, valId, found, max, unit) {
       var b = document.getElementById(barId); var v = document.getElementById(valId);
-      if (b && raw !== undefined) b.style.width = Math.min(100, (raw / max) * 100).toFixed(0) + "%";
-      if (v && raw !== undefined) v.textContent = raw.toFixed(1) + " " + unit;
+      if (!found) return;
+      if (b) b.style.width = Math.min(100, (found.value / max) * 100).toFixed(0) + "%";
+      if (v) v.textContent = found.value.toFixed(found.value >= 100 ? 0 : 1) + " " + unit;
     };
-    if (pm) {
-      fill("aqi-pm25", "aqi-pm25v", pm.pm25 || pm.pm2_5, 75, "µg");
-      fill("aqi-pm10", "aqi-pm10v", pm.pm10, 150, "µg");
+    fill("aqi-pm25", "aqi-pm25v", pm25, 75, "µg");
+    fill("aqi-pm10", "aqi-pm10v", pm10, 150, "µg");
+    fill("aqi-tvoc", "aqi-tvocv", tvoc, 500, "ppb");
+    var tvocName = document.getElementById("aqi-tvoc-name");
+    if (tvocName) {
+      var est = !!(tvoc && tvoc.metric === "tvoc_est");
+      tvocName.textContent = est ? "TVOC ≈" : "TVOC";
+      if (est) tvocName.title = ieT("iotExt.tvocEstHint"); else tvocName.removeAttribute("title");
     }
-    if (voc) {
-      fill("aqi-tvoc", "aqi-tvocv", voc.tvoc || voc.TVOC, 500, "ppb");
-      fill("aqi-eco2", "aqi-eco2v", co2 ? (co2.co2 || co2.eCO2) : (voc.eco2 || voc.eCO2), 2000, "ppm");
-    }
+    var co2Row = document.getElementById("aqi-eco2-row");
+    if (co2Row) co2Row.hidden = !co2;
+    var co2Name = document.getElementById("aqi-eco2-name");
+    if (co2Name && co2) co2Name.textContent = co2.metric === "co2" ? "CO₂" : "eCO₂";
+    fill("aqi-eco2", "aqi-eco2v", co2, 2000, "ppm");
   }
 
   function ovFillOutdoor(data) {
