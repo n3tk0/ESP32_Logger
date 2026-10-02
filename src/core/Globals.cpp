@@ -86,6 +86,12 @@ unsigned long lastFlowPulseTime = 0;
 // ============================================================================
 bool          rtcValid      = false;
 bool          shouldRestart = false;
+char          g_restartCause[40] = "";
+
+void requestRestart(const char* cause) {
+    if (!shouldRestart) strlcpy(g_restartCause, cause ? cause : "", sizeof(g_restartCause));
+    shouldRestart = true;
+}
 unsigned long restartTimer  = 0;
 
 // ============================================================================

@@ -412,7 +412,7 @@ void TaskManager::shutdown() {
 // Called from loop(). If any task hasn’t updated its heartbeat in 30s,
 // set shouldRestart to trigger a graceful reboot.
 // ---------------------------------------------------------------------------
-bool TaskManager::checkHealth() {
+bool TaskManager::checkHealth(char* why, size_t whyCap) {
     if (!running) return true;
     // Grace period: skip watchdog checks for the first 60s after boot.
     // SDS011 in periodic mode may wait 60-90s for its first frame.
@@ -423,16 +423,22 @@ bool TaskManager::checkHealth() {
     TaskHandle_t taskHandles[TASK_COUNT] = {
         hSensor, hSlowSensor, hProcess, hStorage, hExport
     };
+    static const char* const names[TASK_COUNT] = {
+        "SensorTask", "SlowSensorTask", "ProcessTask", "StorageTask", "ExportTask"
+    };
     for (int i = 0; i < TASK_COUNT; i++) {
         TaskHandle_t h = taskHandles[i];
         if (!h) continue;    // not started (SlowSensorTask with no blocking sensor)
         if (eTaskGetState(h) == eDeleted) {
             Serial.printf("[Watchdog] Task %d deleted unexpectedly\n", i);
+            if (why) snprintf(why, whyCap, "watchdog: %s deleted", names[i]);
             return false;
         }
         uint32_t hb = g_taskHeartbeat[i];
         if (now - hb > MAX_SILENCE_MS) {
             Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, now - hb);
+            if (why) snprintf(why, whyCap, "watchdog: %s silent %lus", names[i],
+                              (unsigned long)((now - hb) / 1000));
             return false;
         }
     }

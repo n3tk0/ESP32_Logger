@@ -105,7 +105,7 @@ static bool handoverSwitch() {
     config.network = net;
     saveConfig();
     Serial.printf("[nodecfg] handover: switching to \"%s\"\n", net.clientSSID);
-    shouldRestart = true;
+    requestRestart("node handover");
     restartTimer  = millis();
     return true;
 }

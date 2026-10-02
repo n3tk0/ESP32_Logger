@@ -874,7 +874,7 @@ static void h_post_save_hardware(AsyncWebServerRequest* r) {
     }
     saveConfig();
     sendRestartPage(r, "Device is restarting with new hardware settings.");
-    shouldRestart = true;
+    requestRestart("hardware settings");
     restartTimer  = millis();
 }
 
@@ -1175,7 +1175,7 @@ static void h_post_save_network(AsyncWebServerRequest* r) {
 
     saveConfig();
     sendRestartPage(r, "Device is restarting with new network settings.");
-    shouldRestart = true;
+    requestRestart("network settings");
     restartTimer  = millis();
 }
 
@@ -1335,14 +1335,14 @@ static void h_post_factory_reset(AsyncWebServerRequest* r) {
     // user-initiated wipe, NOT a crash.
     g_resetMagic = 0;
     g_pendingWiFiShutdown = true;
-    shouldRestart = true;
+    requestRestart("factory reset");
     restartTimer  = millis();
 }
 
 static void h_post_restart(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
     r->send(200, "application/json", "{\"ok\":true}");
-    shouldRestart = true;
+    requestRestart("restart from web");
     restartTimer  = millis();
 }
 
@@ -1372,7 +1372,7 @@ static void h_post_api_format_filesystem(AsyncWebServerRequest* r) {
     Serial.println("[Format] OK — rebooting");
     r->send(200, "application/json",
             "{\"ok\":true,\"message\":\"formatted, rebooting\"}");
-    shouldRestart = true;
+    requestRestart("format");
     restartTimer  = millis();
 }
 
@@ -1526,7 +1526,7 @@ static void h_post_api_platform_reload(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;   // was unprotected — reboots device
     // Signal to main loop / TaskManager to reload configs
     // Full reload requires restart; signal shouldRestart
-    shouldRestart = true;
+    requestRestart("platform reload");
     restartTimer  = millis();
     r->send(200, "application/json", "{\"ok\":true,\"restart\":true}");
 }
@@ -2559,7 +2559,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     r->_tempObject = nullptr;
                 }
                 if (ok) {
-                    shouldRestart = true;
+                    requestRestart("firmware update");
                     restartTimer = millis();
                 }
             },

@@ -103,6 +103,12 @@ extern unsigned long lastFlowPulseTime;
 // ============================================================================
 extern bool          rtcValid;
 extern bool          shouldRestart;
+/// Why the pending restart was asked for, written to the event log just before
+/// it happens. The first request wins; a char array for the same cross-task
+/// reason as the arrays above.
+extern char          g_restartCause[40];
+/// shouldRestart = true, with the cause for the event log.
+void requestRestart(const char* cause);
 extern unsigned long restartTimer;
 
 // ============================================================================

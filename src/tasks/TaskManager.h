@@ -50,7 +50,8 @@ public:
     static void shutdown();
 
     // Software watchdog (C4): returns false if any task is stuck (>30s no heartbeat)
-    static bool checkHealth();
+    /// `why` (optional) gets the failing task and how long it was silent.
+    static bool checkHealth(char* why = nullptr, size_t whyCap = 0);
 
     // Re-read platform_config.json and refresh the in-memory storageParam
     // fields that StorageTask polls every aggregation tick (currently SDS011
