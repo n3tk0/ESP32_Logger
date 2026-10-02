@@ -310,19 +310,29 @@ static String getMime(const String& path) {
 // driving the AsyncTCP worker OOM.
 //
 // The whole list is a JsonDocument before a byte is sent, and every entry
-// copies its name and path: ~110 B each, so 500 entries are ~55 KB plus the
-// serialised copy. A board with PSRAM has that; a C3 has ~40-80 KB free in
-// total and would panic mid-request. 150 keeps it near 16 KB there; the Files
-// page already says when a listing was cut short.
-#if LOGGER_PSRAM_AVAILABLE
+// copies its name and path: ~110 B each, plus the serialised copy, so 500
+// entries need ~100 KB. With PSRAM that is there. Without it the listing may
+// take half the free heap at request time — ~160 entries on a C3 with 80 KB
+// free, the full 500 on an S3 with its internal RAM free — and the Files page
+// says when a listing was cut short.
 static const size_t SCANDIR_MAX_ENTRIES = 500;
+static const size_t SCANDIR_ENTRY_BYTES = 250;   // DOM + serialised, rounded up
+static const size_t SCANDIR_MIN_ENTRIES = 50;
+
+static size_t scanDirCap() {
+#if LOGGER_PSRAM_AVAILABLE
+    return SCANDIR_MAX_ENTRIES;
 #else
-static const size_t SCANDIR_MAX_ENTRIES = 150;
+    const size_t byHeap = (size_t)ESP.getFreeHeap() / 2 / SCANDIR_ENTRY_BYTES;
+    if (byHeap < SCANDIR_MIN_ENTRIES) return SCANDIR_MIN_ENTRIES;
+    return byHeap < SCANDIR_MAX_ENTRIES ? byHeap : SCANDIR_MAX_ENTRIES;
 #endif
+}
 
 // Returns true if the scan was truncated because SCANDIR_MAX_ENTRIES was hit.
 static bool scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
                     const String& filter, bool recursive) {
+    const size_t cap = scanDirCap();
     std::vector<String> stack;
     stack.push_back(dir);
 
@@ -339,7 +349,7 @@ static bool scanDir(fs::FS& fs, const String& dir, JsonArray& arr,
         }
 
         while (File entry = d.openNextFile()) {
-            if (arr.size() >= SCANDIR_MAX_ENTRIES) {
+            if (arr.size() >= cap) {
                 entry.close();
                 d.close();
                 return true;   // truncated

@@ -1086,7 +1086,7 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         ring["bytes"]    = (uint32_t)webRingBuf.bytes();
 #if RING_COMPACT
         ring["compact"]   = true;
-        ring["key_drops"] = webRingBuf.keyDrops();
+        ring["key_evictions"] = webRingBuf.keyEvictions();
 #endif
         ring["psram"]    = webRingBuf.isPsram();
     }

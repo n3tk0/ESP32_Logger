@@ -117,9 +117,12 @@ constexpr size_t RING_SCAN_LIMIT_SERIES = 2048;
 // and rebuilds the full SensorReading on the way out. The API is the same;
 // only the storage changes. The C3's ~227 readings drop from 16 KB to ~5.5 KB.
 //
-// A table entry is reused once no reading in the ring refers to it. A reading
-// whose combination finds no room (more than RING_KEYS distinct metrics in
-// one window) is not stored and is counted in keyDrops().
+// A table entry is reused once no reading in the ring refers to it. When a new
+// combination finds the table full (more than RING_KEYS distinct metrics in
+// one window), the oldest readings are dropped until an entry frees: the new
+// metric always gets in and the history gets shorter, counted in
+// keyEvictions(). 48 covers about three remote nodes of twelve metrics plus
+// the local sensors before that starts.
 //
 // Override with -DRING_COMPACT=0/1; the host tests build both.
 // ---------------------------------------------------------------------------
@@ -191,7 +194,8 @@ public:
         if (capacity == 0) return false;
 
 #if RING_COMPACT
-        (void)preferPsram;
+        (void)preferPsram;   // compact is the no-PSRAM layout; see webRingBufInit
+        if (capacity > UINT16_MAX) capacity = UINT16_MAX;   // Key::refs
         // One block: the key table first (its size is a multiple of 4, so the
         // slots after it stay aligned), then the slots. Both are plain data.
         void* p = malloc(capacity * sizeof(Slot) + RING_KEYS * sizeof(Key));
@@ -241,8 +245,9 @@ public:
 #endif
     }
 
-    // Readings not stored because the key table was full (compact only).
-    uint32_t keyDrops() const { return _keyDrops; }
+    // Readings dropped early, oldest first, so a new metric could get a key
+    // table entry (compact only).
+    uint32_t keyEvictions() const { return _keyEvictions; }
 
     void push(const SensorReading& r) {
         if (!_cap) return;
@@ -261,8 +266,21 @@ public:
 #if RING_COMPACT
         // The slot being written holds the oldest reading once the ring is
         // full; that one is evicted, so its key loses a reference.
-        if (!_put(h % N, r, (h - _tail.load(std::memory_order_relaxed)) >= N))
-            return;                                               // 1
+        size_t t = _tail.load(std::memory_order_relaxed);
+        if (h - t >= N) _unref(t % N);
+        int k = _keyFor(r);
+        // Table full: drop the oldest readings until one of their keys frees,
+        // so a new metric always gets in (at the cost of the oldest history).
+        // The slot about to be written is never one of them: it is at h.
+        if (k < 0 && h - t >= N) t++;   // already released above
+        while (k < 0 && t < h) {
+            _unref(t % N);
+            _tail.store(++t, std::memory_order_release);
+            _keyEvictions++;
+            k = _keyFor(r);
+        }
+        if (k < 0) return;              // unreachable: an empty ring frees all
+        _write(h % N, r, k);                                      // 1
 #else
         _buf[h % N] = r;                                          // 1
 #endif
@@ -278,8 +296,7 @@ public:
         if (!_cap) return 0;
         const size_t N = _cap;
         size_t h      = _head.load(std::memory_order_acquire);
-        size_t t      = _tail.load(std::memory_order_relaxed);
-        size_t oldest = (h > N) ? (h - N) : t;
+        size_t oldest = _oldest(h);
 
         // Anchor the window to the NEWEST end of the ring.
         //
@@ -314,8 +331,7 @@ public:
         if (!_cap || (!count && (!out || maxOut == 0))) return 0;
         const size_t N = _cap;
         size_t h      = _head.load(std::memory_order_acquire);
-        size_t t      = _tail.load(std::memory_order_relaxed);
-        size_t oldest = (h > N) ? (h - N) : t;
+        size_t oldest = _oldest(h);
         size_t start  = oldest;
         if ((h - oldest) > maxScan) start = h - maxScan;
 
@@ -340,8 +356,7 @@ public:
         if (!_cap || !out || maxOut == 0) return 0;
         const size_t N = _cap;
         size_t h      = _head.load(std::memory_order_acquire);
-        size_t t      = _tail.load(std::memory_order_relaxed);
-        size_t oldest = (h > N) ? (h - N) : t;
+        size_t oldest = _oldest(h);
         size_t start  = oldest;
         if ((h - oldest) > maxScan) start = h - maxScan;
 
@@ -370,8 +385,7 @@ public:
         if (!_cap) return false;
         const size_t N = _cap;
         size_t h = _head.load(std::memory_order_acquire);
-        size_t t = _tail.load(std::memory_order_relaxed);
-        size_t start = (h > N) ? (h - N) : t;
+        size_t start = _oldest(h);
         // Bounded: see RING_SCAN_LIMIT_LAST. A metric older than this many
         // entries is reported as absent, which is what the freshness UI wants
         // anyway — and the bound exceeds the whole internal-budget ring, so
@@ -395,8 +409,7 @@ public:
         if (maxOut == 0 || !_cap) return 0;
         const size_t N = _cap;
         size_t h = _head.load(std::memory_order_acquire);
-        size_t t = _tail.load(std::memory_order_relaxed);
-        size_t start = (h > N) ? (h - N) : t;
+        size_t start = _oldest(h);
         // Bounded: see RING_SCAN_LIMIT_SERIES. Caps the cost when the metric
         // is absent; a sparkline simply comes back shorter.
         if ((h - start) > RING_SCAN_LIMIT_SERIES) start = h - RING_SCAN_LIMIT_SERIES;
@@ -461,23 +474,18 @@ private:
         out.quality = (SensorQuality)sl.quality;
     }
 
-    // Writes slot `s`. `evict`: it holds a live reading that is being dropped.
-    // False (and nothing written) when the key table has no room.
-    bool _put(size_t s, const SensorReading& r, bool evict) {
+    void _unref(size_t s) {
+        Key& k = _keys[_slots[s].key];
+        if (k.refs) k.refs--;
+    }
+
+    void _write(size_t s, const SensorReading& r, int k) {
         Slot& sl = _slots[s];
-        if (evict && _keys[sl.key].refs) _keys[sl.key].refs--;
-        const int k = _keyFor(r);
-        if (k < 0) {
-            if (evict) _keys[sl.key].refs++;   // the old reading stays
-            _keyDrops++;
-            return false;
-        }
         _keys[k].refs++;
         sl.ts      = r.timestamp;
         sl.value   = r.value;
         sl.key     = (uint8_t)k;
         sl.quality = (uint8_t)r.quality;
-        return true;
     }
 
     // The entry for r's strings: an existing one, else a free one filled in.
@@ -518,6 +526,14 @@ private:
     void _get(size_t s, SensorReading& out) const { out = _buf[s]; }
 #endif
 
+    // First readable index for a reader that loaded head `h`: the ring's
+    // whole span, or less when push() dropped readings early to free a key.
+    size_t _oldest(size_t h) const {
+        const size_t t = _tail.load(std::memory_order_acquire);
+        const size_t o = (h > _cap) ? (h - _cap) : 0;
+        return (t > o && t <= h) ? t : o;
+    }
+
     void _release() {
 #if RING_COMPACT
         // _slots lives in the same block as _keys.
@@ -530,7 +546,7 @@ private:
 #endif
         _cap      = 0;
         _inPsram  = false;
-        _keyDrops = 0;
+        _keyEvictions = 0;
         _head.store(0, std::memory_order_relaxed);
         _tail.store(0, std::memory_order_relaxed);
     }
@@ -545,7 +561,7 @@ private:
 #endif
     size_t         _cap     = 0;
     bool           _inPsram = false;
-    uint32_t       _keyDrops = 0;
+    uint32_t       _keyEvictions = 0;
     std::atomic<size_t> _head{0};
     std::atomic<size_t> _tail{0};
 };

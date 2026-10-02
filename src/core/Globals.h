@@ -38,7 +38,6 @@ extern bool   apModeTriggered;
 extern bool   wifiConnectedAsClient;
 extern bool   wifiFallbackToAP;
 extern bool   onlineLoggerMode;
-extern char   currentIPAddress[16];   // dotted IPv4
 extern char   connectedSSID[33];      // 32 + NUL, the 802.11 maximum
 
 // ============================================================================

@@ -24,7 +24,6 @@ bool   apModeTriggered      = false;
 bool   wifiConnectedAsClient = false;
 bool   wifiFallbackToAP     = false;
 bool   onlineLoggerMode     = false;
-char   currentIPAddress[16]  = "";
 char   connectedSSID[33]     = "";
 
 // ============================================================================
