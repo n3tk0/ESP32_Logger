@@ -717,12 +717,22 @@ with sync_playwright() as p:
         "clDateSz":"CL_DATE_SZ", "inRuleY":"IN_RULE_Y", "inLabY":"IN_LAB_Y",
         "rule2Y":"RULE2_Y", "grY":"GR_Y", "grH":"GR_H", "rule3Y":"RULE3_Y",
     }
+    # The sections, before the headline is fitted to what it reads: beside a
+    # humidity that keeps its 44 it comes out smaller than the file's 88, and
+    # the line under it comes up — kdFlowHeadFit(). An older collector sends
+    # no headline widths and draws the file's sizes.
     ordinary = pg.evaluate(
-        "(function(){var i=kdFlowInput(0x1FF);i.forecast=true;return kdFlowCompute(i);})()")
+        "(function(){var i=kdFlowInput(0x1FF);i.forecast=true;i.heroAdv=0;"
+        "return kdFlowCompute(i);})()")
     drift = ["%s=%s but %s=%s" % (k, ordinary[k], c, base.get(c))
              for k, c in KEYS.items() if ordinary[k] != base.get(c)]
     check(not drift, "the preview's ordinary page is the layout file's (%s)"
           % ("; ".join(drift) if drift else "all %d agree" % len(KEYS)))
+    fitted = pg.evaluate(
+        "(function(){var i=kdFlowInput(0x1FF);i.forecast=true;return kdFlowCompute(i);})()")
+    check(fitted["bigSz"] == 44 and fitted["bigSz"] < fitted["heroSz"] <= 88,
+          "and fitted, the value beside the headline keeps its 44 (%d, %d)"
+          % (fitted["heroSz"], fitted["bigSz"]))
 
     # It is a setting like any other: unsaved until Save, then read back.
     check(pg.is_visible("#kd-savebar"), "choosing a shape is an unsaved change")

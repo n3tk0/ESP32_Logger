@@ -409,7 +409,7 @@ function kdScaleG(v, g) { return kdQ(v * g + 500, 1000); }
 var KDF = {
   FOOT_Y:764, WEEK_H:88, FC_H:124, TOP_Y:20, CHART_ABOVE:26, CHART_BELOW:24,
   CHART_MIN:220, TOP_MIN:262, TOP_GROWN:386, COL_L:270, COL_R:252, CL_Y:26,
-  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6, FIG_SIZE:620, BIG_MIN:28, HERO_MIN:40, BIG_KEEP_PM:800,
+  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6, FIG_SIZE:620, BIG_MIN:28, HERO_MIN:40,
   GROW_MAX:1180, GROW_CLOCK:1146, GROW_BIG:1090, GROW_SUB:1120,
   LAND_FOOT_Y:564, LAND_X1:782, LAND_COL:300, LAND_SEP:328, LAND_CLOCK:840,
   LAND_ROW_W:77, IN_H:102, LAND_GROW_MIN:640, OL_PITCH:92
@@ -473,6 +473,16 @@ function kdFlowFirstInAdvance(metric, text, unit, arrow) {
                   kdFlowFieldAdvance(text, unit, arrow));
 }
 
+// The value beside the headline as it is sized: two figures, a sign where
+// the metric has one — kdFlowPairAdvance() in KindleFlow.h.
+function kdFlowPairAdvance(metric, text, unit, arrow) {
+  var p = String(text == null ? "" : text), neg = false, k = 0;
+  if (p[0] === "-" || p[0] === "+") { neg = p[0] === "-"; p = p.slice(1); }
+  while (k < p.length && p.charCodeAt(k) >= 48 && p.charCodeAt(k) <= 57) k++;
+  var sized = (neg || metric === "temperature" || metric === "dew_point") ? "-" : "";
+  return kdFlowFieldAdvance(sized + "00" + p.slice(k), unit, arrow);
+}
+
 // A value with its unit and arrow, each figure at KDF.FIG_SIZE — see
 // kdFlowFieldAdvance() in KindleFlow.h.
 function kdFlowFieldAdvance(text, unit, arrow) {
@@ -528,10 +538,14 @@ function kdFlowClockSizes(gc, f) {
 function kdFlowHeadFit(inp, f) {
   if (!inp.heroAdv) return;
   var hA = inp.heroAdv, bA = inp.bigAdv || 0, hero = f.heroSz, big = f.bigSz;
-  var keep = Math.max(KDF.BIG_MIN, kdQ(big * KDF.BIG_KEEP_PM, 1000));
+  var bS = bA ? (inp.bigFitAdv || bA) : 0, bW = Math.max(bA, bS);
   var room = f.colLW - (bA ? f.headGap + f.slashW : 0);
-  while (kdQ(hero * hA, 1000) + (bA ? kdQ(big * bA, 1000) : 0) > room) {
-    if (bA && big > keep) big--;
+  while (hero > KDF.HERO_MIN && kdQ(hero * hA, 1000) + kdQ(big * bS, 1000) > room) hero--;
+  while (bA && big > KDF.BIG_MIN && kdQ(hero * hA, 1000) + kdQ(big * bS, 1000) > room) big--;
+  var turn = false;
+  while (kdQ(hero * hA, 1000) + (bA ? kdQ(big * bW, 1000) : 0) > room) {
+    turn = !turn;
+    if (bA && big > KDF.BIG_MIN && (turn || hero <= KDF.HERO_MIN)) big--;
     else if (hero > KDF.HERO_MIN) hero--;
     else if (bA && big > KDF.BIG_MIN) big--;
     else break;
@@ -784,17 +798,20 @@ function kdFlowInput(show) {
     return firstIn ? kdFlowFirstInAdvance(z.metric, v, kdPvUnit(z), arrow)
                    : kdFlowWorstAdvance(z.metric, v, kdPvUnit(z), arrow);
   }
-  // The headline and the value beside it by what they print, as the
-  // collector measures them for kdFlowHeadFit().
-  function head(key) {
+  // The headline and the value beside it by what they print, and the value
+  // also by the two figures it is sized for, as the collector measures them
+  // for kdFlowHeadFit().
+  function head(key, sized) {
     var z = kdSlot(key), v = kdPvValue(z);
     if (v === "") return 0;
     var arrow = !!(z.flags & kdFlags.trend) && !!(show & 0x0004) && z.metric === "pressure";
-    return kdFlowFieldAdvance(v, kdPvUnit(z), arrow);
+    return sized ? kdFlowPairAdvance(z.metric, v, kdPvUnit(z), arrow)
+                 : kdFlowFieldAdvance(v, kdPvUnit(z), arrow);
   }
   var i, a;
   inp.heroAdv = head("hero");
   inp.bigAdv = (show & 0x0001) ? head("big") : 0;
+  inp.bigFitAdv = (show & 0x0001) ? head("big", true) : 0;
   if (show & 0x0002) {
     for (i = 1; i <= 6; i++) {
       if ((a = adv("g" + i))) { inp.grid.push("g" + i); inp.gridAdv.push(a); }
@@ -830,7 +847,10 @@ function kdPvBoxes(L) {
   if (L.land) return kdPvBoxesLand(L);
   var heroW = 136 + kdQ(g * 16, 180), bigX = 12 + heroW;
   b.hero  = [10, 12, heroW, L.subY - 16];
-  b.big   = [bigX, 40 + kdQ(g * 8, 180), 294 - bigX, 64 + kdQ(g * 16, 180)];
+  // Down to the line under the headline and no further: a headline sized
+  // for "-00.0°" is smaller, and that line comes up under it.
+  var bigY = 40 + kdQ(g * 8, 180);
+  b.big   = [bigX, bigY, 294 - bigX, Math.min(64 + kdQ(g * 16, 180), L.subY - 4 - bigY)];
   b.sub   = [10, L.subY - 2, 284, L.subSz + 7];
   var gy = L.subY + L.subSz + 7;
   b.grid  = [10, gy, 284, L.topBot - 8 - gy];

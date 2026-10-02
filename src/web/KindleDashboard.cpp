@@ -1276,13 +1276,14 @@ static uint16_t kdPlaceAdvance(const KindleConfig& skin, const KindleSlot& sl,
                               : kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow));
 }
 
-/// A headline value as it prints, with its unit and the arrow kdPlaceAdvance()
-/// counts.
+/// The value beside the headline as it prints, with its unit and the arrow
+/// kdPlaceAdvance() counts; `sized` for the two figures it is laid out for.
 static uint16_t kdHeadAdvance(const KindleConfig& skin, const KindleSlot& sl,
-                              const KdResolved& r) {
+                              const KdResolved& r, bool sized = false) {
     const bool arrow = (sl.flags & KSLOTF_TREND) && (skin.showFlags & KSHOW_TENDENCY) &&
                        strcmp(sl.metric, "pressure") == 0;
-    return (uint16_t)kdFlowFieldAdvance(r.text, r.unit, arrow);
+    return (uint16_t)(sized ? kdFlowPairAdvance(sl.metric, r.text, r.unit, arrow)
+                            : kdFlowFieldAdvance(r.text, r.unit, arrow));
 }
 
 /// Where everything goes on this render. ONE CALL, USED BY BOTH RENDERERS, for
@@ -1311,13 +1312,16 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     in.inColOk  = inCol;
     // The headline and the value beside it, so the flow can fit the two on
     // one line — as the page draws them: the second only when it is switched
-    // on and has a reading. BY WHAT THEY PRINT, not widened like the grid's:
-    // sized for "-00.0°" the ordinary "8.4° / 71%" would not fit its column,
-    // and the fit only ever takes size away from a line that is too wide.
+    // on and has a reading. The headline BY WHAT IT PRINTS; the second by
+    // that and by the two figures it is sized for (kdFlowPairAdvance()), so
+    // it keeps its size and the headline takes what is left — see
+    // kdFlowHeadFit().
     if (zones.z[KZ_HERO].used() && res[KZ_HERO].ok)
         in.heroAdv = kdHeadAdvance(skin, zones.z[KZ_HERO], res[KZ_HERO]);
-    if ((skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() && res[KZ_BIG].ok)
-        in.bigAdv = kdHeadAdvance(skin, zones.z[KZ_BIG], res[KZ_BIG]);
+    if ((skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() && res[KZ_BIG].ok) {
+        in.bigAdv    = kdHeadAdvance(skin, zones.z[KZ_BIG], res[KZ_BIG]);
+        in.bigFitAdv = kdHeadAdvance(skin, zones.z[KZ_BIG], res[KZ_BIG], true);
+    }
 
     uint8_t used[KZ_GRID_COUNT];
     const int n = (skin.showFlags & KSHOW_GRID) ? kdGridUsed(zones, visible, used) : 0;

@@ -687,14 +687,22 @@ the panel's bold faces have figures that wide, and a four-figure pressure
 sized by 0.5 was cut at its cell's right edge.
 
 The headline and the value beside it share one line in a 270 px column, and
-"23.5° / 1013 hPa" does not fit it at 88 and 44. When the two are too wide
-for the column, the value beside the headline gets smaller first, but only
-to eight tenths of its size (35 px, 38 on a grown page), near the indoor
-row's second values; then the headline itself, down to 40 px; and only then
-the value beside it again, down to 28 px. "21.7° / 37%" used to take the
-humidity to 28, and it could not be read. They are measured by what they print, so the
-ordinary "8.4° / 71%" keeps its 88 and 44, and a line that fits is never
-touched. The indoor row keeps the unshrunk headline size as its limit.
+"23.5° / 1013 hPa" does not fit it at 88 and 44. The value beside the
+headline keeps its size and the headline gives way. The value is sized for
+two figures, "00%", so "5%" and "37%" are one size: 44 on the ordinary page,
+48 as the page grows. The headline, by what it prints, takes what is left,
+down to 40: 77 for "21.7°", 67 for "-38.8°", and 88 for "8.4°", which fits
+as it is. Only a value wider than it was sized for ("100%" in fog) makes the
+two give way in turn, down to 28 for the value. The humidity used to give
+way first, and "21.7° / 37%" took it down to 28, where it could not be read.
+
+On the panel the unit, the slash and the second value go after the figures
+as the face actually draws them: the script reads the advances of 0-9, '.'
+and '-' out of both TrueType files (the clock's `clock_metrics()`), and only
+falls back to the collector's estimate — figures at 0.62 em, wider than any
+of the Kindle's faces — for a character it could not read.
+
+The indoor row keeps the unshrunk headline size as its limit.
 
 The indoor row, upright:
 

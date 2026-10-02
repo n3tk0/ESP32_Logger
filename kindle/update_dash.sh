@@ -1921,6 +1921,7 @@ font_setup() {
     font_metrics "$FONT_BOLD"; FONT_BOLD_SPAN="$FM_SPAN"; FONT_BOLD_ASC="$FM_ASC"
     # The clock is set in the bold — see clock_metrics().
     clock_metrics "$FONT_BOLD"
+    clock_metrics "$FONT_REG" RW
     [ "${TRACE:-0}" = "1" ] && \
         printf 'font clock widths: 0 %s 1 %s : %s\n' "${CW_0:-?}" "${CW_1:-?}" "${CW_c:-?}" >&2
     [ "${TRACE:-0}" = "1" ] && \
@@ -2008,14 +2009,16 @@ font_metrics() {
 # minute-by-minute clock costs no fork. clock_fit() then sets the time smaller
 # when it would not fit its rectangle, and centres it by its real width.
 #
-# Sets CW_<c> for each character (CW_c for ':') in thousandths of the em, or
-# leaves them all empty when the file cannot be read that far — the clock
-# then draws as it always has.
-CLOCK_CHARS="0 1 2 3 4 5 6 7 8 9 c a m p"
+# Sets CW_<c> for each character (CW_c for ':', CW_d for '.', CW_n for '-')
+# in thousandths of the em, or leaves them all empty when the file cannot be
+# read that far — the clock then draws as it always has. A second argument
+# names another prefix: the regular face is read into RW_ the same way, so
+# draw_field() can put a unit right after the figures FBInk actually drew.
+CLOCK_CHARS="0 1 2 3 4 5 6 7 8 9 c a m p d n"
 clock_metrics() {
-    # $1=font file
-    local f="$1" c n off sub seg i k code gid nhm start delta ro
-    for c in $CLOCK_CHARS; do eval "CW_$c="; done
+    # $1=font file  $2=prefix, CW by default
+    local f="$1" p="${2:-CW}" c n off sub seg i k code gid nhm start delta ro
+    for c in $CLOCK_CHARS; do eval "${p}_$c="; done
     [ -s "$f" ] || return 1
     command -v od >/dev/null 2>&1 || return 1
     set -- $(od -A n -t u1 -N 6 "$f" 2>/dev/null)
@@ -2080,6 +2083,7 @@ clock_metrics() {
     for c in $CLOCK_CHARS; do
         case "$c" in
             c) code=58 ;; a) code=97 ;; m) code=109 ;; p) code=112 ;;
+            d) code=46 ;; n) code=45 ;;
             *) code=$(( 48 + c )) ;;
         esac
         # The first segment whose last code is at or past this one.
@@ -2107,11 +2111,11 @@ clock_metrics() {
         [ "$gid" -ge "$nhm" ] && gid=$(( nhm - 1 ))
         set -- $(od -A n -t u1 -j $(( hmtx + gid * 4 )) -N 2 "$f" 2>/dev/null)
         [ $# -eq 2 ] || continue
-        eval "CW_$c=$(( ($1 * 256 + $2) * 1000 / upm ))"
+        eval "${p}_$c=$(( ($1 * 256 + $2) * 1000 / upm ))"
     done
     # Without the figures and the colon there is nothing to measure a time by.
     for c in 0 1 2 3 4 5 6 7 8 9 c; do
-        eval "[ -n \"\${CW_$c}\" ]" || { for c in $CLOCK_CHARS; do eval "CW_$c="; done; return 1; }
+        eval "[ -n \"\${${p}_$c}\" ]" || { for c in $CLOCK_CHARS; do eval "${p}_$c="; done; return 1; }
     done
     return 0
 }
@@ -2133,6 +2137,33 @@ clock_width() {
         [ -n "$w" ] || { CLOCK_W=0; return 1; }
         CLOCK_W=$(( CLOCK_W + w ))
     done
+    return 0
+}
+
+# How wide a reading's figures come out, in thousandths of the em, into
+# VAL_ADV: measured in the face it is drawn in ($1=1 the bold, else the
+# regular) when every character of $2 was read from that file, otherwise $3,
+# the collector's estimate. THE ESTIMATE IS SET WIDE on purpose — figures at
+# 0.62 em, so nothing is ever cut — and the unit drawn after it at that width
+# stood well clear of the number: "21.6   °", and the slash and the second
+# value pushed into the rule beside them.
+val_adv() {
+    # $1=bold $2=value $3=fallback advance
+    local s="$2" p=RW c w
+    [ "$1" = "1" ] && p=CW
+    VAL_ADV=0
+    while [ -n "$s" ]; do
+        c="${s%"${s#?}"}"; s="${s#?}"
+        case "$c" in
+            [0-9]) eval "w=\${${p}_$c}" ;;
+            .)     eval "w=\${${p}_d}" ;;
+            -)     eval "w=\${${p}_n}" ;;
+            *)     w="" ;;
+        esac
+        [ -n "$w" ] || { VAL_ADV="${3:-0}"; return 1; }
+        VAL_ADV=$(( VAL_ADV + w ))
+    done
+    [ "$VAL_ADV" -gt 0 ] || VAL_ADV="${3:-0}"
     return 0
 }
 
@@ -3722,7 +3753,8 @@ draw_field() {
     else
         draw_text_reg  "$x" "$y" "$sz" "$ink" "$val"
     fi
-    ux=$(( x + sz * vadv / 1000 ))
+    val_adv "$bold" "$val" "$vadv"
+    ux=$(( x + sz * VAL_ADV / 1000 ))
 
     if [ -n "$unit" ]; then
         # 42 % for a unit, 34 % for a degree — the page's .unit and .unit-d.
@@ -3765,9 +3797,10 @@ draw_field() {
 # centred field is centred on what is actually drawn.
 FIELD_W=0
 field_w() {
-    # $1=size $2=value $3=unit $4=arrow $5=value advance $6=unit advance
+    # $1=size $2=value $3=unit $4=arrow $5=value advance $6=unit advance $7=bold
     local sz="$1" usz
-    FIELD_W=$(( sz * ${5:-0} / 1000 ))
+    val_adv "${7:-0}" "$2" "${5:-0}"
+    FIELD_W=$(( sz * VAL_ADV / 1000 ))
     if [ -n "$3" ]; then
         if [ "$3" = "°" ]; then usz=$(( sz * 34 / 100 ))
         else                    usz=$(( sz * 42 / 100 ))
@@ -3937,7 +3970,7 @@ draw_zones() {
     # collector's; an older one sends none and both stay at the left edge.
     if [ -z "${Z_BIG_VALUE:-}" ]; then
         field_w "$hero_sz" "$Z_HERO_VALUE" "$Z_HERO_UNIT" "$Z_HERO_ARROW" \
-                "${Z_HERO_VADVW:-0}" "${Z_HERO_UADVW:-0}"
+                "${Z_HERO_VADVW:-0}" "${Z_HERO_UADVW:-0}" "${Z_HERO_BOLD:-0}"
         [ "${Z_HERO_VADVW:-0}" -gt 0 ] 2>/dev/null && \
             centre_in "$lx" "${COL_L_W:-270}" "$FIELD_W" && hx="$CENTRE_X"
         centre_in "$lx" "${COL_L_W:-270}" \
@@ -3954,7 +3987,16 @@ draw_zones() {
     # which makes "8.4°" five characters long.
     if [ -n "${Z_BIG_VALUE:-}" ]; then
         local big_sz="${BIG_SZ:-44}"
+        # As draw_field() drew it: the figures as wide as they came out and
+        # the unit at its own small size. Z_HERO_ADVW counted the degree at the
+        # headline's full size, which put the slash a long way after it; it is
+        # only what an older collector, with no Z_HERO_VADVW, leaves to go by.
         local hw=$(( hero_sz * ${Z_HERO_ADVW:-0} / 1000 ))
+        if [ "${Z_HERO_VADVW:-0}" -gt 0 ] 2>/dev/null; then
+            field_w "$hero_sz" "$Z_HERO_VALUE" "$Z_HERO_UNIT" "$Z_HERO_ARROW" \
+                    "$Z_HERO_VADVW" "${Z_HERO_UADVW:-0}" "${Z_HERO_BOLD:-0}"
+            hw="$FIELD_W"
+        fi
         local sx=$(( lx + hw + ${HEAD_GAP:-8} ))
         # The slash is always the regular face, the value may be bold: each
         # on the headline's baseline by its own face's numbers.
@@ -4003,7 +4045,7 @@ draw_zones() {
                 centre_in "$cx" "$gcw" "$(( ${GRID_LAB_SZ:-10} * ladv / 1000 ))"
                 lcx="$CENTRE_X"
                 if [ -n "$val" ] && [ "$vadv" -gt 0 ] 2>/dev/null; then
-                    field_w "$gvsz" "$val" "$unit" "$arrow" "$vadv" "$uadv"
+                    field_w "$gvsz" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$bold"
                     centre_in "$cx" "$gcw" "$FIELD_W"
                     vcx="$CENTRE_X"
                 fi
@@ -4077,7 +4119,7 @@ draw_zones() {
                 cx="$rx"; vsz="$big"; y="$big_y"
                 # Alone, it stands in the middle of the column.
                 if [ "$n" -eq 1 ] && [ -n "$val" ] && [ "$vadv" -gt 0 ] 2>/dev/null; then
-                    field_w "$big" "$val" "$unit" "$arrow" "$vadv" "$uadv"
+                    field_w "$big" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$bold"
                     centre_in "$rx" "$rw" "$FIELD_W"
                     cx="$CENTRE_X"
                 fi

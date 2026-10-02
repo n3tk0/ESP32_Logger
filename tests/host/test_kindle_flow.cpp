@@ -217,7 +217,7 @@ static void test_a_wide_reading_fits_its_column() {
     // Sized with room to spare for figures wider than kdAdvanceMille()'s.
     CHECK(P > kdAdvanceMille("0000") + (250u + kdAdvanceMille("hPa")) * 42u / 100u + 350u);
 
-    // The ordinary "8.4° / 71%" keeps the layout file's sizes.
+    // A short pair that fits as it is keeps the layout file's sizes.
     KdFlowIn ord = defaultPage();
     ord.heroAdv = (uint16_t)kdFlowFieldAdvance("8.4", "\xC2\xB0", false);
     ord.bigAdv  = (uint16_t)kdFlowFieldAdvance("71", "%", false);
@@ -235,18 +235,37 @@ static void test_a_wide_reading_fits_its_column() {
     KdFlowIn plain = defaultPage();
     CHECK_EQ(f.inValSz1, kdFlowCompute(plain).inValSz1);
 
-    // "21.7° / 37%": the value beside the headline keeps eight tenths of its
-    // size, near the indoor row's second values, and the headline gives way
-    // instead. It used to go down to 28 and could not be read.
-    KdFlowIn hum = defaultPage();
-    hum.heroAdv = (uint16_t)kdFlowFieldAdvance("21.7", "\xC2\xB0", false);
-    hum.bigAdv  = (uint16_t)kdFlowFieldAdvance("37", "%", false);
-    const KdFlow h = kdFlowCompute(hum);
-    CHECK(h.heroSz * (int)hum.heroAdv / 1000 + h.headGap + h.slashW
-          + h.bigSz * (int)hum.bigAdv / 1000 <= h.colLW);
-    CHECK_EQ(h.bigSz, 44 * KDF_BIG_KEEP_PM / 1000);
-    CHECK(h.bigSz + 4 >= h.inValSz);
-    CHECK(h.heroSz < 88 && h.heroSz > KDF_HERO_MIN);
+    // The humidity sized for two figures keeps the layout's 44 whatever it
+    // reads, and the headline, by what it prints, takes what is left: 77 for
+    // "21.7°", 67 for "-38.8°". It used to be the other way round, and the
+    // humidity went down to 28 and could not be read.
+    const char* temps[] = { "-38.8", "-0.4", "8.4", "21.7", "39.9" };
+    const char* hums[]  = { "5", "37", "99" };
+    for (const char* t : temps) for (const char* hu : hums) {
+        KdFlowIn k = defaultPage();
+        k.heroAdv   = (uint16_t)kdFlowFieldAdvance(t, "\xC2\xB0", false);
+        k.bigAdv    = (uint16_t)kdFlowFieldAdvance(hu, "%", false);
+        k.bigFitAdv = (uint16_t)kdFlowPairAdvance("humidity", hu, "%", false);
+        const KdFlow kf = kdFlowCompute(k);
+        CHECK_EQ(kf.bigSz, 44);
+        CHECK(kf.heroSz > kf.bigSz && kf.heroSz <= 88);
+        CHECK(kf.heroSz * (int)k.heroAdv / 1000 + kf.headGap + kf.slashW
+              + kf.bigSz * (int)k.bigFitAdv / 1000 <= kf.colLW);
+    }
+    KdFlowIn year = defaultPage();
+    year.heroAdv   = (uint16_t)kdFlowFieldAdvance("21.7", "\xC2\xB0", false);
+    year.bigAdv    = (uint16_t)kdFlowFieldAdvance("37", "%", false);
+    year.bigFitAdv = (uint16_t)kdFlowPairAdvance("humidity", "37", "%", false);
+    const KdFlow y = kdFlowCompute(year);
+    CHECK_EQ(y.heroSz, 77);
+    // "100%" is wider than it was sized for: both give a little, it fits.
+    KdFlowIn fog = year;
+    fog.bigAdv = (uint16_t)kdFlowFieldAdvance("100", "%", false);
+    const KdFlow fg = kdFlowCompute(fog);
+    CHECK(fg.heroSz * (int)fog.heroAdv / 1000 + fg.headGap + fg.slashW
+          + fg.bigSz * (int)fog.bigAdv / 1000 <= fg.colLW);
+    CHECK(fg.bigSz > KDF_BIG_MIN && fg.bigSz < y.bigSz);
+    CHECK(fg.heroSz > KDF_HERO_MIN && fg.heroSz < y.heroSz);
 
     // The headline alone, with the column to itself, stays as it was.
     KdFlowIn lone = defaultPage();

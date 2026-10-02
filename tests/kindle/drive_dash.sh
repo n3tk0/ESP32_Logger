@@ -3767,6 +3767,31 @@ check "$?" "  and the boxed one is centred by that width"
   CLOCK_STYLE=0 draw_clock "00:36"
   grep -q -- "px=$(px_of "$CL_SIZE")," "$FBINK_LOG" || exit 1 )
 check "$?" "  and a face it cannot read draws the clock as it always did"
+# THE UNIT GOES AFTER THE FIGURES AS DRAWN. The collector's estimate sets a
+# figure at 0.62 em so nothing is ever cut, and on the panel the degree stood
+# well clear of "21.6", with "/ 37 %" pushed into the rule beside it. With the
+# bold measured (figures 750 in this face) the '%' after "37" at 40 goes at
+# 2 x 750 = 1.5 em; a value with a character the face did not give ('.' is
+# not in it) keeps the collector's width.
+( reset_log
+  draw_field 100 50 40 1 "37" "%" "" 1240 800 BLACK
+  grep -q -- "left=$(( 100 + 40 * 1500 / 1000 ))," "$FBINK_LOG" || exit 1
+  reset_log
+  draw_field 100 50 40 1 "21.6" "°" "" 2120 330 BLACK
+  grep -q -- "left=$(( 100 + 40 * 2120 / 1000 ))," "$FBINK_LOG" || exit 2
+  field_w 40 "37" "%" "" 1240 800 1
+  [ "$FIELD_W" = $(( 40 * 1500 / 1000 + 40 * 42 / 100 * 800 / 1000 )) ] || exit 3 )
+check "$?" "a unit is set after the figures as the face draws them, not the estimate"
+( reset_log
+  Z_HERO_VALUE=37 Z_HERO_UNIT="°" Z_HERO_ARROW="" Z_HERO_BOLD=1 \
+  Z_HERO_VADVW=1240 Z_HERO_UADVW=330 Z_HERO_ADVW=1570 \
+  Z_BIG_VALUE=5 Z_BIG_UNIT="%" Z_BIG_BOLD=1 Z_BIG_VADVW=620 Z_BIG_UADVW=800 \
+  HERO_SZ=80 BIG_SZ=38 COL_L_X=18 HEAD_GAP=8 draw_zones
+  # The slash after "37" and its degree as drawn: 1.5 em, and the degree at
+  # 34 % of 80 — not Z_HERO_ADVW, which counted it at the headline's size.
+  hw=$(( 80 * 1500 / 1000 + 80 * 34 / 100 * 330 / 1000 ))
+  grep "	/	*$" "$FBINK_LOG" | grep -q -- "left=$(( 18 + hw + 8 ))," || exit 1 )
+check "$?" "  and the slash after the headline goes after its degree as drawn"
 clock_metrics /nonexistent
 load_kv "$DASH_TMP/data.txt" PAYLOAD
 
