@@ -44,7 +44,7 @@ static_assert(ForecastModule::OUTLOOK_N == KD_FC_COLS, "outlook columns");
 // how a forecast that is no longer being drawn goes on being remembered.
 static void kdForecastKeysEmpty(AsyncResponseStream* s) {
     s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_ICON=-1\nFC_HIGH=\nFC_LOW=\n"
-             "FC_WIND=\nFC_AGE=\"\"\n");
+             "FC_WIND=\nFC_AGE=\"\"\nFC_SUMMARY_ADVW=0\n");
     for (int i = 0; i < KD_FC_COLS; i++)
         s->printf("FC%d_LABEL=\"\"\nFC%d_LABELW=0\nFC%d_CODE=-1\nFC%d_ICON=-1\n"
                   "FC%d_TEMP=\nFC%d_TEMPW=0\nFC%d_LOW=\n", i, i, i, i, i, i, i);
@@ -1295,7 +1295,7 @@ static uint16_t kdHeadAdvance(const KindleConfig& skin, const KindleSlot& sl,
 /// headline has anything in it; `html` whether it is for the browser page.
 static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT],
                         bool standalone, bool haveSub, bool html, bool land,
-                        bool inCol) {
+                        bool inCol, bool wall) {
     const KindleZones& zones = kdSlots();
     bool visible[KZ_COUNT];
     kdZoneVisibility(res, visible);
@@ -1310,6 +1310,7 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     in.outPct   = (uint8_t)kdOutSizePct(skin);
     in.inPct    = (uint8_t)kdInSizePct(skin);
     in.inColOk  = inCol;
+    in.wall     = wall && !land;
     // The headline and the value beside it, so the flow can fit the two on
     // one line — as the page draws them: the second only when it is switched
     // on and has a reading. The headline BY WHAT IT PRINTS; the second by
@@ -1351,12 +1352,33 @@ struct KdRender {
 };
 
 /// `inCol`: the renderer knows the two-column indoor row — the browser page
-/// always, the FBInk panel when its request says ?col=1.
+/// always, the FBInk panel when its request says ?col=1. `wall`: the wall page,
+/// from kdWallFor().
 static void kdRenderBegin(KdRender& r, const KindleConfig& skin, uint32_t now,
-                          bool standalone, bool html, bool land, bool inCol = true) {
+                          bool standalone, bool html, bool land, bool inCol = true,
+                          bool wall = false) {
     kdResolveZones(skin, r.res);
     kdSubLine(r.sub, sizeof(r.sub), skin, r.res[KZ_HERO], now);
-    r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html, land, inCol);
+    r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html, land, inCol, wall);
+}
+
+/// Whether this render is the wall page (KPAGE_WALL): chosen for this
+/// renderer — `style` is KindleConfig::pageStyle for the FBInk panel and
+/// ::webStyle for the browser page, which are set apart — upright, and for a
+/// renderer that knows how to draw it: the browser page always, the panel
+/// when its script says ?wall=1. A script from before it gets the desk page it
+/// can draw, rather than keys it would drop.
+static bool kdWallFor(uint8_t style, uint8_t rot, bool knows) {
+    return style == KPAGE_WALL && !kdRotLandscape(rot) && knows;
+}
+
+/// The reader's choices as the wall page reads them, on the render's own copy:
+/// no chart and no week strip, whatever their switches say — the page has no
+/// room for either, and a line one pixel wide does not read across a room —
+/// and, unless the rules have been set, the heaviest black ones.
+static void kdWallSkin(KindleConfig& skin) {
+    skin.showFlags &= (uint16_t)~(KSHOW_CHART | KSHOW_WEEK);
+    if (!skin.rules) skin.rules = kdRulesPack(KRULE_THICK, KRULE_BLACK, KRULE_SOLID);
 }
 
 static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
@@ -1426,13 +1448,14 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         snprintf(key, sizeof(key), "Z_%s_ARROW", up);
         kdShellVar(s, key, res[i].arrow);
 
+        // Every value bold on the wall page, which is read from across a room.
         s->printf("Z_%s_BOLD=%d\n", up,
-                  (zones.z[i].flags & KSLOTF_BOLD) ? 1 : 0);
+                  ((zones.z[i].flags & KSLOTF_BOLD) || rd.flow.wall) ? 1 : 0);
         // The colour NAME, not the level: the shell hands it straight to
         // FBInk's -C, and translating a number there would be a second copy of
         // a mapping that already lives in KindleSlots.h.
         snprintf(key, sizeof(key), "Z_%s_INK", up);
-        kdShellVar(s, key, (i == KZ_BIG && bigDefaultInk)
+        kdShellVar(s, key, (i == KZ_BIG && bigDefaultInk && !rd.flow.wall)
                            ? "GRAY4" : kdInkFbink(zones.z[i].ink));
 
         // HOW WIDE THE PIECES COME OUT, in thousandths of the type size they
@@ -1557,6 +1580,25 @@ static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
     p += F("</div>");
 }
 
+/// One of the grid's rows: the cells from `at` of the `n` places in `used`,
+/// as many as the layout put on row `r`. Returns where the next row starts.
+static int appendGridRow(String& p, const KdRender& rd, const uint8_t* used, int n,
+                         int at, int r) {
+    const KindleZones& zones = kdSlots();
+    const int cols = rd.flow.gridRows[r];
+    p += F("<table class=\"grid\"><tr>");
+    for (int c = 0; c < cols && at < n; c++, at++) {
+        // A row of one is centred in the column, as the headline is.
+        p += (cols == 1) ? F("<td class=\"c1\" width=\"") : F("<td width=\"");
+        p += (int)(100 / cols);
+        p += F("%\">");
+        appendCell(p, rd.res[used[at]], zones.z[used[at]], "gv");
+        p += F("</td>");
+    }
+    p += F("</tr></table>");
+    return at;
+}
+
 /// The whole top of the page: the outdoor headline and grid on the left, the
 /// clock and the indoor row on the right.
 /// The outdoor group: its heading, the headline, the line under it, the grid.
@@ -1603,19 +1645,7 @@ static void appendOutdoor(String& p, const KindleConfig& skin, const KdRender& r
         const int n = kdGridUsed(zones, visible, used);
 
         int at = 0;
-        for (int r = 0; r < flow.gridNRows; r++) {
-            const int cols = flow.gridRows[r];
-            p += F("<table class=\"grid\"><tr>");
-            for (int c = 0; c < cols && at < n; c++, at++) {
-                // A row of one is centred in the column, as the headline is.
-                p += (cols == 1) ? F("<td class=\"c1\" width=\"") : F("<td width=\"");
-                p += (int)(100 / cols);
-                p += F("%\">");
-                appendCell(p, res[used[at]], zones.z[used[at]], "gv");
-                p += F("</td>");
-            }
-            p += F("</tr></table>");
-        }
+        for (int r = 0; r < flow.gridNRows; r++) at = appendGridRow(p, rd, used, n, at, r);
     }
 
 }
@@ -1773,9 +1803,11 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // the forecast keys, PAGE_MODE and the layout all have to agree on it.
     const bool standalone = kdStandaloneFor(req);
     const uint8_t rot = kdRotFor(req, skin.rotation);
+    const bool wall = kdWallFor(skin.pageStyle, rot, req->hasParam("wall"));
+    if (wall) kdWallSkin(skin);
     KdRender rd;
     kdRenderBegin(rd, skin, now, standalone, false, kdRotLandscape(rot),
-                  req->hasParam("col"));
+                  req->hasParam("col"), wall);
 
     AsyncResponseStream* s = req->beginResponseStream("text/plain");
 
@@ -2001,6 +2033,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     if (!standalone) {
         const auto& fc = forecastModule.snapshot();
         kdShellVar(s, "FC_SUMMARY", forecastSummary(fc));
+        // Its width, for the wall page, which sets it as large as its column
+        // allows — see draw_forecast_body().
+        kdShellUint(s, "FC_SUMMARY_ADVW", kdAdvanceMille(forecastSummary(fc)));
         kdShellInt(s, "FC_CODE", fc.code);
         // FC_ICON, NOT FC_CODE, IS WHAT THE PANEL DRAWS WITH. It has eleven BMP
         // files, one per range, and no way to reduce a code itself — so it looked
@@ -2453,6 +2488,219 @@ static void appendLandBody(String& p, const KindleConfig& skin, uint32_t now,
 #endif
 }
 
+// ---------------------------------------------------------------------------
+// The wall page — kdFlowWall()
+// ---------------------------------------------------------------------------
+/// Where a block on the wall page starts: the layout's design pixel, less the
+/// body's padding, which the box everything is placed in sits inside.
+static void kdWallAt(String& p, const char* cls, int x, int y, int w = 0) {
+    p += F("<div class=\"wa");
+    if (cls && *cls) { p += ' '; p += cls; }
+    p += F("\" style=\"left:");
+    p += kdPx(x - 18);
+    p += F("px;top:");
+    p += kdPx(y - 14);
+    p += F("px");
+    if (w > 0) { p += F(";width:"); p += kdPx(w); p += F("px"); }
+    p += F("\">");
+}
+
+/// A hairline of the wall page: across when `w`, down when `h`.
+static void kdWallRule(String& p, int x, int y, int w, int h) {
+    p += F("<div class=\"");
+    p += w ? F("wr") : F("wv");
+    p += F("\" style=\"left:");
+    p += kdPx(x - 18);
+    p += F("px;top:");
+    p += kdPx(y - 14);
+    p += F("px;");
+    p += w ? F("width:") : F("height:");
+    p += kdPx(w ? w : h);
+    p += F("px\"></div>");
+}
+
+#ifdef MODULE_FORECAST_ENABLED
+/// The forecast beside the clock: the icon and the condition word, the day's
+/// high and low under them, the wind and the age under that. The word is set
+/// as large as its column allows, up to the layout's size — "Променлива
+/// облачност" has to fit the width "Ясно" does.
+static void appendWallForecast(String& p, const KdFlow& f) {
+    const ForecastModule::Data d = forecastModule.snapshot();
+    if (!d.valid) return;
+    kdWallAt(p, "lab", f.labFcX, f.labFcY);
+    p += kdT("Forecast", "Прогноза");
+    p += F("</div>");
+    kdWallAt(p, "", f.fcIconX, f.fcIconY);
+    appendWeatherIcon(p, d.code, kdPx(52));
+    p += F("</div>");
+    const char* word = forecastSummary(d);
+    const unsigned adv = kdAdvanceMille(word);
+    int sz = f.fcTextSz;
+    if (adv) sz = kdfMax(12, kdfMin(sz, (int)(f.fcTextW * 1000u / adv)));
+    kdWallAt(p, "wfc", f.fcTextX, f.fcIconY + (52 - sz) / 2, f.fcTextW);
+    p += F("<span style=\"font-size:"); p += kdPx(sz); p += F("px\">");
+    p += word;
+    p += F("</span></div>");
+    if (isfinite(d.highC) && isfinite(d.lowC)) {
+        kdWallAt(p, "wfc fc-t", f.fcTempX, f.fcTempY);
+        p += (int)lroundf(d.highC);
+        p += F("&deg;/");
+        p += (int)lroundf(d.lowC);
+        p += F("&deg;</div>");
+    }
+    kdWallAt(p, "wfc wfw", f.fcWindX, f.fcWindY);
+    if (isfinite(d.windKph)) {
+        p += kdT("wind ", "вятър ");
+        p += (int)(d.windKph + 0.5f);
+        p += F(" km/h");
+    }
+    char age[16];
+    forecastAgeText(age, sizeof(age), d.fetchedAt, (uint32_t)time(nullptr));
+    if (age[0] != '\0') {
+        if (isfinite(d.windKph)) p += F(" &middot; ");
+        p += age;
+    }
+    p += F("</div>");
+}
+#endif
+
+/// The wall page, 600 x 800: every block where kdFlowWall() put it, in one
+/// box the height of the page down to the footer.
+static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
+                           const KdRender& rd) {
+    const KdFlow& f = rd.flow;
+    const KdResolved* res = rd.res;
+    const KindleZones& zones = kdSlots();
+    bool visible[KZ_COUNT];
+    kdZoneVisibility(res, visible);
+
+    p += F("<div class=\"wl\" style=\"height:");
+    p += kdPx(f.footY - 14);
+    p += F("px\">");
+
+    // ── The headline, across the page ──
+    kdWallAt(p, "lab", f.colLX, f.groupY, f.headW);
+    appendEscaped(p, kdGroupOutLabel(zones));
+    if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive())
+        appendBatteryBadge(p);
+    p += F("</div>");
+    const bool big = (skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() &&
+                     res[KZ_BIG].ok;
+    kdWallAt(p, big ? "head" : "head ctr", f.colLX, f.heroY, f.headW);
+    appendValue(p, res[KZ_HERO], zones.z[KZ_HERO], "v1");
+    if (big) {
+        p += F("<span class=\"slash\">/</span>");
+        appendValue(p, res[KZ_BIG], zones.z[KZ_BIG], "v2");
+    }
+    p += F("</div>");
+    if (rd.sub[0]) {
+        kdWallAt(p, big ? "sub" : "sub ctr", f.colLX, f.subY, f.headW);
+        appendEscaped(p, rd.sub);
+        p += F("</div>");
+    }
+    kdWallRule(p, 18, f.headRuleY, 564, 0);
+
+    // ── The grid, on the left ──
+    if (f.gridNRows) {
+        uint8_t used[KZ_GRID_COUNT];
+        const int n = kdGridUsed(zones, visible, used);
+        int at = 0;
+        for (int r = 0; r < f.gridNRows; r++) {
+            kdWallAt(p, "", f.colLX, f.gridY + r * f.gridRowH, f.colLW);
+            at = appendGridRow(p, rd, used, n, at, r);
+            p += F("</div>");
+        }
+    }
+    if (f.sepH > 0) kdWallRule(p, f.sepX, f.sepY, 0, f.sepH);
+
+    // ── The indoor readings, one under the other — or across the page under
+    // the grid, each in an equal cell with its caption on the heading's line ──
+    if (f.inValSz1 && f.inHrow) {
+        uint8_t used[KZ_INDOOR_COUNT];
+        const int n = kdIndoorUsed(zones, visible, used);
+        const int m = n < 3 ? n : 3;
+        const int cw = m ? f.inW / m : f.inW;
+        kdWallRule(p, 18, f.inRuleY, 564, 0);
+        for (int i = 0; i < m; i++) {
+            const KdResolved& r = res[used[i]];
+            const KindleSlot& sl = zones.z[used[i]];
+            const int x = f.inX + i * cw;
+            kdWallAt(p, "lab", x, f.inLabY, cw);
+            if (i == 0) appendEscaped(p, kdGroupInLabel(zones));
+            else        appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
+            p += F("</div>");
+            kdWallAt(p, "cv", x, f.inValY, cw);
+            appendValue(p, r, sl, "iv");
+            p += F("</div>");
+        }
+    } else if (f.inValSz1) {
+        uint8_t used[KZ_INDOOR_COUNT];
+        const int n = kdIndoorUsed(zones, visible, used);
+        kdWallAt(p, "lab", f.inX, f.inLabY, f.inW);
+        appendEscaped(p, kdGroupInLabel(zones));
+        p += F("</div>");
+        for (int i = 0; i < n && i < 3; i++) {
+            const int y = i == 0 ? f.inValY : (i == 1 ? f.inVal2Y : f.inVal3Y);
+            const KdResolved& r = res[used[i]];
+            const KindleSlot& sl = zones.z[used[i]];
+            if (i) {
+                kdWallAt(p, "lab", f.inX, y - f.labSz - 4, f.inW);
+                appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
+                p += F("</div>");
+            }
+            kdWallAt(p, "cv", f.inX, y, f.inW);
+            appendValue(p, r, sl, i == 0 ? "iv iv-1" : "iv");
+            p += F("</div>");
+        }
+    }
+
+    // ── The band at the foot: the clock, and the forecast beside it ──
+    if (f.rule3Y < f.footY) {
+        kdWallRule(p, 18, f.rule3Y, 564, 0);
+        if (f.clock) {
+            // Alone it is centred in the band, beside the forecast it starts
+            // at the margin — see kdFlowWall().
+            const bool alone = f.sep2H == 0;
+            kdWallAt(p, alone ? "wclk ctr" : "wclk", 18, f.clY, alone ? 564 : f.clW);
+            appendClock(p, skin, now);
+            p += F("</div>");
+        }
+        if (f.sep2H > 0) kdWallRule(p, f.sep2X, f.sep2Y, 0, f.sep2H);
+#ifdef MODULE_FORECAST_ENABLED
+        if (f.forecast) appendWallForecast(p, f);
+#endif
+    }
+    p += F("</div>");
+}
+
+/// The wall page's own rules, after the layout's: every block placed where
+/// kdFlowWall() put it, the captions and the line under the headline in black
+/// rather than grey, every value bold, and the hairlines at the rules' setting
+/// — which kdWallSkin() has made the heaviest black unless it was chosen.
+static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
+    static const char* const style[3] = {"solid", "dashed", "dotted"};
+    const int w = kdPx(kdRulePx(skin));
+    const char* st  = style[kdRuleStyle(skin) % 3];
+    const char* ink = kdRuleCss(kdRuleInk(skin), false);
+    p += F(".wl{position:relative;width:"); p += kdPx(564); p += F("px}");
+    p += F(".wa{position:absolute;white-space:nowrap;overflow:hidden}");
+    p += F(".wl .lab,.wl .head,.wl .sub,.wl .cv,.wfc{line-height:1;margin:0}");
+    p += F(".wl .lab,.wl .sub{color:#000}");
+    p += F(".wl .grid{margin-top:0}.wl .grid td{height:auto;vertical-align:top}");
+    p += F(".wl .grid .lab{margin-bottom:"); p += kdPx(4); p += F("px}");
+    p += F(".wl .v1,.wl .v2,.wl .gv,.wl .iv{font-weight:700}");
+    // The second value black like the first — and the inks a place was given
+    // after it, so they still win.
+    p += F(".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}");
+    p += F(".wr{position:absolute;height:0;border-top:"); p += w; p += F("px ");
+    p += st; p += ' '; p += ink; p += '}';
+    p += F(".wv{position:absolute;width:0;border-left:"); p += w; p += F("px ");
+    p += st; p += ' '; p += ink; p += '}';
+    p += F(".wl .fc-t{font-weight:700;margin:0;font-size:"); p += kdPx(f.fcTempSz); p += F("px}");
+    p += F(".wfw{color:#444;font-size:"); p += kdPx(f.fcWindSz); p += F("px}");
+    p += F(".foot{margin-top:0}");
+}
+
 /// The page turned a quarter or a half: drawn upright in a box the size of
 /// the turned page, and the box rotated onto the screen about its top-left
 /// corner and moved back into view. -webkit- first, for the reader's old
@@ -2522,8 +2770,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // The places and where everything goes, once for the whole page: the
     // stylesheet's sizes and the markup's rows have to come from one answer.
     const uint8_t rot = kdRotFor(req, kdPageRot(skin));
+    const bool wall = kdWallFor(skin.webStyle, rot, true);
+    if (wall) kdWallSkin(skin);
     KdRender rd;
-    kdRenderBegin(rd, skin, now, kdStandalone(), true, kdRotLandscape(rot));
+    kdRenderBegin(rd, skin, now, kdStandalone(), true, kdRotLandscape(rot), true, wall);
     rd.chartFine = chartFine;
 
     String p;
@@ -2635,10 +2885,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S("px}")
     KD_S(".v1{font-size:")                    KD_N(88)
     KD_S("px}")
-    KD_S(".v2{font-size:")                    KD_N(44)
+    KD_S(".v2{font-size:")                    KD_N(52)
     KD_S("px;color:#444;letter-spacing:")     KD_N(-1)
     KD_S("px}")
-    KD_S(".slash{font-size:")                 KD_N(44)
+    KD_S(".slash{font-size:")                 KD_N(52)
     KD_S("px;color:#aaa;letter-spacing:0;padding:0 ") KD_N(7)
     KD_S("px;position:relative;top:")         KD_N(-5)
     KD_S("px}")
@@ -2896,9 +3146,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S("px}")
     KD_S(".sa .v1{font-size:")                KD_N(104)
     KD_S("px}")
-    KD_S(".sa .v2{font-size:")                KD_N(48)
+    KD_S(".sa .v2{font-size:")                KD_N(57)
     KD_S("px}")
-    KD_S(".sa .slash{font-size:")             KD_N(48)
+    KD_S(".sa .slash{font-size:")             KD_N(57)
     KD_S("px;padding:0 ")                     KD_N(8)
     KD_S("px;top:")                           KD_N(-6)
     KD_S("px}")
@@ -2936,6 +3186,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // KindleFlow.h worked out. After the clock style, because the clock's size
     // is one of the things it decides.
     kdFlowCss(p, rd.flow, skin.clockStyle, [](int v) { return kdPx(v); });
+    if (rd.flow.wall) kdWallCss(p, skin, rd.flow);
 
     kdRotCss(p, rot);
 
@@ -2951,7 +3202,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // and the box is rotated onto the screen — see kdRotCss().
     if (rot != KROT_0) p += F("<div class=\"rot\">");
 
-    if (rd.flow.land) {
+    if (rd.flow.wall) {
+        appendWallBody(p, skin, now, rd);
+    } else if (rd.flow.land) {
         appendLandBody(p, skin, now, rd, tOut, tIn, haveOut, haveIn);
     } else {
         // No masthead. The place name never changed and the date is carried by the

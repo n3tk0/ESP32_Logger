@@ -689,10 +689,10 @@ sized by 0.5 was cut at its cell's right edge.
 The headline and the value beside it share one line in a 270 px column, and
 "23.5° / 1013 hPa" does not fit it at 88 and 44. The value beside the
 headline keeps its size and the headline gives way. The value is sized for
-two figures, "00%", so "5%" and "37%" are one size: 44 on the ordinary page,
-48 as the page grows. The headline, by what it prints, takes what is left,
-down to 40: 77 for "21.7°", 67 for "-38.8°", and 88 for "8.4°", which fits
-as it is. Only a value wider than it was sized for ("100%" in fog) makes the
+two figures, "00%", so "5%" and "37%" are one size: 52 on the ordinary page,
+57 as the page grows (it was 44 and 48, and read as a footnote from across a
+room). The headline, by what it prints, takes what is left, down to 40: 71
+for "21.7°", 62 for "-38.8°", and 88 for "8.4°", which fits as it is. Only a value wider than it was sized for ("100%" in fog) makes the
 two give way in turn, down to 28 for the value. The humidity used to give
 way first, and "21.7° / 37%" took it down to 28, where it could not be read.
 
@@ -771,6 +771,50 @@ coordinates: `/kindle/data` sends `RES_W`/`RES_H` swapped, `PAGE_ROT`, and the
 landscape page's x positions as `LY_*` keys as well as its heights; the chart
 image is fetched as `/kindle/graph.bmp?h=H&w=W`. The reader can override the
 collector with `ROTATE=` in `dash.conf`, sent as `?rot=`.
+
+### Read from a wall: the wall page
+
+The desk page's headline shares a 270 px column with the clock's, so it
+cannot pass about 77 px whatever is switched off: a section that gives its
+height back gives it to the chart, or to air. **Read from** draws a page that
+spends the width instead, laid out by `kdFlowWall()`. The FBInk panel and the
+browser page are set apart, as their rotations are: `page_style` and
+`web_style` in `/api/kindle/config`, each 0 for a desk (the default, and what
+an older config holds) or 1 for a wall.
+
+| row | what is in it |
+|---|---|
+| top | the outdoor headline and the value beside it across the whole page, up to 160 and 96 px, and the line under them |
+| middle | the grid on the left, 352 px; the indoor readings one under the other on the right, the first with no caption, the others at seven tenths of it. Or the grid across the page and the indoor readings on one line under it (below) |
+| band | the clock (124 px), and beside it the forecast: icon and condition, the day's high and low, wind and age. Either alone has the band to itself |
+| footer | as on the desk page |
+
+**Or the indoor readings across the page, under the grid.** Four outdoor
+readings beside the indoor column come out at about 47 px: "1010 hPa" and
+"14 µg/m³" are too wide to go two to a 352 px row, and four rows are too
+short. So `kdFlowWallRow()` also tries the grid across the whole width with the
+indoor three on one line under it, ruled off, each at one size in an equal
+cell with its caption on the heading's line, and keeps whichever arrangement
+sets the smallest reading on the page larger. With pressure, dew point, PM2.5
+and PM10 outside and temperature, humidity and AQI inside, that is every one
+of the seven at 66 px rather than 47 to 81; with the default two places it is
+76 to 81 rather than 56 to 95. The panel gets `IN_HROW=1`.
+
+The headline's row is as tall as the largest headline, whatever this one
+came out at, and the headline stands on its foot, so a reading that gains a
+figure does not move everything under it. The chart and the week strip are
+not drawn, whatever their switches say: a line one pixel wide does not read
+at three metres, and the room they took is the room the readings want. The
+captions and the line under the headline are black, every value is bold,
+the value beside the headline is black rather than #444, and the rules are
+the heaviest black ones unless they have been set.
+
+Upright only: turned to 90° or 270°, the page is the desk one on its side.
+The FBInk script asks for it with `?wall=1`, and only a script that does gets
+it (`WALL=1`, `HEAD_W`, `HEAD_RULE_Y`, `IN_VCOL`, `IN_HROW`, `SEP_Y`, `SEP2_*`, and the
+forecast's `FC_*_X`, `FC_*_SZ` and `FC_TEXT_W` as `LY_*` keys); an older
+script keeps drawing the desk page. Its clock is inside the forecast's
+rectangle, so the forecast tier draws it again.
 
 ## Appearance
 

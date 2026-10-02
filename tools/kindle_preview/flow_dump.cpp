@@ -9,6 +9,7 @@
 //
 //   g++ -std=gnu++17 -I. tools/kindle_preview/flow_dump.cpp -o flow_dump
 //   ./flow_dump kv   chart=1 fc=0 week=1 sub=1 grid=3135,2202 in=2202,1836 res=600
+//   ./flow_dump kv   wall=1 ...                  (the wall page, kdFlowWall())
 //   ./flow_dump css  ... clock=2 pagew=600 html=1
 //   ./flow_dump json ...
 //   ./flow_dump adv  'pressure:1008:hPa:1;dew_point:-3.1:°'
@@ -120,6 +121,7 @@ int main(int argc, char** argv) {
         else if (k == "sub")   in.sub      = atoi(v) != 0;
         else if (k == "clk")   in.clock    = atoi(v) != 0;
         else if (k == "land")  in.land     = atoi(v) != 0;
+        else if (k == "wall")  in.wall     = atoi(v) != 0;
         else if (k == "grid")  in.nGrid    = (uint8_t)parseList(v, in.gridAdv, 6);
         else if (k == "in")    in.nIn      = (uint8_t)parseList(v, in.inAdv, 3);
         else if (k == "gridp") in.nGrid    = (uint8_t)parsePlaces(v, in.gridAdv, 6);
@@ -192,6 +194,15 @@ int main(int argc, char** argv) {
                "\"battY\":%d",
                f.olX[0], f.olX[1], f.olX[2], f.olX[3], f.olX[4], f.wkX, f.wkY, f.wkCellW,
                f.wkHdgY, f.wkRule ? "true" : "false", f.footY, f.statX, f.battX, f.battY);
+        printf(",\"wall\":%s,\"headW\":%d,\"headRuleY\":%d,\"inVcol\":%s,\"inHrow\":%s,\"sep2X\":%d,"
+               "\"sep2Y\":%d,\"sep2H\":%d,\"labFcX\":%d,\"labFcY\":%d,\"fcIconX\":%d,"
+               "\"fcIconY\":%d,\"fcTextX\":%d,\"fcTextY\":%d,\"fcTextW\":%d,\"fcTextSz\":%d,"
+               "\"fcTempX\":%d,\"fcTempY\":%d,\"fcTempSz\":%d,\"fcWindX\":%d,\"fcWindY\":%d,"
+               "\"fcWindSz\":%d",
+               f.wall ? "true" : "false", f.headW, f.headRuleY, f.inVcol ? "true" : "false", f.inHrow ? "true" : "false",
+               f.sep2X, f.sep2Y, f.sep2H, f.labFcX, f.labFcY, f.fcIconX, f.fcIconY,
+               f.fcTextX, f.fcTextY, f.fcTextW, f.fcTextSz, f.fcTempX, f.fcTempY,
+               f.fcTempSz, f.fcWindX, f.fcWindY, f.fcWindSz);
         printf("}\n");
         return 0;
     }

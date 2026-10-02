@@ -1331,6 +1331,37 @@ check "$?" "two readings the layout stacks are drawn one under the other, centre
   exit 0 )
 check "$?" "three indoor readings are two columns, one alone is centred"
 
+# THE WALL PAGE WITH FOUR OUTDOOR PLACES: the indoor readings across the page
+# under the grid (IN_HROW), the three at one size and one top, in equal cells.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0 \
+      gridp='pressure:1010:hPa:1;dew_point:6.7:°;pm25:6:µg/m³;pm10:14:µg/m³'
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "${WALL:-0}" = "1" ] || exit 1
+  [ "${IN_HROW:-0}" = "1" ] || { echo "IN_HROW [$IN_HROW]" >&2; exit 2; }
+  [ "$IN_VAL_SZ" = "$IN_VAL_SZ_1" ] || exit 3
+  [ "$COL_R_X" = "18" ] && [ "$COL_R_W" = "564" ] || exit 4
+  reset_log
+  draw_zones >/dev/null 2>&1
+  px=$(px_of "$IN_VAL_SZ")
+  tops=""; lefts=""
+  for v in "$Z_ITEMP_VALUE" "$Z_IHUM_VALUE" "$Z_IAQI_VALUE"; do
+    at=$(grep -- "px=$px,left=" "$FBINK_LOG" | grep -e "--${T}${v}${T}" | head -1 |
+         sed 's/.*left=\([0-9]*\),top=\([0-9]*\).*/\1 \2/')
+    set -- $at
+    [ $# -eq 2 ] || { echo "indoor value $v not drawn at $px" >&2; exit 5; }
+    lefts="$lefts $1"; tops="$tops $2"
+  done
+  set -- $tops
+  [ "$1" = "$2" ] && [ "$2" = "$3" ] || { echo "not one line: $tops" >&2; exit 6; }
+  [ "$1" -gt "$GRID_Y" ] || exit 7
+  set -- $lefts
+  [ "$1" = "18" ] && [ "$2" = "206" ] && [ "$3" = "394" ] || { echo "cells: $lefts" >&2; exit 8; }
+  exit 0 )
+check "$?" "the wall page with four outdoor places: the indoor readings on one line under the grid"
+
 # Old script, new collector: the file's own GRID_ROWS is still sent for it.
 grep -q 'GRID_ROWS=' "$FIXTURE"
 check "$?" "the fixture still carries the file-page GRID_ROWS older scripts read"
@@ -1347,7 +1378,7 @@ check "$?" "the fixture still carries the file-page GRID_ROWS older scripts read
   fetch_data >/dev/null 2>&1
   # And which version of the scripts asks: the repository's kindle/ has no
   # VERSION file, which is a folder copied from a checkout — "none".
-  grep -q "/kindle/data?shape=standalone&col=1&pkg=none$" "$WORK/wget.log" || exit 2
+  grep -q "/kindle/data?shape=standalone&col=1&wall=1&pkg=none$" "$WORK/wget.log" || exit 2
   exit 0 )
 check "$?" "the chart is fetched at the layout's height, the data for the chosen page"
 LAYOUT=auto; unset PAGE_MODE; RES_W=600; RES_H=800
@@ -2730,7 +2761,7 @@ if [ -n "$PKG_GOOD" ]; then
       # ...and the refusal rides along on the next fetch.
       DASH_DIR="$KDIR"; DASH_VER=""
       fetch_data >/dev/null 2>&1
-      grep -q '/kindle/data?col=1&pkg=none&pkgerr=md5&pkgfor=0123456789abcdef0123456789abcdef$' \
+      grep -q '/kindle/data?col=1&wall=1&pkg=none&pkgerr=md5&pkgfor=0123456789abcdef0123456789abcdef$' \
           "$WORK/wget.log" || exit 7
       exit 0 )
     check "$?" "a package whose MD5 is not the offer's changes nothing, is reported, and is not retried"

@@ -268,6 +268,17 @@ constexpr uint8_t KLAYOUT_AUTO       = 0;   // standalone when there is no forec
 constexpr uint8_t KLAYOUT_NORMAL     = 1;   // always keep the forecast band
 constexpr uint8_t KLAYOUT_STANDALONE = 2;   // always the tall-readings page
 
+// What the page is read from: a desk beside it, or across a room. KindleConfig
+// ::pageStyle. The wall page (KindleFlow.h, kdFlowWall()) puts the outdoor
+// headline across the whole width, the grid and the indoor readings in two
+// columns under it and the clock beside the forecast at the foot, and drops
+// the chart and the week strip: what is left is set as large as it fits.
+// Upright only; turned, the page is the desk one on its side.
+//
+// DESK IS 0, an older config's reserved byte: the page as it was.
+constexpr uint8_t KPAGE_DESK = 0;
+constexpr uint8_t KPAGE_WALL = 1;
+
 // Which reader the browser page at /kindle is laid out for, when its address
 // does not say (?scr=WxH). The table of sizes is kdDevice() in KindleSkin.h.
 //
@@ -500,7 +511,13 @@ struct KindleConfig {
     // CSS px the reader's browser keeps for its own bar above the page, taken
     // off the screen's height before the page is fitted to it. 0 = none.
     uint8_t  browserBar;
-    uint8_t  reserved[14];
+    // KPAGE_*: the desk page or the wall page — the FBInk panel's, and the
+    // browser page's at /kindle on its own, as the two rotations are.
+    // Formerly reserved[0] and [1]; 0, the desk page, is what an older config
+    // holds there.
+    uint8_t  pageStyle;
+    uint8_t  webStyle;
+    uint8_t  reserved[12];
 };
 
 struct DeviceConfig {
