@@ -156,7 +156,7 @@ address (e.g. BME280 supports `0x76` or `0x77`).
 | Type id | Name | Interface | Metrics |
 |---|---|---|---|
 | `bme280` | BME280/BMP280 | I2C (`sda`, `scl`, `address`) | temperature, humidity, pressure |
-| `bme688` | BME688/680 | I2C (`sda`, `scl`, `address`) | temperature, humidity, pressure, gas_resistance |
+| `bme688` | BME688/680 | I2C (`sda`, `scl`, `address`) | temperature, humidity, pressure, gas_resistance, iaq, tvoc_est (estimate), dew_point |
 | `ds18b20` | DS18B20 | 1-Wire (`pin`) | temperature (×N probes on bus) |
 | `sds011` | SDS011 | UART (`uart_rx`, `uart_tx`) | pm25, pm10 |
 | `pms5003` | PMS5003 | UART (`uart_rx`, `uart_tx`) | pm1, pm25, pm10 |

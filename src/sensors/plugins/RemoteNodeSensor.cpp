@@ -97,8 +97,8 @@ void RemoteNodeSensor::_calibrate(SensorReading* out, int n) const {
 
 int RemoteNodeSensor::_derive(SensorReading* out, int n, int maxOut,
                               float rawTemp, float rawGas) {
-    // dew_point and iaq, as the collector's own BME280/BME688 plugins publish
-    // them, worked out here from what the node sent rather than sent by it:
+    // dew_point, iaq and tvoc_est, as the collector's own BME280/BME688
+    // plugins publish them, worked out here from what the node sent rather than sent by it:
     // they cost the node, the radio and the node's metric budget nothing, and
     // the formula is the one a wired sensor uses. A node that does send its
     // own is left alone.
@@ -126,17 +126,31 @@ int RemoteNodeSensor::_derive(SensorReading* out, int n, int maxOut,
     // the same gas value back on every tick until the node sends a new one,
     // so only a new one (another time or another value) is folded in. A
     // repeat gets the index that reading produced.
+    bool haveIaq = false;
     if (g >= 0 && h >= 0 && n < maxOut && findMetric(out, n, "iaq") < 0 && isfinite(rawGas)) {
         if (!_iaqValid || out[g].timestamp != _iaqTs || rawGas != _iaqGas) {
             _iaqLast  = _iaq.update(out[h].value, rawGas);
+            _tvocLast = _iaq.tvocPpb(rawGas);
             _iaqTs    = out[g].timestamp;
             _iaqGas   = rawGas;
             _iaqValid = true;
         }
+        haveIaq = true;
         SensorReading& r = out[n++];
         r = SensorReading();
         strncpy(r.metric, "iaq", sizeof(r.metric) - 1);
         r.value     = _iaqLast;
+        r.timestamp = out[g].timestamp;
+        r.quality   = out[g].quality;
+    }
+    // The TVOC estimate rides on the same baseline, so it comes and goes with
+    // iaq (above) rather than on its own.
+    if (haveIaq && n < maxOut && findMetric(out, n, "tvoc_est") < 0 && isfinite(_tvocLast)) {
+        SensorReading& r = out[n++];
+        r = SensorReading();
+        strncpy(r.metric, "tvoc_est", sizeof(r.metric) - 1);
+        strncpy(r.unit, "ppb", sizeof(r.unit) - 1);
+        r.value     = _tvocLast;
         r.timestamp = out[g].timestamp;
         r.quality   = out[g].quality;
     }

@@ -165,7 +165,8 @@ static const char* _haDeviceClass(const char* metric) {
     if (strstr(metric, "humidity"))     return "humidity";
     if (strstr(metric, "pressure"))     return "atmospheric_pressure";
     if (strstr(metric, "co2"))          return "carbon_dioxide";
-    if (strstr(metric, "tvoc"))         return "volatile_organic_compounds";
+    // Every TVOC metric here is in ppb; the plain class is µg/m³ only.
+    if (strstr(metric, "tvoc"))         return "volatile_organic_compounds_parts";
     if (strstr(metric, "lux"))          return "illuminance";
     if (strstr(metric, "pm25"))         return "pm25";
     if (strstr(metric, "pm10"))         return "pm10";
