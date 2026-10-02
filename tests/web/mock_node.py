@@ -75,7 +75,7 @@ CAPS_WIFI = {
     ],
     "forbidden_pins": [6, 7, 8, 9, 10, 11],
     "warn_pins": WARN_8266,
-    "max_sensors": 8, "max_metrics": 8,
+    "max_sensors": 8, "max_metrics": 12,
 }
 XIAO = {"D0": 2, "D1": 3, "D2": 4, "D3": 5, "D4": 6, "D5": 7, "D6": 21, "D7": 20,
         "D8": 8, "D9": 9, "D10": 10, "A0": 2, "A1": 3, "A2": 4}
@@ -103,7 +103,7 @@ CAPS_ESPNOW = {
         "20": "UART0 RX — the serial console",
         "21": "UART0 TX — the serial log comes out here",
     },
-    "max_sensors": 8, "max_metrics": 8,
+    "max_sensors": 8, "max_metrics": 12,
 }
 CAPS = {"wifi": CAPS_WIFI, "espnow": CAPS_ESPNOW}
 

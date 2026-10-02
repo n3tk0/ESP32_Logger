@@ -171,20 +171,21 @@ def wifi(b):
     nxt(pg)
     check("sensors" in step_name(pg), "step 4 is Sensors")
     bud = lambda: pg.locator("#k-bud").inner_text()
-    check(bud() == "4 / 8 metrics", "the budget meter counts the BME280 as 4 (%r)" % bud())
+    check(bud() == "4 / 12 metrics", "the budget meter counts the BME280 as 4 (%r)" % bud())
     pg.select_option("#addtype", "ds18b20")
     pg.click("[data-a=add]")
     check(pg.locator(".srow").count() == 2, "a DS18B20 row was added")
-    check(bud() == "5 / 8 metrics", "one probe is one metric (%r)" % bud())
+    check(bud() == "5 / 12 metrics", "one probe is one metric (%r)" % bud())
     fld(pg, "sensors[1].pin").fill("D5")
     check(hint(pg, "sensors[1].pin").startswith("GPIO14"), "its pin accepts D5")
-    fld(pg, "sensors[1].count").fill("5")
-    check(bud() == "9 / 8 metrics", "five probes blow the budget (%r)" % bud())
-    check("at most 8" in ferr(pg, "sensors"), "and the page says so")
-    fld(pg, "sensors[1].count").fill("1")
+    fld(pg, "sensors[1].count").fill("8")
+    check(bud() == "12 / 12 metrics", "eight probes fill the budget (%r)" % bud())
     pg.select_option("#addtype", "bh1750")
     pg.click("[data-a=add]")
-    check(bud() == "6 / 8 metrics", "a BH1750 adds one (%r)" % bud())
+    check(bud() == "13 / 12 metrics", "a BH1750 on top blows it (%r)" % bud())
+    check("at most 12" in ferr(pg, "sensors"), "and the page says so")
+    fld(pg, "sensors[1].count").fill("1")
+    check(bud() == "6 / 12 metrics", "back to one probe (%r)" % bud())
     pg.select_option("#addtype", "pulse")
     pg.click("[data-a=add]")
     check(pg.locator('[data-f="sensors[3].mode"]').count() == 1, "a pulse counter can be added to a WiFi node")
@@ -192,7 +193,7 @@ def wifi(b):
     check(pg.locator(".srow").count() == 3, "removing a row removes it")
     check(fld(pg, "sensors[2].mode").count() == 1, "and the rows below move up")
     pg.locator('[data-row="2"] [data-a=rm]').click()
-    check(bud() == "5 / 8 metrics", "the meter follows removals (%r)" % bud())
+    check(bud() == "5 / 12 metrics", "the meter follows removals (%r)" % bud())
     no_hscroll(pg, "Sensors")
 
     # ── a refusal from the node, on a field the page also flags
@@ -215,14 +216,18 @@ def wifi(b):
     check(pg.locator("#ov").is_hidden(), "the save overlay is gone")
 
     # ── a second rule: the budget, refused by the node
+    # (BME280 4 + eight probes 8 + BH1750 1 = 13, one over the twelve.)
     fld(pg, "sensors[1].pin").fill("D5")
-    fld(pg, "sensors[1].count").fill("6")
+    fld(pg, "sensors[1].count").fill("8")
+    pg.select_option("#addtype", "bh1750")
+    pg.click("[data-a=add]")
     pg.click("[data-a=go][data-i='5']")
     pg.click("#save")
     pg.wait_for_function("document.querySelector('[data-fe=\"sensors\"]') && "
                          "document.querySelector('[data-fe=\"sensors\"]').textContent.indexOf('refused') >= 0",
                          timeout=5000)
     check("sensors" in step_name(pg), "an over-budget refusal lands on Sensors too")
+    pg.locator('[data-row="2"] [data-a=rm]').click()
     fld(pg, "sensors[1].count").fill("1")
 
     # ── save for real
