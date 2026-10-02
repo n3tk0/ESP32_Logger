@@ -587,40 +587,45 @@
   function ovFillAQI(data) {
     // Sensors are found by the metrics they report, not by their type, so a
     // node's PM sensor or BME680 (type "remote") counts as much as a wired
-    // one. The assigned sensor, when there is one, is asked first for every
-    // metric; the others fill in what it does not have.
+    // one. The assigned sensor, when there is one, answers first with any
+    // metric it has; the others fill in what it does not have, by the order
+    // of preference (a real TVOC sensor before a BME680's estimate, a PM
+    // sensor before the IAQ).
     var binding = _getBinding("aqi");
     var list = Array.isArray(data) ? data.filter(function (s) { return s && s.readings; }) : [];
-    if (binding) {
-      list.sort(function (a, b) { return (b.id === binding) - (a.id === binding); });
-    }
-    var pick = function (metrics) {
-      for (var i = 0; i < list.length; i++) {
-        for (var j = 0; j < metrics.length; j++) {
-          var v = list[i].readings[metrics[j]];
-          if (typeof v === "number" && isFinite(v)) return { metric: metrics[j], value: v };
-        }
+    var bound = null;
+    list.forEach(function (s) { if (binding && s.id === binding) bound = s; });
+    var from = function (s, metrics) {
+      for (var j = 0; j < metrics.length; j++) {
+        var v = s.readings[metrics[j]];
+        if (typeof v === "number" && isFinite(v)) return { metric: metrics[j], value: v };
       }
       return null;
     };
-    var pm25 = pick(["pm25", "pm2_5"]);
-    var pm10 = pick(["pm10"]);
-    // A real TVOC sensor wins over the estimate from a BME680's gas reading.
-    var tvoc = pick(["tvoc"]) || pick(["tvoc_est"]);
+    var pick = function (groups) {
+      var g, i, f;
+      if (bound) for (g = 0; g < groups.length; g++) if ((f = from(bound, groups[g]))) return f;
+      for (g = 0; g < groups.length; g++)
+        for (i = 0; i < list.length; i++) if ((f = from(list[i], groups[g]))) return f;
+      return null;
+    };
+    var pm25 = pick([["pm25", "pm2_5"]]);
+    var pm10 = pick([["pm10"]]);
+    var tvoc = pick([["tvoc"], ["tvoc_est"]]);
     // eCO₂ only from a sensor that reports it (SGP30/ENS160) or a real CO₂
     // sensor; a BME680 alone gets no row rather than its TVOC restated.
-    var co2  = pick(["co2"]) || pick(["eco2"]);
-    var iaq  = pick(["iaq"]);
+    var co2  = pick([["co2"], ["eco2"]]);
+    var dial = pick([["pm25", "pm2_5"], ["iaq"]]);
 
-    // The gauge: an AQI from PM2.5 (EPA linear interpolation simplified);
+    // The dial: an AQI from PM2.5 (EPA linear interpolation simplified);
     // without a PM sensor, the BME680's IAQ (0..500, BSEC bands).
     var score = null, level = 0, pct = 0, gaugeLabel = "AQI";
-    if (pm25) {
-      score = Math.min(500, Math.round((pm25.value / 35.4) * 100));
+    if (dial && dial.metric !== "iaq") {
+      score = Math.min(500, Math.round((dial.value / 35.4) * 100));
       level = score < 50 ? 0 : score < 100 ? 1 : 2;
       pct = Math.min(1, score / 300);
-    } else if (iaq) {
-      score = Math.round(iaq.value);
+    } else if (dial) {
+      score = Math.round(dial.value);
       level = score <= 100 ? 0 : score <= 200 ? 1 : 2;
       pct = Math.min(1, score / 500);
       gaugeLabel = "IAQ";
