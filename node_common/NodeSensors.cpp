@@ -629,12 +629,24 @@ static bool beginSds(const SensorCfg& s) {
     // good. Continuous (period 0) and active reporting; the node does its own
     // sleeping with the work/sleep command (sdsSetWorking()).
     //
-    // Asked first and written only when wrong: each set is a write to the
-    // sensor's flash, and the ESP-NOW node comes through here on every wake.
-    // After the wake above, because a sleeping SDS011 answers nothing. One
-    // that still does not answer (no TX wire, say) is written anyway.
-    if (sdsQuery(0x02, 400) != 0) { sdsSet(0x02, 0); delay(100); }   // reporting: active
-    if (sdsQuery(0x08, 400) != 0) { sdsSet(0x08, 0); delay(100); }   // period: continuous
+    // Asked first and written only when the sensor says it is wrong: each
+    // set is a write to its flash, and the ESP-NOW node comes through here on
+    // every wake. After the wake above, and given a moment and a second try,
+    // because a sensor that was asleep can miss the first command. One that
+    // never answers is left alone: a write it could not hear would only be
+    // repeated on every wake.
+    delay(200);
+    for (uint8_t cmd : {(uint8_t)0x02, (uint8_t)0x08}) {   // reporting mode, period
+        int v = sdsQuery(cmd, 400);
+        if (v < 0) v = sdsQuery(cmd, 400);
+        if (v > 0) {
+            NS_LOG("[sensor] SDS011 setting 0x%02X was %d; set to 0\n", (unsigned)cmd, v);
+            sdsSet(cmd, 0);
+            delay(100);
+        } else if (v < 0) {
+            NS_LOG("[sensor] SDS011 did not answer query 0x%02X\n", (unsigned)cmd);
+        }
+    }
     // No handshake to confirm: the SDS011 streams a frame a second while it
     // works. The port being up is "ok"; whether a valid frame arrives decides
     // whether pm25/pm10 are published.
