@@ -2924,7 +2924,7 @@ fetch_graph() {
 zones_forget() {
     local z s
     for z in ${GRID_ZONES:-} ${IN_ZONES:-} HERO BIG; do
-        for s in VALUE UNIT LABEL ARROW BOLD INK VADVW UADVW ADVW LADVW; do
+        for s in VALUE UNIT LABEL ARROW BOLD INK VADVW UADVW ADVW LADVW CAPUNIT; do
             unset "Z_${z}_${s}" 2>/dev/null
         done
     done
@@ -3094,6 +3094,7 @@ flow_apply() {
           OL3_X OL4_X OL3_Y OL4_Y \
           WALL HEAD_W HEAD_RULE_Y IN_VCOL SEP_Y SEP2_X SEP2_Y SEP2_H FC_TEXT_W 2>/dev/null
     LAB_INK=GRAY7
+    SLASH_INK=GRAYA
     case "${LY_GR_H:-}" in ''|*[!0-9]*) FLOW_SIG=""; return 0 ;; esac
     # The grid's rows are a list of counts, each divided into the column's
     # width: 1..6 each, separated by single spaces, or the grid is not drawn
@@ -3118,8 +3119,10 @@ flow_apply() {
     LAYOUT_FLOW=1
     # THE WALL PAGE IS READ FROM ACROSS A ROOM: its captions and the line
     # under the headline in black, where the desk page sets them in grey as
-    # context for the numbers beside them. Grey at three metres is nothing.
-    [ "${WALL:-0}" = "1" ] && LAB_INK=BLACK
+    # context for the numbers beside them. Grey at three metres is nothing —
+    # and the slash between the two headline values with them, or the two
+    # run together into one number.
+    [ "${WALL:-0}" = "1" ] && { LAB_INK=BLACK; SLASH_INK=BLACK; }
     return 0
 }
 
@@ -4013,7 +4016,7 @@ draw_zones() {
         # The slash is always the regular face, the value may be bold: each
         # on the headline's baseline by its own face's numbers.
         draw_text_reg "$sx" "$(baseline_y "$hero_y" "$hero_sz" "$big_sz" "${Z_HERO_BOLD:-0}" 0)" \
-                      "$big_sz" "GRAYA" "/"
+                      "$big_sz" "${SLASH_INK:-GRAYA}" "/"
         y=$(baseline_y "$hero_y" "$hero_sz" "$big_sz" "${Z_HERO_BOLD:-0}" "${Z_BIG_BOLD:-0}")
         draw_field "$(( sx + ${SLASH_W:-22} ))" "$y" "$big_sz" "${Z_BIG_BOLD:-0}" \
                    "$Z_BIG_VALUE" "$Z_BIG_UNIT" "$Z_BIG_ARROW" \
@@ -4051,6 +4054,10 @@ draw_zones() {
             eval "val=\$Z_${z}_VALUE; unit=\$Z_${z}_UNIT; lab=\$Z_${z}_LABEL"
             eval "arrow=\$Z_${z}_ARROW; bold=\$Z_${z}_BOLD; ink=\${Z_${z}_INK:-BLACK}"
             eval "vadv=\${Z_${z}_VADVW:-0}; uadv=\${Z_${z}_UADVW:-0}"
+            # The wall page's unit, on the caption's line rather than after
+            # the figures — the collector has already taken it off the value.
+            eval "capu=\${Z_${z}_CAPUNIT:-}"
+            [ -n "$capu" ] && lab="$lab / $capu"
             cx=$(( lx + gi * gcw ))
             # A row of one is centred, caption and value each on their own —
             # the page's .grid td.c1. Widths of 0 (an older collector) leave
@@ -4435,8 +4442,12 @@ draw_forecast_body() {
         # forecast". The collector reduces it now (weatherIconCode), which is
         # also where the browser page's ranges live, so the two cannot disagree.
         # FC_CODE is the fallback for a collector too old to send FC_ICON.
-        local icon="$ICON_DIR/fc_${FC_ICON:-$FC_CODE}_${FC_MAIN_SZ}.bmp"
-        [ ! -f "$icon" ] && icon="$ICON_DIR/fc_-1_${FC_MAIN_SZ}.bmp"
+        # The wall page's is larger (FC_WALL_SZ): it is what reads across a
+        # room. A layout from before it has none, and keeps the desk's size.
+        local isz="$FC_MAIN_SZ"
+        [ "${WALL:-0}" = "1" ] && [ -n "${FC_WALL_SZ:-}" ] && isz="$FC_WALL_SZ"
+        local icon="$ICON_DIR/fc_${FC_ICON:-$FC_CODE}_${isz}.bmp"
+        [ ! -f "$icon" ] && icon="$ICON_DIR/fc_-1_${isz}.bmp"
         draw_image "$icon" "$FC_ICON_X" "$FC_ICON_Y"
 
         # On the wall page the word is set as large as its column allows, up

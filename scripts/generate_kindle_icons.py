@@ -146,7 +146,7 @@ BATTERY_SVG_INNER = (
 )
 
 # ---------------------------------------------------------------------------
-# Resolution configs: { res_w: (main_icon_size, outlook_icon_size) }
+# Resolution configs: { res_w: (main_icon_size, outlook_icon_size, wall_size) }
 #
 # READ OUT OF kindle/layout/*.conf, not written here. These are FC_MAIN_SZ and
 # FC_OL_SZ, and the panel reads them from those files at run time — a second
@@ -248,14 +248,14 @@ def generate_all():
     # that draws them, and repainting the plate reaches the icons on it.
     _, GROUND = grounds()
 
-    for res_w, (main_sz, outlook_sz) in RESOLUTIONS.items():
+    for res_w, (main_sz, outlook_sz, wall_sz) in RESOLUTIONS.items():
         out_dir = kindle_dir / str(res_w)
         out_dir.mkdir(parents=True, exist_ok=True)
 
         for code, (name, svg_inner) in ICONS.items():
             svg_doc = wrap_svg(svg_inner)
 
-            for sz in (main_sz, outlook_sz):
+            for sz in (main_sz, outlook_sz, wall_sz):
                 bmp = svg_to_greyscale_bmp(svg_doc, sz)
                 fname = f"fc_{code}_{sz}.bmp"
                 path = out_dir / fname

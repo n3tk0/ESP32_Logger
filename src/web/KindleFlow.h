@@ -894,8 +894,9 @@ static const int KDF_WALL_SUB     = 22;
 static const int KDF_WALL_BAND    = 200;   ///< the clock and the forecast, rule to footer
 static const int KDF_WALL_CLOCK   = 1300;  ///< the clock beside the forecast: 96 -> 124
 static const int KDF_WALL_CLOCK_1 = 1500;  ///< ...and alone in the band: 96 -> 144
-static const int KDF_WALL_FC_TEXT = 28;    ///< the summary, at most
-static const int KDF_WALL_FC_TEMP = 60;    ///< the day's high and low, at most
+static const int KDF_WALL_FC_ICON = 80;    ///< the condition's icon (FC_WALL_SZ)
+static const int KDF_WALL_FC_TEXT = 22;    ///< the summary beside it, at most
+static const int KDF_WALL_FC_TEMP = 58;    ///< the day's high and low, at most
 static const int KDF_IN_V_GAP     = 10;    ///< one indoor reading's foot to the next one's caption
 
 /// The day's high and low as the band prints them, "-00°/-00°", in mille.
@@ -937,6 +938,12 @@ static inline void kdFlowIndoorV(const KdFlowIn& in, int top, int bot, KdFlow& f
     f.inVal3Y  = (int16_t)(f.inVal2Y + s + per);
     f.inValSz1 = (uint8_t)s1;
     f.inValSz  = (uint8_t)s;
+}
+
+/// The most the wall page's high and low can be: KDF_WALL_FC_TEMP, or what
+/// fits between the icon and the wind.
+static inline int kdWallFcTempMax(const KdFlow& f) {
+    return kdfMin(KDF_WALL_FC_TEMP, f.fcWindY - 4 - f.fcTempY);
 }
 
 static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
@@ -1016,23 +1023,29 @@ static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
     f.sep2Y = (int16_t)(f.rule3Y + 12);
     f.sep2H = (int16_t)(beside ? KDF_WALL_BAND - 24 : 0);
 
-    // ── The forecast: the icon and the summary, the day under them ──
+    // ── The forecast: a large icon with the summary beside it, the day's high
+    // and low under them as large as the band lets them be, the wind at the
+    // foot. The word gives way to the temperature: the icon says the weather
+    // from across a room, and the word does not. ──
     const int fx = in.clock ? KDF_WALL_RX : X0;
     const int fw = X1 - fx;
+    const int I = KDF_WALL_FC_ICON;
     f.labFcX  = (int16_t)fx;
-    f.labFcY  = (int16_t)(f.rule3Y + 12);
+    f.labFcY  = (int16_t)(f.rule3Y + 10);
     f.fcIconX = (int16_t)fx;
-    f.fcIconY = (int16_t)(f.rule3Y + 42);
-    f.fcTextX = (int16_t)(fx + 64);
-    f.fcTextW = (int16_t)(fw - 64);
+    f.fcIconY = (int16_t)(f.rule3Y + 32);
+    f.fcTextX = (int16_t)(fx + I + 8);
+    f.fcTextW = (int16_t)(fw - I - 8);
     f.fcTextSz = (uint8_t)KDF_WALL_FC_TEXT;
-    f.fcTextY = (int16_t)(f.fcIconY + (52 - KDF_WALL_FC_TEXT) / 2);
-    f.fcTempX = (int16_t)fx;
-    f.fcTempY = (int16_t)(f.rule3Y + 104);
-    f.fcTempSz = (uint8_t)kdfMin(KDF_WALL_FC_TEMP, fw * 1000 / KDF_FC_TEMP_ADV);
-    f.fcWindX = (int16_t)fx;
-    f.fcWindY = (int16_t)(f.fcTempY + f.fcTempSz + 8);
+    f.fcTextY = (int16_t)(f.fcIconY + (I - KDF_WALL_FC_TEXT) / 2);
     f.fcWindSz = 17;
+    f.fcWindX = (int16_t)fx;
+    f.fcWindY = (int16_t)(f.rule3Y + KDF_WALL_BAND - 4 - f.fcWindSz);
+    f.fcTempX = (int16_t)fx;
+    f.fcTempY = (int16_t)(f.fcIconY + I + 4);
+    // For the widest it can print, "-10°/-20°"; the page sets it larger by
+    // what it does print (kdWallFcFit() in KindleDashboard.cpp), up to this.
+    f.fcTempSz = (uint8_t)kdfMin(kdWallFcTempMax(f), fw * 1000 / KDF_FC_TEMP_ADV);
 }
 
 /// The forecast band's current conditions where the layout file has them —

@@ -1361,6 +1361,29 @@ check "$?" "three indoor readings are two columns, one alone is centred"
   exit 0 )
 check "$?" "the wall page with four outdoor places: 2 x 2 on the left, the indoor column on the right"
 
+# THE WALL PAGE'S UNITS BY THE CAPTION, "PRESSURE / hPa", when the collector
+# sends one (Z_<zone>_CAPUNIT), and the slash beside the headline in black.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "${WALL:-0}" = "1" ] || exit 1
+  first=$(echo $GRID_ZONES | cut -d' ' -f1)
+  eval "lab=\${Z_${first}_LABEL}"
+  [ -n "$lab" ] || exit 2
+  eval "Z_${first}_CAPUNIT=hPa"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -q -e "--${T}${lab} / hPa${T}" "$FBINK_LOG" || { echo "no '$lab / hPa'" >&2; exit 3; }
+  [ "$SLASH_INK" = "BLACK" ] && [ "$LAB_INK" = "BLACK" ] || exit 4
+  # The desk page keeps its grey slash.
+  flow_payload "$WORK/ly.txt" res=600
+  ly_load "$WORK/ly.txt"; load_layout
+  [ "${WALL:-0}" = "0" ] && [ "$SLASH_INK" = "GRAYA" ] || exit 5
+  exit 0 )
+check "$?" "the wall page sets a unit by its caption and the slash in black"
+
 # AND IT REPAINTS BY ZONES, AS THE DESK PAGE DOES: the readings above the band,
 # the clock its own rectangle in the band every minute, the forecast beside it
 # — each refreshed once and none of them flashing; the whole screen only on

@@ -1349,7 +1349,45 @@ struct KdRender {
     char       sub[64];
     KdFlow     flow;
     bool       chartFine = false;   ///< the first two hours — kdChartWantsFine()
+    /// The wall page's grid units, moved off the value onto its caption —
+    /// see kdWallUnits(). Empty for a place whose unit stayed.
+    char       capUnit[KZ_GRID_COUNT][sizeof(KdResolved::unit)] = {};
 };
+
+/// THE UNIT ON THE CAPTION'S LINE on the wall page's grid, "НАЛЯГ / hPa", so
+/// the cell's width goes to the figures: "1010 hPa" and "14 µg/m³" set two to
+/// a row in half a 352 px column came out at 47 px. A degree or a per cent
+/// sign stays on its number — it is narrow, and "РОСА / °" reads as nothing.
+static bool kdUnitToCaption(const char* unit) {
+    return unit[0] && strncmp(unit, "\xC2\xB0", 2) != 0 && strcmp(unit, "%") != 0;
+}
+
+static void kdWallUnits(KdRender& r) {
+    for (int i = 0; i < KZ_GRID_COUNT; i++) {
+        KdResolved& z = r.res[KZ_G1 + i];
+        r.capUnit[i][0] = '\0';
+        if (!kdUnitToCaption(z.unit)) continue;
+        memcpy(r.capUnit[i], z.unit, sizeof(z.unit));
+        z.unit[0] = '\0';
+    }
+}
+
+#ifdef MODULE_FORECAST_ENABLED
+/// The wall page's high and low as large as what they print lets them be:
+/// the layout sized them for the widest, "-10°/-20°", and "14°/3°" is half
+/// as wide. Up to kdWallFcTempMax(), never below the layout's size.
+static void kdWallFcFit(KdFlow& f) {
+    const ForecastModule::Data d = forecastModule.snapshot();
+    if (!d.valid || !isfinite(d.highC) || !isfinite(d.lowC)) return;
+    char t[24];
+    snprintf(t, sizeof(t), "%d\xC2\xB0/%d\xC2\xB0", (int)lroundf(d.highC), (int)lroundf(d.lowC));
+    const unsigned adv = kdFigAdvance(t);
+    const int fw = KDF_WALL_X1 - f.fcTempX;
+    if (!adv) return;
+    const int sz = kdfMin(kdWallFcTempMax(f), (int)(fw * 1000u / adv));
+    if (sz > f.fcTempSz) f.fcTempSz = (uint8_t)sz;
+}
+#endif
 
 /// `inCol`: the renderer knows the two-column indoor row — the browser page
 /// always, the FBInk panel when its request says ?col=1. `wall`: the wall page,
@@ -1359,7 +1397,12 @@ static void kdRenderBegin(KdRender& r, const KindleConfig& skin, uint32_t now,
                           bool wall = false) {
     kdResolveZones(skin, r.res);
     kdSubLine(r.sub, sizeof(r.sub), skin, r.res[KZ_HERO], now);
+    // Before the layout, which then sizes the grid by its figures alone.
+    if (wall && !land) kdWallUnits(r);
     r.flow = kdFlowFor(skin, r.res, standalone, r.sub[0] != '\0', html, land, inCol, wall);
+#ifdef MODULE_FORECAST_ENABLED
+    if (wall && !land) kdWallFcFit(r.flow);
+#endif
 }
 
 /// Whether this render is the wall page (KPAGE_WALL): chosen for this
@@ -1471,8 +1514,16 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         // The caption as the panel prints it, upper case, for a grid row of
         // one, which is centred.
         {
-            char lup[48];
+            char lup[64];
             kdUpperUtf8(lup, sizeof(lup), res[i].label);
+            // On the wall page the grid's unit is on this line, after it.
+            const char* cu = kdZoneIsGrid((uint8_t)i) ? rd.capUnit[i - KZ_G1] : "";
+            if (cu[0]) {
+                const size_t l = strlen(lup);
+                snprintf(lup + l, sizeof(lup) - l, " / %s", cu);
+                snprintf(key, sizeof(key), "Z_%s_CAPUNIT", up);
+                kdShellVar(s, key, cu);
+            }
             s->printf("Z_%s_LADVW=%u\n", up, kdAdvanceMille(lup));
         }
 
@@ -1569,10 +1620,17 @@ static void appendValue(String& p, const KdResolved& r, const KindleSlot& sl,
 /// A captioned cell: the label above, the value under it. The grid and the
 /// indoor row are the same shape at two sizes, so they are one function.
 static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
-                       const char* valueClass, bool caption = true) {
+                       const char* valueClass, bool caption = true,
+                       const char* capUnit = "") {
     if (caption) {
         p += F("<div class=\"lab\">");
         appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
+        // The wall page's unit, after the caption and in its own case.
+        if (capUnit[0]) {
+            p += F(" <span class=\"lu\">/ ");
+            appendEscaped(p, capUnit);
+            p += F("</span>");
+        }
         p += F("</div>");
     }
     p += F("<div class=\"cv\">");
@@ -1592,7 +1650,8 @@ static int appendGridRow(String& p, const KdRender& rd, const uint8_t* used, int
         p += (cols == 1) ? F("<td class=\"c1\" width=\"") : F("<td width=\"");
         p += (int)(100 / cols);
         p += F("%\">");
-        appendCell(p, rd.res[used[at]], zones.z[used[at]], "gv");
+        appendCell(p, rd.res[used[at]], zones.z[used[at]], "gv", true,
+                   rd.capUnit[used[at] - KZ_G1]);
         p += F("</td>");
     }
     p += F("</tr></table>");
@@ -2524,13 +2583,13 @@ static void appendWallForecast(String& p, const KdFlow& f) {
     p += kdT("Forecast", "Прогноза");
     p += F("</div>");
     kdWallAt(p, "", f.fcIconX, f.fcIconY);
-    appendWeatherIcon(p, d.code, kdPx(52));
+    appendWeatherIcon(p, d.code, kdPx(KDF_WALL_FC_ICON));
     p += F("</div>");
     const char* word = forecastSummary(d);
     const unsigned adv = kdAdvanceMille(word);
     int sz = f.fcTextSz;
     if (adv) sz = kdfMax(12, kdfMin(sz, (int)(f.fcTextW * 1000u / adv)));
-    kdWallAt(p, "wfc", f.fcTextX, f.fcIconY + (52 - sz) / 2, f.fcTextW);
+    kdWallAt(p, "wfc", f.fcTextX, f.fcIconY + (KDF_WALL_FC_ICON - sz) / 2, f.fcTextW);
     p += F("<span style=\"font-size:"); p += kdPx(sz); p += F("px\">");
     p += word;
     p += F("</span></div>");
@@ -2660,7 +2719,7 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
     // after it, so they still win. The rules' .wa is absolute, sized inline.
     p += F(".wa{position:absolute;white-space:nowrap;overflow:hidden}"
            ".wl .lab,.wl .head,.wl .sub,.wl .cv,.wfc{line-height:1;margin:0}"
-           ".wl .lab,.wl .sub{color:#000}"
+           ".wl .lab,.wl .sub,.wl .slash{color:#000}.lu{text-transform:none}"
            ".wl .grid{margin-top:0}.wl .grid td{height:auto;vertical-align:top}"
            ".wl .v1,.wl .v2,.wl .gv,.wl .iv{font-weight:700}"
            ".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}"

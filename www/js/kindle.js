@@ -385,6 +385,14 @@ function kdPvUnit(z) {
   return KD_UNIT[z.metric] || "";
 }
 function kdPvCaption(z) { return z.label || z.shown || ""; }
+// The wall page's grid sets a unit by its caption, "PRESSURE / hPa", and the
+// figures alone below — all but ° and %, which stay on the value
+// (kdUnitToCaption() in KindleDashboard.cpp).
+function kdPvUnitToCaption(u) { return !!u && u !== "°" && u !== "%"; }
+// What a figure is sized by: kdFigAdvance() in KindleFlow.h.
+function kdPvFigAdvance(t) {
+  return kdAdvanceMille(t) + (String(t).match(/[0-9]/g) || []).length * 120;
+}
 function kdPvClock() { return (kdVal("kd-time","0") | 0) === 2 ? "5:40pm" : "17:40"; }
 function kdPvDate() {
   return ["27 august","august 27","27.08.2026","2026-08-27"][kdVal("kd-date","0") | 0];
@@ -415,7 +423,7 @@ var KDF = {
   LAND_ROW_W:77, IN_H:102, LAND_GROW_MIN:640, OL_PITCH:92, BIG_SZ:52,
   WALL_X1:582, WALL_W:564, WALL_COL:352, WALL_SEP:376, WALL_RX:394, WALL_LAB:18,
   WALL_HERO:160, WALL_BIG:96, WALL_SUB:22, WALL_BAND:200, WALL_CLOCK:1300,
-  WALL_CLOCK_1:1500, WALL_FC_TEXT:28, WALL_FC_TEMP:60, IN_V_GAP:10,
+  WALL_CLOCK_1:1500, WALL_FC_ICON:80, WALL_FC_TEXT:22, WALL_FC_TEMP:58, IN_V_GAP:10,
   FC_TEMP_ADV:4 * 620 + 2 * 330 + 330 + 2 * 330
 };
 
@@ -820,13 +828,20 @@ function kdFlowWall(inp, f) {
   f.clY = f.rule3Y + Math.max(0, kdQ(K.WALL_BAND - f.clH, 2));
   f.sep2X = K.WALL_SEP; f.sep2Y = f.rule3Y + 12; f.sep2H = beside ? K.WALL_BAND - 24 : 0;
   var fx = inp.clock ? K.WALL_RX : X0, fw = X1 - fx;
-  f.labFcX = fx; f.labFcY = f.rule3Y + 12;
-  f.fcIconX = fx; f.fcIconY = f.rule3Y + 42;
-  f.fcTextX = fx + 64; f.fcTextW = fw - 64; f.fcTextSz = K.WALL_FC_TEXT;
-  f.fcTextY = f.fcIconY + kdQ(52 - K.WALL_FC_TEXT, 2);
-  f.fcTempX = fx; f.fcTempY = f.rule3Y + 104;
-  f.fcTempSz = Math.min(K.WALL_FC_TEMP, kdQ(fw * 1000, K.FC_TEMP_ADV));
-  f.fcWindX = fx; f.fcWindY = f.fcTempY + f.fcTempSz + 8; f.fcWindSz = 17;
+  var I = K.WALL_FC_ICON;
+  f.labFcX = fx; f.labFcY = f.rule3Y + 10;
+  f.fcIconX = fx; f.fcIconY = f.rule3Y + 32;
+  f.fcTextX = fx + I + 8; f.fcTextW = fw - I - 8; f.fcTextSz = K.WALL_FC_TEXT;
+  f.fcTextY = f.fcIconY + kdQ(I - K.WALL_FC_TEXT, 2);
+  f.fcWindSz = 17; f.fcWindX = fx;
+  f.fcWindY = f.rule3Y + K.WALL_BAND - 4 - f.fcWindSz;
+  f.fcTempX = fx; f.fcTempY = f.fcIconY + I + 4;
+  f.fcTempSz = Math.min(kdWallFcTempMax(f), kdQ(fw * 1000, K.FC_TEMP_ADV));
+}
+
+// kdWallFcTempMax() in KindleFlow.h: the most the high and low can be.
+function kdWallFcTempMax(f) {
+  return Math.min(KDF.WALL_FC_TEMP, f.fcWindY - 4 - f.fcTempY);
 }
 
 // The forecast's current conditions where the layout file has them.
@@ -900,11 +915,12 @@ function kdFlowInput(show) {
               nGrid:0, gridAdv:[], nIn:0, inAdv:[], grid:[], inside:[],
               outPct:kdVal("kd-outsz", "100") | 0, inPct:kdVal("kd-insz", "100") | 0 };
   function adv(key, firstIn) {
-    var z = kdSlot(key), v = kdPvValue(z);
+    var z = kdSlot(key), v = kdPvValue(z), u = kdPvUnit(z);
     if (v === "") return 0;
     var arrow = !!(z.flags & kdFlags.trend) && !!(show & 0x0004) && z.metric === "pressure";
-    return firstIn ? kdFlowFirstInAdvance(z.metric, v, kdPvUnit(z), arrow)
-                   : kdFlowWorstAdvance(z.metric, v, kdPvUnit(z), arrow);
+    if (inp.wall && key.charAt(0) === "g" && kdPvUnitToCaption(u)) u = "";
+    return firstIn ? kdFlowFirstInAdvance(z.metric, v, u, arrow)
+                   : kdFlowWorstAdvance(z.metric, v, u, arrow);
   }
   // The headline and the value beside it by what they print, and the value
   // also by the two figures it is sized for, as the collector measures them
@@ -1095,7 +1111,7 @@ function kdRenderPreview() {
     if (v) {
       var by = L.heroY + 18 + Math.round((L.heroSz - 88) / 2);
       x += L.headGap;
-      h += kdT(x, by, L.bigSz, "/", { ink:"#aaaaaa" });
+      h += kdT(x, by, L.bigSz, "/", { ink:L.wall ? "#000000" : "#aaaaaa" });
       x += kdTw("/", L.bigSz) + 6;
       h += kdT(x, by, L.bigSz, v,
                { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0002), ink:kdPvInk(z.ink) });
@@ -1125,9 +1141,10 @@ function kdRenderPreview() {
       for (i = 0; i < rows[r].length; i++) {
         z = kdSlot(rows[r][i]); x = X + i * cw; v = kdPvValue(z);
         u = kdPvUnit(z);
+        var cap = kdPvCaption(z), lx = x;
+        if (L.wall && kdPvUnitToCaption(u)) { cap += " / " + u; u = ""; }
         usz = Math.round(vs * (u === "°" ? 0.34 : 0.42));
         // A row of one is centred in the column, caption and value each.
-        var cap = kdPvCaption(z), lx = x;
         if (rows[r].length === 1) {
           lx = x + Math.max(0, kdQ(cw - kdTw(cap, L.labSz), 2));
           x += Math.max(0, kdQ(cw - kdTw(v, vs) - kdTw(u, usz), 2));
@@ -1235,12 +1252,19 @@ function kdRenderPreview() {
     var olT = ["21:00","00:00","03:00","06:00","09:00"], olV = ["6°","4°","3°","5°","9°"];
     if (!L.wall) h += kdRl(18, fy + 0, RW, 1);
     h += kdT(L.labFcX, L.labFcY, L.wall ? L.labSz : 14, "FORECAST", { ink:capInk, bold:capB });
-    h += kdBox(L.fcIconX, L.fcIconY, 52, 52, "kd-pl");
+    var isz = L.wall ? KDF.WALL_FC_ICON : 52;
+    h += kdBox(L.fcIconX, L.fcIconY, isz, isz, "kd-pl");
     var fsz = L.fcTextW ? Math.min(L.fcTextSz, kdQ(L.fcTextW * 1000, kdAdvanceMille("Showers")))
                         : L.fcTextSz;
     h += kdT(L.fcTextX, L.fcTextY + kdQ(L.fcTextSz - fsz, 2), fsz, "Showers",
              { bold:!!(bold & 0x0040) });
-    h += kdT(L.fcTempX, L.fcTempY, L.fcTempSz, "14°/3°", { bold:true });
+    // The wall page sets the high and low by what they print: kdWallFcFit().
+    var tsz = L.fcTempSz;
+    if (L.wall) {
+      tsz = Math.max(tsz, Math.min(kdWallFcTempMax(L),
+                                   kdQ((KDF.WALL_X1 - L.fcTempX) * 1000, kdPvFigAdvance("14°/3°"))));
+    }
+    h += kdT(L.fcTempX, L.fcTempY, tsz, "14°/3°", { bold:true });
     h += kdT(L.fcWindX, L.fcWindY, L.fcWindSz, "wind 23 km/h · 8 min", { ink:"#444444" });
     for (i = 0; i < L.olN; i++) {
       var ox = L.olX[i];

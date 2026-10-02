@@ -786,15 +786,22 @@ an older config holds) or 1 for a wall.
 |---|---|
 | top | the outdoor headline and the value beside it across the whole page, up to 160 and 96 px, and the line under them |
 | middle | the grid on the left, 352 px, laid out by how many readings it has (below); the indoor readings one under the other on the right, the first with no caption, the others at seven tenths of it |
-| band | the clock (124 px), and beside it the forecast: icon and condition, the day's high and low, wind and age. Either alone has the band to itself |
+| band | the clock (124 px), and beside it the forecast: an 80 px icon with the condition beside it (up to 22 px, smaller for a long word), the day's high and low under them (up to 58 px, by what they print), wind and age at the foot. Either alone has the band to itself |
 | footer | as on the desk page |
 
 **The grid is laid out by how many readings it has**, not by a search for
 the largest: two one under the other, four 2 x 2, six three rows of two, an
 odd one alone on the last row. Each is then as large as its cell allows, all
 at one size and never above the headline. Two readings come out at about 95 px;
-four or six with "1010 hPa" among them at about 47, the width half the column
+four or six with "1010 hPa" among them at about 66, the width half the column
 leaves for the widest.
+
+**A grid reading's unit goes on its caption's line**, "PRESSURE / hPa", and
+the value is its figures alone, which is what lets them be that large: the
+collector takes the unit off the value before the layout sizes the grid
+(`kdWallUnits()`) and sends it as `Z_<zone>_CAPUNIT`. ° and % stay on the
+value, where they read as part of it. The slash beside the headline is black,
+as the captions are.
 
 The headline's row is as tall as the largest headline, whatever this one
 came out at, and the headline stands on its foot, so a reading that gains a

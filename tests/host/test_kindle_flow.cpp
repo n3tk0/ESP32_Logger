@@ -791,7 +791,19 @@ static void checkWallStacks(const KdFlow& f) {
         CHECK(f.clX >= 18 && f.clX + f.clW <= 582);
         if (!f.sep2H) CHECK_EQ(f.clX - 18, 582 - (f.clX + f.clW));
     }
-    if (f.forecast) CHECK(f.fcWindY + f.fcWindSz <= f.footY);
+    if (f.forecast) {
+        CHECK(f.fcWindY + f.fcWindSz <= f.footY);
+        // The large icon under the heading, the word beside it, the high and
+        // low under the icon at no more than the band leaves above the wind.
+        CHECK(f.labFcY + f.labSz <= f.fcIconY);
+        CHECK(f.fcTextX >= f.fcIconX + KDF_WALL_FC_ICON);
+        CHECK(f.fcTextX + f.fcTextW <= 582);
+        CHECK(f.fcTempY >= f.fcIconY + KDF_WALL_FC_ICON);
+        CHECK(f.fcTempSz <= kdWallFcTempMax(f));
+        CHECK(kdWallFcTempMax(f) >= 50);
+        CHECK(f.fcTempY + kdWallFcTempMax(f) <= f.fcWindY);
+        CHECK(f.fcIconX >= (f.sep2H ? f.sep2X : 18));
+    }
     if (f.clock || f.forecast) CHECK(f.rule3Y < f.footY);
 }
 
