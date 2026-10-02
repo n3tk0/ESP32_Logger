@@ -13,6 +13,7 @@
 #include "NodeCfgTables.h"
 #include "src/nodecfg/NodePortalPage.h"
 #include "FwFlash.h"
+#include "DiagPage.h"
 
 using nodecfg::NodeConfig;
 
@@ -384,6 +385,126 @@ static void handleStatus() {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/diag, GET /api/log, GET /diag — why the node is not reporting
+// ---------------------------------------------------------------------------
+//
+// /api/status says what the sensors did at bring-up; this says what they have
+// done since, and what the network and the collector made of it. The SDS011
+// counters are the point of it: "ok" there only means the serial port opened,
+// and the four ways it can still send nothing (no wire, wrong wire, noise, a
+// sensor left in periodic or query mode) each leave a different set of zeros.
+
+/// Seconds since a millis() stamp, or null for "never" (0).
+static void putAge(JsonObject o, const char* key, uint32_t ms) {
+    if (ms) o[key] = (millis() - ms) / 1000UL;
+    else    o[key] = nullptr;
+}
+
+static void handleDiag() {
+    if (!authOk()) return;
+    String out;
+    {
+        JsonDocument doc;
+        JsonObject sys = doc["sys"].to<JsonObject>();
+        sys["uptime_s"]   = millis() / 1000UL;
+        sys["fw"]         = (const char*)s_target->fw;
+        sys["reset"]      = ESP.getResetReason();
+        sys["heap"]       = ESP.getFreeHeap();
+        sys["max_block"]  = ESP.getMaxFreeBlockSize();
+        sys["frag"]       = ESP.getHeapFragmentation();
+        sys["cpu_mhz"]    = ESP.getCpuFreqMHz();
+
+        JsonObject w = doc["wifi"].to<JsonObject>();
+        const bool up = WiFi.status() == WL_CONNECTED;
+        w["connected"] = up;
+        if (up) {
+            w["ssid"] = WiFi.SSID();
+            w["rssi"] = WiFi.RSSI();
+            w["ch"]   = WiFi.channel();
+            w["ip"]   = WiFi.localIP().toString();
+        }
+        if (s_link) {
+            w["connects"] = s_link->wifiConnects;
+            w["fails"]    = s_link->wifiFails;
+            putAge(w, "up_s", s_link->wifiUpMs);
+
+            JsonObject c = doc["collector"].to<JsonObject>();
+            c["host"]      = (const char*)s_target->net.host;
+            c["port"]      = s_target->net.port;
+            c["posts"]     = s_link->posts;
+            c["fails"]     = s_link->postFails;
+            c["last_code"] = s_link->lastCode;
+            putAge(c, "last_ok_s", s_link->everOk ? s_link->lastOkMs : 0);
+            putAge(c, "last_fail_s", s_link->lastFailMs);
+            if (s_link->lastAccepted >= 0) c["accepted"] = s_link->lastAccepted;
+            if (s_link->lastRoom >= 0)     c["room"]     = s_link->lastRoom;
+            c["backlog"]     = s_link->backlog;
+            c["backlog_cap"] = s_link->backlogCap;
+            c["dropped"]     = s_link->backlogDropped;
+        }
+
+        NodeSensorDiag d[nodecfg::MAX_SENSORS];
+        const int n = nodeSensorsDiag(d, nodecfg::MAX_SENSORS);
+        JsonArray arr = doc["sensors"].to<JsonArray>();
+        for (int i = 0; i < n; i++) {
+            JsonObject o = arr.add<JsonObject>();
+            o["type"]  = d[i].type;
+            o["ok"]    = d[i].ok;
+            if (d[i].addr)  o["addr"]  = d[i].addr;
+            if (d[i].found) o["found"] = d[i].found;
+            o["reads"] = d[i].reads;
+            o["empty"] = d[i].empty;
+            putAge(o, "last_ok_s", d[i].lastOkMs);
+        }
+
+        const NodeSdsDiag& q = nodeSensorsSdsDiag();
+        if (q.up) {
+            JsonObject o = doc["sds011"].to<JsonObject>();
+            o["awake"]    = q.awake;
+            o["warmed"]   = q.warmed;
+            o["pending"]  = q.pending;
+            o["bytes"]    = q.bytes;
+            o["frames"]   = q.frames;
+            o["bad_sum"]  = q.badSum;
+            o["other"]    = q.other;
+            o["used"]     = q.used;
+            o["give_ups"] = q.giveUps;
+            putAge(o, "woke_s", q.wokeMs);
+            putAge(o, "frame_s", q.frameMs);
+            o["report_mode"] = q.reportMode;
+            o["period"]      = q.period;
+            if (isfinite(q.pm25)) o["pm25"] = q.pm25;
+            if (isfinite(q.pm10)) o["pm10"] = q.pm10;
+        }
+        doc["log_bytes"] = nodeLogSize();
+        serializeJson(doc, out);
+    }
+    sendJson(200, out);
+}
+
+static void sendLogChunk(const char* p, size_t n, void*) {
+    s_http.sendContent(p, n);
+}
+
+/// The log ring as plain text, straight out of the ring: nothing is copied.
+static void handleLog() {
+    if (!authOk()) return;
+    s_http.sendHeader("Cache-Control", "no-store");
+    s_http.setContentLength(nodeLogSize());
+    s_http.send(200, "text/plain; charset=utf-8", "");
+    nodeLogEach(sendLogChunk, nullptr);
+}
+
+/// The page that shows both. Its own, not a section of the setup page: that
+/// one is shared with the ESP-NOW node and held to a gzip budget it has no
+/// room left in, and this is the WiFi node's alone.
+static void handleDiagPage() {
+    if (!authOk()) return;
+    s_http.sendHeader("Cache-Control", "no-store");
+    s_http.send_P(200, PSTR("text/html; charset=utf-8"), NODE_DIAG_HTML);
+}
+
+// ---------------------------------------------------------------------------
 // POST /update — a firmware image from the page (docs/NODE_OTA.md §5)
 // ---------------------------------------------------------------------------
 //
@@ -535,6 +656,9 @@ static void bindRoutes() {
     s_http.on("/api/config", HTTP_POST, handleConfigPost);
     s_http.on("/api/scan", HTTP_GET, handleScan);
     s_http.on("/api/status", HTTP_GET, handleStatus);
+    s_http.on("/api/diag", HTTP_GET, handleDiag);
+    s_http.on("/api/log", HTTP_GET, handleLog);
+    s_http.on("/diag", HTTP_GET, handleDiagPage);
     s_http.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
     // Every other path gets the page: that is what makes a phone's captive-
     // portal probe (generate_204, hotspot-detect.html, …) open it.

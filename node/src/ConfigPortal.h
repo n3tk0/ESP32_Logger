@@ -74,6 +74,19 @@ struct PortalLinkStatus {
     bool     lastOk    = false;   ///< the latest POST was answered (HTTP 200)
     bool     everOk    = false;
     uint32_t lastOkMs  = 0;       ///< millis() of the latest answered POST
+    // For GET /api/diag only.
+    uint32_t posts     = 0;       ///< POSTs answered 200
+    uint32_t postFails = 0;       ///< POSTs not answered 200
+    int16_t  lastCode  = 0;       ///< HTTP status, or HTTPClient's negative error
+    uint32_t lastFailMs = 0;      ///< millis() of the latest failed POST
+    int16_t  lastAccepted = -1;   ///< the collector's `accepted` on the last 200
+    int16_t  lastRoom  = -1;      ///< and its `room` (-1 = not sent)
+    uint16_t backlog   = 0;       ///< readings held for the collector
+    uint16_t backlogCap = 0;
+    uint32_t backlogDropped = 0;  ///< discarded to make room, ever
+    uint32_t wifiConnects = 0;    ///< successful (re)connections
+    uint32_t wifiFails    = 0;    ///< cycles that could not connect
+    uint32_t wifiUpMs     = 0;    ///< millis() of the latest connection
 };
 
 void portalSetLinkStatus(const PortalLinkStatus* s);

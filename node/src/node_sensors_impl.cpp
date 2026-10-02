@@ -9,6 +9,9 @@
 // and the shared file fails with "Wire.h: No such file or directory".
 #include <Wire.h>
 #include <SoftwareSerial.h>
+// The sensor layer's log lines go into the node's log ring too (/api/log).
+#include "NodeLog.h"
+#define NS_LOG(fmt, ...) LOGF(fmt, ##__VA_ARGS__)
 #include "node_common/NodeSensors.cpp"
 
 // ---------------------------------------------------------------------------

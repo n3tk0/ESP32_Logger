@@ -248,6 +248,8 @@ static bool ensureWifi() {
 
     if (connectTo(next ? s_cfg.net.next.ssid : s_cfg.net.ssid,
                   next ? s_cfg.net.next.pass : s_cfg.net.pass)) {
+        s_linkStatus.wifiConnects++;
+        s_linkStatus.wifiUpMs = millis();
         const uint8_t a = s_link.wifiResult(true, which);
         if (a & NodeSync::LA_PROMOTE) {
             // §4.5: the new network is now this node's network; the old one is
@@ -262,6 +264,7 @@ static bool ensureWifi() {
         return true;
     }
     s_link.wifiResult(false, which);
+    s_linkStatus.wifiFails++;
 
     LOGLN("[wifi] repeated failures — opening setup portal");
     s_portalBgRunning = false; // portalRun will stop the HTTP server on exit
@@ -569,6 +572,8 @@ static PostResult postBatch() {
     if (!http.begin(client, url)) {
         LOGLN("[post] http.begin failed");
         s_linkStatus.lastOk = false;
+        s_linkStatus.postFails++;
+        s_linkStatus.lastFailMs = millis();
         return PostResult::Failed;
     }
     http.setTimeout(5000);
@@ -579,6 +584,7 @@ static PostResult postBatch() {
     }
 
     const int code = http.POST(body);
+    s_linkStatus.lastCode = (int16_t)code;
     body = String();   // the request is gone; give its ~3.8 KB back before the reply
     const String reply = (code > 0) ? http.getString() : String();
     http.end();
@@ -590,6 +596,8 @@ static PostResult postBatch() {
         else LOGF("[post] %s (%d held)\n",
                            http.errorToString(code).c_str(), s_backlog.count());
         s_linkStatus.lastOk = false;
+        s_linkStatus.postFails++;
+        s_linkStatus.lastFailMs = millis();
         const uint8_t a = s_link.postResult(false);
         // Not while a restart is pending: discovery rewrites s_cfg's host,
         // which is the collector's new config now, not the one posting.
@@ -600,6 +608,7 @@ static PostResult postBatch() {
     s_linkStatus.lastOk   = true;
     s_linkStatus.everOk   = true;
     s_linkStatus.lastOkMs = millis();
+    s_linkStatus.posts++;
     if (s_link.postResult(true) & NodeSync::LA_TRIAL_OK) {
         LOGLN("[cfg] the new network settings reached the collector; kept");
         s_sync.trialRev = 0;
@@ -638,6 +647,8 @@ static PostResult postBatch() {
         if (deserializeJson(res, reply) == DeserializationError::Ok) {
             accepted = res["accepted"] | n;
             room     = res["room"]     | -1;
+            s_linkStatus.lastAccepted = (int16_t)accepted;
+            s_linkStatus.lastRoom     = (int16_t)room;
             handleReplyCfg(res["cfg"]);
             readReplyFw(res["fw"]);
         } else {
@@ -986,6 +997,11 @@ void setup() {
 }
 
 void loop() {
+    // For /api/diag, which cannot see the queue itself.
+    s_linkStatus.backlog        = (uint16_t)s_backlog.count();
+    s_linkStatus.backlogCap     = (uint16_t)NodeBacklog::CAPACITY;
+    s_linkStatus.backlogDropped = s_backlog.dropped();
+
     if (s_portalBgRunning) {
         portalHandleClient();
     }

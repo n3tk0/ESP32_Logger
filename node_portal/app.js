@@ -89,7 +89,7 @@ en: {
   sleep: "Deep sleep",
   sleepHint: "On for batteries. Off = mains powered, always awake.",
   fw: "Firmware", localEdits: "local edits",
-  fwRun: "Running", fwGo: "Upload & restart",
+  fwRun: "Running", fwGo: "Upload & restart", diag: "Diagnostics",
   fwUp: "Uploading… {p}%", fwChk: "Checking…", fwOk: "Updated, restarting…",
   fwFail: "Upload failed: {e}",
   fwOld: "This firmware cannot update itself from the page.",
@@ -176,7 +176,7 @@ bg: {
   sleep: "Дълбок сън",
   sleepHint: "Включено при батерии. Изключено = мрежово захранване, винаги буден.",
   fw: "Фърмуер", localEdits: "локални промени",
-  fwRun: "Работещ", fwGo: "Качи и рестартирай",
+  fwRun: "Работещ", fwGo: "Качи и рестартирай", diag: "Диагностика",
   fwUp: "Качване… {p}%", fwChk: "Проверка…", fwOk: "Обновено, рестартиране…",
   fwFail: "Качването не успя: {e}",
   fwOld: "Този фърмуер не може да се обнови от страницата.",
@@ -576,6 +576,8 @@ function linkBox() {
   k += kpi(t("collector"), st.collector ? esc(t(st.collector)) : "—");
   k += kpi(t("lastOk"), st.last_ok_s == null || st.last_ok_s < 0 ? esc(t("never")) : esc(t("ago", { t: fmtDur(st.last_ok_s) })));
   var b = '<div class="kpis">' + k + '</div><p class="hint">' + esc(t("linkHint")) + "</p>";
+  // The WiFi node's own page (GET /diag); the ESP-NOW node has none.
+  if (isW()) b += '<p><a href="/diag">' + esc(t("diag")) + " →</a></p>";
   var nx = S.cfg.link && S.cfg.link.next_ssid;
   if (nx) b += '<div class="field"><span class="field-label">' + esc(t("nextNet")) + '</span><div class="mono">' + esc(nx) + '</div><div class="hint">' + esc(t("nextNetHint")) + "</div></div>";
   return b;

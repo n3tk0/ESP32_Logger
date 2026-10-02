@@ -27,6 +27,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <math.h>
 
 #include "src/nodecfg/NodeConfig.h"
 #include "src/nodecfg/MetricCatalog.h"
@@ -86,6 +87,39 @@ void nodeSensorsSetWait(void (*wait)(uint32_t ms));
 /// Short human description for the boot log and /api/status,
 /// e.g. "bmx280@0x76 ok, ds18b20x2@GPIO12 ok, pulse@GPIO4 rain".
 const char* nodeSensorsDescribe();
+
+/// One configured entry, for a diagnostics page.
+struct NodeSensorDiag {
+    const char* type;       ///< sensorTypeName()
+    bool        ok;         ///< answered at its last bring-up
+    uint8_t     addr;       ///< I2C address that answered
+    uint8_t     found;      ///< ds18b20: probes on the bus
+    uint32_t    reads;      ///< reads that gave at least one value
+    uint32_t    empty;      ///< reads that gave none
+    uint32_t    lastOkMs;   ///< millis() of the last good read, 0 = never
+};
+
+/// Fill `out` with the configured entries, in config order; returns how many.
+int nodeSensorsDiag(NodeSensorDiag* out, int maxOut);
+
+/// The SDS011's serial line, for telling a wiring fault (no bytes), a wrong
+/// baud rate or noise (bytes, no frames) and a sensor left in periodic or
+/// query mode (frames rare or none, `period`/`reportMode` non-zero) apart.
+struct NodeSdsDiag {
+    bool     up = false, awake = false, warmed = false, pending = false;
+    uint32_t bytes   = 0;   ///< every byte received
+    uint32_t frames  = 0;   ///< valid measurement frames
+    uint32_t badSum  = 0;   ///< measurement frames with a bad checksum
+    uint32_t other   = 0;   ///< command replies and misaligned frames
+    uint32_t used    = 0;   ///< frames that went out as a reading
+    uint32_t giveUps = 0;   ///< due reads abandoned for want of a frame
+    uint32_t wokeMs  = 0;   ///< millis() of the last wake command
+    uint32_t frameMs = 0;   ///< millis() of the newest frame, 0 = none
+    int16_t  reportMode = -2;   ///< last query: 0 active, 1 query, -1 no answer, -2 not asked
+    int16_t  period     = -2;   ///< last query: minutes, 0 continuous, -1/-2 as above
+    float    pm25 = NAN, pm10 = NAN;   ///< the last values sent
+};
+const NodeSdsDiag& nodeSensorsSdsDiag();
 
 /// Release interrupts and serial ports before deep sleep or a restart.
 void nodeSensorsEnd();
