@@ -476,9 +476,15 @@ struct __attribute__((packed)) FwDoneMsg {
 // below build and walk it, and espnowValidate() walks it once, exactly, before
 // anyone else reads it.
 
-/// Most values in one DATA2 sample: the eight-metric budget plus
-/// battery_voltage. MetricCatalog.h static_asserts that this is enough.
-static const uint8_t EN_DATA2_MAX_VALUES = 9;
+/// Most values in one DATA2 sample: the twelve-metric budget
+/// (nodecfg::MAX_METRICS) plus battery_voltage. MetricCatalog.h
+/// static_asserts that this is enough.
+///
+/// It was 9, and a collector built then refuses a sample with more values
+/// (espnowValidate). A node only sends more than nine once its config has
+/// more than eight metrics, which only an updated collector or an updated
+/// node's own page can give it — so update the collector first.
+static const uint8_t EN_DATA2_MAX_VALUES = 13;
 
 /// The 12-byte header, identical in layout to the front of DataMsg.
 struct __attribute__((packed)) Data2Header {

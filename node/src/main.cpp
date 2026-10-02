@@ -50,6 +50,8 @@ static PortalLinkStatus  s_linkStatus;
 
 static uint32_t s_lastPost   = 0;
 static bool     s_postedOnce = false;
+/// Sends since boot: which sensors a cycle reads (nodecfg::sensorDue()).
+static uint32_t s_tick       = 0;
 
 /// How many configured sensor entries answered at the last nodeSensorsBegin(),
 /// and the cycles since. One that failed at boot while another works is
@@ -686,7 +688,7 @@ static PostResult postBatch() {
 /// the queue exists to keep.
 static void collectReading() {
     NodeReading vals[NODE_MAX_READINGS];
-    const int n = nodeSensorsRead(s_cfg, vals, NODE_MAX_READINGS);
+    const int n = nodeSensorsRead(s_cfg, vals, NODE_MAX_READINGS, s_tick);
     if (n == 0) {
         LOGLN("[sensor] nothing to record this cycle");
         return;
@@ -991,7 +993,9 @@ void loop() {
     const uint32_t now = millis();
 
     // Unsigned subtraction, so the ~49-day millis() wrap is a non-event.
-    if (s_postedOnce && (now - s_lastPost) < (uint32_t)s_cfg.interval_s * 1000UL) {
+    const uint32_t periodMs = (uint32_t)s_cfg.interval_s * 1000UL;
+    if (s_postedOnce && (now - s_lastPost) < periodMs) {
+        nodeSensorsIdle(s_cfg, s_tick, periodMs - (now - s_lastPost));
         delay(50);
         return;
     }
@@ -1030,6 +1034,7 @@ void loop() {
     // thing the backlog exists for — the cycle where the router is down — must
     // not be the one cycle whose reading was never taken.
     if (nodeSensorsReady()) collectReading();
+    s_tick++;
 
     // An offer is only ever the one this cycle's replies carried.
     s_fwOffer.present = false;

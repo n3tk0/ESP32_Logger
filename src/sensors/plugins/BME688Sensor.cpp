@@ -4,9 +4,7 @@
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 #include "../ReadingCache.h"         // ambient temperature reference
 #include "../../utils/Psychrometrics.h"
-#include "../../utils/AtomicWrite.h"
-#include "../../pipeline/DataPipeline.h"   // fsMutex
-#include <LittleFS.h>
+#include "../../utils/IaqBaselineStore.h"
 
 bool BME688Sensor::init(JsonObjectConst cfg) {
     _enabled      = cfg["enabled"]            | true;
@@ -54,9 +52,12 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _bme.setIIRFilterSize(BME688_Mini::FILTER_3);
     _bme.setGasHeater(_heaterTemp, _heaterDurMs);
 
+    // New settings start from a clean slate: a baseline taken under other
+    // heater settings (or another sensor id) must not carry over in memory.
+    // _loadBaseline() restores one only when the file matches these settings.
+    _iaq        = GasIaq();
     _initMs     = millis();
     _warm       = false;
-    _lastSaveMs = _initMs;
     _loadBaseline();
 
     _ready = true;
@@ -117,7 +118,7 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
     float h   = _calHumidity.apply(_bme.humidity);
     float p   = _calPressure.apply(_bme.pressure / 100.0f);
     float g   = _calGas.apply(rawGas);
-    float iaq = _computeIaq(h, rawGas);                 // 0..500 (lower = cleaner)
+    float iaq = _iaq.update(h, rawGas, _warmedUp());  // 0..500 (lower = cleaner)
     _maybeSaveBaseline();
 
     // Dew point pairs the RH with the temperature it was measured AT — the raw
@@ -150,57 +151,9 @@ int BME688Sensor::readAll(SensorReading* out, int maxOut) {
 }
 
 // ---------------------------------------------------------------------------
-// Gas baseline persistence.
-//
-// The file holds the heater settings next to the baseline: the MOX resistance
-// depends on the heater temperature and duration, so a baseline taken under
-// other settings is discarded rather than trusted.
+// Gas baseline persistence (utils/IaqBaselineStore.h).
 namespace {
-struct IaqBaselineFile {
-    uint32_t magic;          // 'IAQ1'
-    int16_t  heaterTemp;
-    int16_t  heaterDurMs;
-    float    baseline;       // Ω
-};
-constexpr uint32_t IAQ_MAGIC = 0x31514149u;            // "IAQ1"
 constexpr uint32_t IAQ_WARMUP_MS = 30UL * 60UL * 1000UL;  // heater settle time
-constexpr uint32_t IAQ_SAVE_EVERY_MS = 60UL * 60UL * 1000UL;
-}
-
-// IAQ (0..500, lower = cleaner; BSEC convention) — humidity + gas heuristic.
-// No Bosch BSEC: a self-calibrating clean-air baseline tracks the upper
-// envelope of the MOX resistance, and the index combines a humidity score
-// (optimal RH ≈ 40 %) with the current resistance ratio to that baseline.
-float BME688Sensor::_computeIaq(float humidity, float rawGasOhm) {
-    // Baseline: rise quickly toward a higher (cleaner) resistance ceiling,
-    // drift down very slowly to absorb sensor aging / ambient drift.
-    if (_gasBaseline <= 0.0f)          _gasBaseline = rawGasOhm;                          // seed
-    else if (rawGasOhm > _gasBaseline) _gasBaseline += (rawGasOhm - _gasBaseline) * 0.10f;
-    // No downward drift while the heater settles: those low readings say
-    // nothing about the air, and a restored baseline would sink toward them.
-    else if (_warmedUp())
-                                       _gasBaseline += (rawGasOhm - _gasBaseline) * 0.0005f;
-    if (_gasBaseline < 1.0f) _gasBaseline = 1.0f;
-
-    // Humidity contribution (0..25): peaks in the 38–42 % comfort band.
-    float humScore;
-    if (humidity >= 38.0f && humidity <= 42.0f) humScore = 25.0f;
-    else if (humidity < 38.0f)                  humScore = (humidity / 38.0f) * 25.0f;
-    else                                        humScore = ((100.0f - humidity) / 58.0f) * 25.0f;
-    if (humScore < 0.0f)  humScore = 0.0f;
-    if (humScore > 25.0f) humScore = 25.0f;
-
-    // Gas contribution (0..75): current resistance relative to clean baseline.
-    float ratio = rawGasOhm / _gasBaseline;   // ≈1 when clean, <1 when polluted
-    if (ratio > 1.0f) ratio = 1.0f;
-    if (ratio < 0.0f) ratio = 0.0f;
-    float gasScore = ratio * 75.0f;
-
-    // Quality 0..100 (higher = cleaner) inverted to IAQ 0..500 (lower = cleaner).
-    float iaq = (100.0f - (humScore + gasScore)) * 5.0f;
-    if (iaq < 0.0f)   iaq = 0.0f;
-    if (iaq > 500.0f) iaq = 500.0f;
-    return iaq;
 }
 
 // Latched, so the 49.7-day millis() wrap does not bring the warm-up back.
@@ -209,59 +162,27 @@ bool BME688Sensor::_warmedUp() {
     return _warm;
 }
 
-void BME688Sensor::_baselinePath(char* out, size_t len) const {
-    // Hash the id rather than putting it in the path: ids are user text.
-    uint32_t h = 2166136261u;
-    for (const char* p = getId(); *p; p++) { h ^= (uint8_t)*p; h *= 16777619u; }
-    snprintf(out, len, "/config/iaq_%08lx.bin", (unsigned long)h);
-}
-
 void BME688Sensor::_loadBaseline() {
     char path[32];
-    _baselinePath(path, sizeof(path));
-    File f = LittleFS.open(path, FILE_READ);
-    if (!f) return;
-    IaqBaselineFile rec{};
-    const bool ok = f.read((uint8_t*)&rec, sizeof(rec)) == sizeof(rec);
-    f.close();
-    if (!ok || rec.magic != IAQ_MAGIC) return;
-    if (rec.heaterTemp != _heaterTemp || rec.heaterDurMs != _heaterDurMs) {
-        Serial.println("[BME688] IAQ baseline from other heater settings, starting over");
-        return;
-    }
-    if (!(rec.baseline >= 1.0f && rec.baseline < 1e9f)) return;
-    _gasBaseline   = rec.baseline;
-    _savedBaseline = rec.baseline;
-    Serial.printf("[BME688] IAQ baseline %.0f Ohm restored\n", rec.baseline);
+    IaqBaselineStore::path("iaq", getId(), path, sizeof(path));
+    _iaq.baseline = IaqBaselineStore::load(path, _heaterTemp, _heaterDurMs, "BME688");
+    _saver.reset(millis(), _iaq.baseline);
 }
 
 // Runs from readAll() in SlowSensorTask (isBlocking), which holds no
 // wireMutex, so waiting on fsMutex here stalls no other sensor.
 void BME688Sensor::_maybeSaveBaseline() {
-    const uint32_t now = millis();
     // Readings taken while the heater is still settling are low and would
     // drag the stored baseline toward "polluted".
     if (!_warmedUp()) return;
-    if (now - _lastSaveMs < IAQ_SAVE_EVERY_MS) return;
-    _lastSaveMs = now;
-    if (_gasBaseline < 1.0f) return;
-    // Skip a write that changes almost nothing: flash wear for no benefit.
-    if (_savedBaseline > 0.0f &&
-        fabsf(_gasBaseline - _savedBaseline) < _savedBaseline * 0.02f) return;
-
-    IaqBaselineFile rec{ IAQ_MAGIC, (int16_t)_heaterTemp, (int16_t)_heaterDurMs, _gasBaseline };
+    const uint32_t now = millis();
+    if (!_saver.due(now, _iaq.baseline)) return;
     char path[32];
-    _baselinePath(path, sizeof(path));
-    if (!LittleFS.exists("/config")) LittleFS.mkdir("/config");
-    const bool ok = atomicWrite(LittleFS, path, [&](File& f) -> bool {
-        return f.write((const uint8_t*)&rec, sizeof(rec)) == sizeof(rec);
-    }, fsMutex);
-    if (ok) {
-        _savedBaseline = _gasBaseline;
-    } else {
-        // fsMutex busy (a datalog flush) or a write error: try again in
-        // five minutes instead of waiting out the hour.
-        _lastSaveMs = now - IAQ_SAVE_EVERY_MS + 5UL * 60UL * 1000UL;
-        Serial.println("[BME688] IAQ baseline save failed, retrying in 5 min");
-    }
+    IaqBaselineStore::path("iaq", getId(), path, sizeof(path));
+    const bool ok = IaqBaselineStore::save(path, _heaterTemp, _heaterDurMs,
+                                           _iaq.baseline, 2000);
+    _saver.done(now, _iaq.baseline, ok);
+    // fsMutex busy (a datalog flush) or a write error: the saver tries
+    // again in five minutes instead of waiting out the hour.
+    if (!ok) Serial.println("[BME688] IAQ baseline save failed, retrying in 5 min");
 }

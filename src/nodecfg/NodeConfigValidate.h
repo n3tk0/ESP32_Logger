@@ -159,10 +159,16 @@ static inline void useField(const PinUse& u, char out[EN_CFG_FIELD_LEN]) {
 ///                 bh1750 addr 0x23 or 0x5C
 ///                 ds18b20 count 1..8, metric 1..10 of [a-z0-9_] from a letter
 ///                 pulse per_pulse > 0, debounce_us <= 1 s
+///                 sds011 warmup_s 10..120
+///                 (interval_s is not checked against the node's: one at
+///                 or below it means every send — see sensorEvery(). The
+///                 node's interval is changed without a validation pass by
+///                 the collector's interval push, which must not be able to
+///                 turn a saved config invalid.)
 ///               no sds011/pulse on a sleeping ESP-NOW node
 ///               one entry per type, except ds18b20
 ///               not bmx280 and bme688 together
-///               at most 8 metrics in total (pressure_sea always counted)
+///               at most 12 metrics in total (pressure_sea always counted)
 ///               no two metrics with the same name
 ///   pins        every pin in use exists on the chip, is not forbidden, and
 ///               is used once (I2C only when an I2C sensor is present, the
@@ -269,6 +275,13 @@ static inline bool validate(const NodeConfig& c, Validation& out) {
                 if (s.mode != PulseMode::Rain && s.mode != PulseMode::Flow) {
                     sensorFieldPath(f, sizeof(f), i, "mode");
                     return fail(out, f, "must be rain or flow");
+                }
+                break;
+            case SensorType::Sds011:
+                if (s.warmup_s < SDS_WARMUP_MIN_S || s.warmup_s > SDS_WARMUP_MAX_S) {
+                    sensorFieldPath(f, sizeof(f), i, "warmup_s");
+                    return fail(out, f, "must be %u..%u seconds",
+                                (unsigned)SDS_WARMUP_MIN_S, (unsigned)SDS_WARMUP_MAX_S);
                 }
                 break;
             default:

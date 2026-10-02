@@ -226,10 +226,14 @@ bool TaskManager::init(fs::FS& fs) {
 
     // ── Queues ───────────────────────────────────────────────────────────
     // Dynamic queue depth: scale sensor queue to actual sensor count × 4 metrics
-    // so one full tick cycle never drops readings (#3.5)
+    // so one full tick cycle never drops readings (#3.5) — and never below
+    // what ONE plugin may hand back in a tick, which a remote node with a
+    // backlog to drain does.
     int sCount    = sensorManager.count();
     int dynSDepth = (sCount > 0) ? max((int)QUEUE_SENSOR_DEPTH, sCount * 4)
                                  : (int)QUEUE_SENSOR_DEPTH;
+    if (dynSDepth < SensorManager::MAX_METRICS_PER_TICK)
+        dynSDepth = SensorManager::MAX_METRICS_PER_TICK;
 
     sensorQueue  = xQueueCreate((UBaseType_t)dynSDepth, sizeof(SensorReading));
     storageQueue = xQueueCreate(QUEUE_STORAGE_DEPTH,    sizeof(SensorReading));

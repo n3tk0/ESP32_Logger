@@ -1,4 +1,7 @@
 #include "SensorManager.h"
+
+#include <memory>
+#include <new>
 #include "../utils/MutexGuard.h"
 #include <LittleFS.h>
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
@@ -220,12 +223,20 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
     int pushed = 0;
     uint32_t ms = millis();
 
-    // Up to 8 metrics per sensor per tick.  The fattest producer is BME68x at
-    // 7 (T/H/P/gas/IAQ + dew_point + humidity_amb); SPS30 emits 5
-    // (4 × PM + device_status).  Keep this >= the largest getMetrics() count
-    // of any registered plugin — readAll() silently truncates otherwise.
-    SensorReading readings[8];
-    constexpr int MAX_METRICS_PER_TICK = 8;
+    // Up to 24 metrics per sensor per tick. The fattest producer is a remote
+    // node: nodecfg::MAX_METRICS (12) of its own, three battery metrics on an
+    // ESP-NOW node and the dew_point + iaq RemoteNodeSensor derives — 17 —
+    // with the rest of the buffer left for its queued history, which drains
+    // behind the live values. Of the wired plugins BME68x is the largest at 7
+    // (T/H/P/gas/IAQ + dew_point + humidity_amb). Keep this >= the largest
+    // getMetrics() count of any registered plugin — readAll() silently
+    // truncates otherwise.
+    //
+    // Static, not on the stack: 24 readings are ~1.7 KB, more than SensorTask
+    // and SlowSensorTask (4 KB stacks) should carry. One buffer serves both,
+    // because every use of it is inside configMutex, held below for the whole
+    // loop by whichever of the two is ticking.
+    static SensorReading readings[MAX_METRICS_PER_TICK];
 
     // R14 / AUDIT 3.19 + 15.3: hold configMutex for the read iteration so
     // a concurrent reloadConfig() can't _destroyAll() the sensor pointer
@@ -265,6 +276,7 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
             n = s->readAll(readings, MAX_METRICS_PER_TICK);
             latUs = (uint32_t)(micros() - t0us);
         }
+        s->afterRead();
 
         // ------------------------------------------------------------------
         // Health tracking — rotate hourly buckets for every elapsed hour.
@@ -459,8 +471,11 @@ void SensorManager::toJson(JsonArray arr) const {
     // paused for one short window and removes the partial-result hazard
     // where one sensor gets values and another doesn't because the 20 ms
     // try-take expired mid-loop.
-    struct Slot { JsonObject obj; ISensor* sensor; const char* metrics[8]; int mcount; int idx; };
-    Slot slots[16];
+    struct Slot { JsonObject obj; ISensor* sensor; const char* metrics[MAX_METRIC_NAMES]; int mcount; int idx; };
+    // On the heap: sixteen slots of twenty names are ~1.6 KB, and this runs on
+    // the AsyncTCP worker's stack. Freed when the function returns.
+    std::unique_ptr<Slot[]> slots(new (std::nothrow) Slot[16]);
+    if (!slots) return;
     int  slotCount = 0;
 
     for (int i = 0; i < _count && slotCount < 16; i++) {
@@ -488,7 +503,7 @@ void SensorManager::toJson(JsonArray arr) const {
         sl.obj    = o;
         sl.sensor = s;
         sl.idx    = i;
-        sl.mcount = s->getMetrics(sl.metrics, 8);
+        sl.mcount = s->getMetrics(sl.metrics, MAX_METRIC_NAMES);
 
         JsonArray ma = o["metrics"].to<JsonArray>();
         for (int m = 0; m < sl.mcount; m++) ma.add(sl.metrics[m]);

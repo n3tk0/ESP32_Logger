@@ -347,7 +347,7 @@ CAPS = {
                       "15": "boot strap, must be low at reset",
                       "1": "serial console TX", "3": "serial console RX",
                       "16": "no interrupt, no pull-up"},
-        "max_sensors": 8, "max_metrics": 8,
+        "max_sensors": 8, "max_metrics": 12,
     },
     "esp32c3": {
         "transport": "espnow", "hw": "esp32c3",
@@ -361,7 +361,7 @@ CAPS = {
         "warn_pins": {"2": "boot strap", "8": "boot strap", "9": "boot strap (BOOT button)",
                       "18": "USB D-", "19": "USB D+", "20": "serial console RX",
                       "21": "serial console TX"},
-        "max_sensors": 8, "max_metrics": 8,
+        "max_sensors": 8, "max_metrics": 12,
     },
 }
 

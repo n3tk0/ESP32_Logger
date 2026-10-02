@@ -304,7 +304,7 @@ jobs:
   # list on a blank filesystem (node/src/NodeStore.cpp).  The matrix walks the
   # seeds that take a different #ifdef path there -- each type at least once,
   # both pulse modes, the two that disable the default sensor -- and proves
-  # the compile-time budget warning still fires for a seed over 8 metrics.
+  # the compile-time budget warning still fires for a seed over 12 metrics.
   build-node:
     name: build (esp8266 node, ${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -330,13 +330,14 @@ jobs:
           - name: dust
             disable: ''
             flags: -DNODE_SENSOR_SDS011
-          # Nine metrics against the collector's eight-per-tick ceiling. This
+          # Thirteen metrics (BMx280 4, BH1750 1, SDS011 2, pulse 2, four
+          # DS18B20 probes) against the twelve-metric budget. This
           # entry exists to prove the guard fires, not to ship a config --
           # expect_warning turns a missing warning into a failure, so the
           # check cannot rot into a no-op the way an unasserted warning would.
           - name: over-budget
             disable: ''
-            flags: -DNODE_SENSOR_BH1750 -DNODE_SENSOR_SDS011 -DNODE_SENSOR_PULSE
+            flags: -DNODE_SENSOR_BH1750 -DNODE_SENSOR_SDS011 -DNODE_SENSOR_PULSE -DNODE_SENSOR_DS18B20 -DNODE_DS18B20_EXPECTED=4
             expect_warning: 'true'
 
     steps:
@@ -391,10 +392,10 @@ jobs:
         if: matrix.expect_warning == 'true'
         working-directory: node
         run: |
-          if grep -q "emits more than 8 metrics" build.log; then
+          if grep -q "emits more than 12 metrics" build.log; then
             echo "metric-budget warning present, as expected"
           else
-            echo "::error::Set exceeds the 8-metric ceiling but node_config.h did not warn - the guard has stopped working"
+            echo "::error::Set exceeds the 12-metric ceiling but node_config.h did not warn - the guard has stopped working"
             exit 1
           fi
 

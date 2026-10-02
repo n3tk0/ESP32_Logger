@@ -40,6 +40,8 @@ bool RemoteIngest::put(const char* nodeId, const char* metric, float value,
             continue;
         }
         if (eq(_e[i].nodeId, nodeId) && eq(_e[i].metric, metric)) {
+            _e[i].gapMs[1] = _e[i].gapMs[0];
+            _e[i].gapMs[0] = now - _e[i].rxMillis;
             _e[i].value    = value;
             _e[i].ts       = ts;
             _e[i].rxMillis = now;
@@ -57,6 +59,8 @@ bool RemoteIngest::put(const char* nodeId, const char* metric, float value,
         _e[free].ts       = ts;
         _e[free].rxMillis = now;
         _e[free].seenMs   = now;
+        _e[free].gapMs[0] = 0;
+        _e[free].gapMs[1] = 0;
         _e[free].used     = true;
         stored = true;
     }
@@ -113,8 +117,27 @@ int RemoteIngest::historyRoom() const {
     return n > 0 ? n : 0;
 }
 
+uint32_t RemoteIngest::staleLimitMs(uint32_t staleAfterMs, uint32_t gapA, uint32_t gapB) {
+    if (staleAfterMs == 0) return 0;
+    if (gapA == 0) return staleAfterMs;                 // no gap seen yet
+    // One gap seen: that one. Two: the shorter, so an outage between two
+    // readings does not stretch the limit for the next.
+    const uint32_t gap = (gapB == 0 || gapA < gapB) ? gapA : gapB;
+    // A gap is at most interval_s (65535 s) in practice; cap the product so a
+    // pathological one cannot wrap round to a short limit.
+    const uint32_t lim = gap > 0x40000000u ? 0xFFFFFFFFu : gap / 2u * 5u;
+    return lim > staleAfterMs ? lim : staleAfterMs;
+}
+
 int RemoteIngest::drain(const char* nodeId, SensorReading* out, int maxOut,
                         uint32_t staleAfterMs) {
+    if (nodeId == nullptr || out == nullptr || maxOut <= 0) return 0;
+    const int n = drainLatest(nodeId, out, maxOut, staleAfterMs);
+    return n + drainHistory(nodeId, out + n, maxOut - n);
+}
+
+int RemoteIngest::drainLatest(const char* nodeId, SensorReading* out, int maxOut,
+                              uint32_t staleAfterMs) {
     if (nodeId == nullptr || out == nullptr || maxOut <= 0) return 0;
 
     const uint32_t now = millis();
@@ -144,11 +167,20 @@ int RemoteIngest::drain(const char* nodeId, SensorReading* out, int maxOut,
         // ProcessingTask's backfill test matters here: once the value is more
         // than two minutes old, its repeats stop being treated as live.
         r.timestamp = _e[i].ts;
-        r.quality   = (staleAfterMs > 0 && age > staleAfterMs)
+        const uint32_t lim = staleLimitMs(staleAfterMs, _e[i].gapMs[0], _e[i].gapMs[1]);
+        r.quality   = (lim > 0 && age > lim)
                     ? QUALITY_ERROR
                     : QUALITY_GOOD;
         n++;
     }
+    taskEXIT_CRITICAL(&_mux);
+    return n;
+}
+
+int RemoteIngest::drainHistory(const char* nodeId, SensorReading* out, int maxOut) {
+    if (nodeId == nullptr || out == nullptr || maxOut <= 0) return 0;
+    int n = 0;
+    taskENTER_CRITICAL(&_mux);
 
     // ── Queued history, oldest first, in whatever room is left ──────────────
     //
@@ -292,7 +324,8 @@ int RemoteIngest::peekLatest(const char* nodeId, SensorReading* out, int maxOut,
         // mailbox, so a slot that is never refilled keeps answering with the
         // value it first received. Reporting that as good would make a node
         // that died an hour ago indistinguishable from one reporting now.
-        out[n].quality   = (staleAfterMs > 0 && age > staleAfterMs)
+        const uint32_t lim = staleLimitMs(staleAfterMs, _e[i].gapMs[0], _e[i].gapMs[1]);
+        out[n].quality   = (lim > 0 && age > lim)
                          ? QUALITY_ERROR
                          : QUALITY_GOOD;
         n++;

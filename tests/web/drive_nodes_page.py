@@ -272,12 +272,12 @@ with sync_playwright() as p:
     panel("e:1").locator('[data-click="nodesCfgAddSensor"]').click()
     pg.wait_for_timeout(300)
     check(panel("e:1").locator(".nd-sensor").count() == 2, "adding a sensor adds a row for it")
-    check(panel("e:1").locator("[data-nd-budget]").inner_text().lower().startswith("5 / 8"),
+    check(panel("e:1").locator("[data-nd-budget]").inner_text().lower().startswith("5 / 12"),
           "and the metric budget counts it (%r)" % panel("e:1").locator("[data-nd-budget]").inner_text())
     check("pick a pin" in hint("e:1", "sensors[1].pin").lower(), "a new sensor asks for its pin")
     fld("e:1", "sensors[1].count").fill("3")
     pg.wait_for_timeout(150)
-    check(panel("e:1").locator("[data-nd-budget]").inner_text().lower().startswith("7 / 8"),
+    check(panel("e:1").locator("[data-nd-budget]").inner_text().lower().startswith("7 / 12"),
           "three probes cost three metrics (%r)" % panel("e:1").locator("[data-nd-budget]").inner_text())
     # A pin the chip cannot use: flagged here, and sent anyway, so the
     # collector's own validator is what refuses it below.
@@ -308,7 +308,7 @@ with sync_playwright() as p:
           "a stored password is never shown, only said to be there (%r)" % pw.get_attribute("placeholder"))
     check(fld("w:greenhouse", "i2c.sda").input_value() == "D2", "NodeMCU labels are used for an ESP8266 (%r)"
           % fld("w:greenhouse", "i2c.sda").input_value())
-    check(panel("w:greenhouse").locator("[data-nd-budget]").inner_text().lower().startswith("7 / 8"),
+    check(panel("w:greenhouse").locator("[data-nd-budget]").inner_text().lower().startswith("7 / 12"),
           "BME688 (5) + two probes = 7 of 8")
     fld("w:greenhouse", "interval_s").fill("120")
     fld("w:greenhouse", "net.pass").fill("newpass99")
@@ -383,7 +383,9 @@ with sync_playwright() as p:
     sent = e1[-1]["config"] if e1 else {}
     check(sorted(sent.keys()) == ["name", "sensors"],
           "the ESP-NOW node got its name and its sensor list, nothing else (%r)" % sorted(sent.keys()))
-    check(sent.get("sensors", [{}, {}])[1:] == [{"type": "ds18b20", "pin": 5, "count": 3, "metric": "probe_temp"}],
+    # interval_s: 0 comes with every new entry, so it cannot inherit the
+    # interval of the same-type entry that sat at its index before.
+    check(sent.get("sensors", [{}, {}])[1:] == [{"type": "ds18b20", "pin": 5, "count": 3, "metric": "probe_temp", "interval_s": 0}],
           "with D3 sent as GPIO5 (%r)" % sent.get("sensors"))
     b1 = row(pg, "en:1").locator(".node-row-name").inner_text().lower()
     check("pending rev 4 → 5" in b1, "and it is now pending the rev it was sent (%r)" % b1)

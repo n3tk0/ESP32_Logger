@@ -25,6 +25,7 @@
 #include "IngestHandler.h"           // POST /api/ingest (FEATURE_REMOTE_NODES)
 #ifdef FEATURE_REMOTE_NODES
 #include "../sensors/RemoteIngest.h"
+#include "../sensors/plugins/RemoteNodeSensor.h"
 #include "../nodes/NodeCfgStore.h"   // per-node "cfg" in the status lists
 #include "NodeCfgApi.h"              // /api/nodes/config, /api/nodes/handover
 #include "NodeFwApi.h"               // /api/nodes/fw*, docs/NODE_OTA.md §2.3
@@ -764,6 +765,16 @@ static void handleEspnowForget(AsyncWebServerRequest* req) {
 // (REMOTE_STATUS_STALE_MS is in IngestHandler.h: the handover shares it.)
 
 static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
+    // Sixteen is every metric a node can send: nodecfg's twelve plus an
+    // ESP-NOW node's three battery metrics. On the heap for this request
+    // only: ~1.2 KB is too much for the AsyncTCP worker's stack, and too much
+    // to keep for good in RAM for a page that is rarely open.
+    static constexpr int MAX_NODE_READINGS = 16;
+    SensorReading* readings = new (std::nothrow) SensorReading[MAX_NODE_READINGS];
+    if (!readings) {
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
+        return;
+    }
     JsonDocument doc;
     JsonArray nodesArr = doc["nodes"].to<JsonArray>();
 
@@ -786,11 +797,7 @@ static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
         if (seen) n["age_ms"] = ageMs; else n["age_ms"] = nullptr;
         n["online"] = seen && (ageMs < REMOTE_STATUS_STALE_MS);
 
-        // Eight is every metric a node of this kind sends with room to spare
-        // (temperature, humidity, pressure, battery and three more), and the
-        // array is on the AsyncTCP worker's stack, which is not generous.
-        SensorReading readings[8];
-        const int mCount = remoteIngest.peekLatest(nodeId, readings, 8,
+        const int mCount = remoteIngest.peekLatest(nodeId, readings, MAX_NODE_READINGS,
                                                    REMOTE_STATUS_STALE_MS);
         JsonArray mArr = n["metrics"].to<JsonArray>();
         for (int m = 0; m < mCount; m++) {
@@ -805,6 +812,7 @@ static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
             mObj["ts"]     = readings[m].timestamp;
         }
     }
+    delete[] readings;
     sendJsonResponse(req, doc);
 }
 #endif
@@ -1244,15 +1252,30 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
         return;
     }
 
-    SensorReading readings[8];
+    // As many as a tick may take, on the heap for this request only (as in
+    // handleApiRemoteStatus): too much for the AsyncTCP worker's stack.
+    SensorReading* readings = new (std::nothrow) SensorReading[SensorManager::MAX_METRICS_PER_TICK];
+    if (!readings) {
+        req->send(503, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
+        return;
+    }
     bool tookMutex = false;
     if (wireMutex) {
         tookMutex = (xSemaphoreTake(wireMutex, pdMS_TO_TICKS(300)) == pdTRUE);
     }
-    int n = s->readAll(readings, 8);
+    int n;
+#ifdef FEATURE_REMOTE_NODES
+    // A remote sensor's readAll() drains the node's queued history, which
+    // this reply would show once and storage would never see.
+    if (strcmp(s->getType(), "remote") == 0)
+        n = static_cast<RemoteNodeSensor*>(s)->readLatest(readings, SensorManager::MAX_METRICS_PER_TICK);
+    else
+#endif
+        n = s->readAll(readings, SensorManager::MAX_METRICS_PER_TICK);
     if (tookMutex) xSemaphoreGive(wireMutex);
 
     if (n <= 0) {
+        delete[] readings;
         s->incErrorCount();
         req->send(500, "application/json", "{\"ok\":false,\"error\":\"read failed\"}");
         return;
@@ -1268,6 +1291,7 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
         r["value"]  = readings[i].value;
         r["unit"]   = readings[i].unit;
     }
+    delete[] readings;
     sendJsonResponse(req, doc);
 }
 

@@ -2,6 +2,8 @@
 #include "../ISensor.h"
 #include <Wire.h>   // TwoWire
 #include "../../drivers/BME688_Mini.h"
+#include "../../utils/GasIaq.h"
+#include "../../utils/IaqBaselineStore.h"
 
 // ============================================================================
 // BME680 / BME688 — Temperature / Humidity / Pressure / Gas + IAQ (I2C)
@@ -117,8 +119,9 @@ private:
     // IAQ (Indoor Air Quality) — derived 0..500 index (lower = cleaner air,
     // BSEC convention) from humidity + a self-calibrating gas-resistance
     // baseline. Heuristic only (no Bosch BSEC); accuracy ramps up over the
-    // first minutes as the baseline settles.
-    float _computeIaq(float humidity, float rawGasOhm);
+    // first minutes as the baseline settles. Shared with RemoteNodeSensor:
+    // see utils/GasIaq.h.
+    GasIaq _iaq;
 
     // The gas baseline survives a restart in a small LittleFS file per sensor
     // id (/config/iaq_<hash>.bin), so IAQ does not start over from whatever
@@ -126,7 +129,6 @@ private:
     // run long enough for the resistance to mean something.
     void _loadBaseline();
     void _maybeSaveBaseline();
-    void _baselinePath(char* out, size_t len) const;
     bool _warmedUp();
 
     // Resolves the air temperature to express humidity against: the configured
@@ -155,11 +157,9 @@ private:
     int      _heaterTemp   = 320;
     int      _heaterDurMs  = 150;
     bool     _ready        = false;
-    float    _gasBaseline  = 0.0f;        // clean-air resistance ceiling (Ω)
-    float    _savedBaseline = 0.0f;       // value last written to LittleFS
     uint32_t _initMs        = 0;          // heater warm-up reference
     bool     _warm          = false;      // warm-up over (latched)
-    uint32_t _lastSaveMs    = 0;
+    IaqBaselineStore::Saver _saver;       // when to write the baseline
 
     CalibrationAxis _calTemp;
     CalibrationAxis _calHumidity;

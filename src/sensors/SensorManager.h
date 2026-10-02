@@ -44,6 +44,13 @@ class SensorManager {
 public:
     static constexpr int MAX_SENSORS = 16;
     static constexpr int MAX_PLUGINS = 16;
+    /// Readings one plugin may hand back per tick (readAll's maxOut). See
+    /// tickFiltered() for what it is sized for.
+    static constexpr int MAX_METRICS_PER_TICK = 24;
+    /// Metric NAMES one sensor may list (getMetrics' maxOut), for
+    /// /api/sensors and MQTT discovery. A remote node's twelve, an ESP-NOW
+    /// node's three battery metrics and the derived dew_point and iaq are 17.
+    static constexpr int MAX_METRIC_NAMES = 20;
 
     // ------------------------------------------------------------------
     // Plugin registration (call before loadAndInit)

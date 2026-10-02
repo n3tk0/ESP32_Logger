@@ -235,8 +235,8 @@ void MqttExporter::publishHaDiscovery() {
     for (int i = 0; i < n; i++) {
         ISensor* s = sensorManager.get(i);
         if (!s || !s->isEnabled()) continue;
-        const char* mNames[8] = {};
-        int mCount = s->getMetrics(mNames, 8);
+        const char* mNames[SensorManager::MAX_METRIC_NAMES] = {};
+        int mCount = s->getMetrics(mNames, SensorManager::MAX_METRIC_NAMES);
         for (int m = 0; m < mCount; m++) {
             const char* dc = _haDeviceClass(mNames[m]);
             if (_publishDiscoveryOne(s->getId(), s->getName(), mNames[m], "", dc)) {

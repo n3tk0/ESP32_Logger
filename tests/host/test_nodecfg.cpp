@@ -301,28 +301,33 @@ static void test_bmx280_and_bme688_together() {
 }
 
 static void test_metric_budget() {
-    // bme688 (5) + sds011 (2) + bh1750 (1) = 8: exactly the budget.
+    // bme688 (5) + sds011 (2) + bh1750 (1) + 4 probes = 12: exactly the budget.
     NodeConfig c = wifiBase();
     c.sensors[0] = sensorDefaults(SensorType::Bme688, Hw::Esp8266);
     addSensor(c, sensorDefaults(SensorType::Sds011, Hw::Esp8266));
     addSensor(c, sensorDefaults(SensorType::Bh1750, Hw::Esp8266));
-    CHECK_EQ((int)configMetricCount(c), 8);
-    ACCEPT(c);
-    // One probe more is nine.
-    addSensor(c, sensorDefaults(SensorType::Ds18b20, Hw::Esp8266));
-    CHECK_EQ((int)configMetricCount(c), 9);
-    REJECT(c, "sensors", "9 metrics");
-
-    // pressure_sea counts even at altitude 0 (§1.1): bmx280 is 4, and 4 probes
-    // make 8 whether or not the altitude is ever set.
-    c = wifiBase();
-    c.altitude_m = 0.0f;
     SensorCfg d = sensorDefaults(SensorType::Ds18b20, Hw::Esp8266);
     d.count = 4;
     addSensor(c, d);
+    CHECK_EQ((int)configMetricCount(c), 12);
     ACCEPT(c);
-    c.sensors[1].count = 5;
-    REJECT(c, "sensors", "at most 8");
+    // One probe more is thirteen.
+    c.sensors[3].count = 5;
+    CHECK_EQ((int)configMetricCount(c), 13);
+    REJECT(c, "sensors", "13 metrics");
+
+    // pressure_sea counts even at altitude 0 (§1.1): bmx280 is 4, and 8 probes
+    // make 12 whether or not the altitude is ever set.
+    c = wifiBase();
+    c.altitude_m = 0.0f;
+    d.count = 8;
+    addSensor(c, d);
+    ACCEPT(c);
+    SensorCfg d2 = sensorDefaults(SensorType::Ds18b20, Hw::Esp8266);
+    d2.pin = 13;
+    copyStr(d2.metric, sizeof(d2.metric), "soil_temp");
+    addSensor(c, d2);
+    REJECT(c, "sensors", "at most 12");
 
     // Eight probes alone are fine.
     c = wifiBase();
@@ -330,6 +335,115 @@ static void test_metric_budget() {
     d.count = 8;
     addSensor(c, d);
     ACCEPT(c);
+}
+
+static void test_sensor_interval_rules() {
+    // 0 is "every send", and any interval from the node's own up is fine.
+    NodeConfig c = wifiBase();
+    c.interval_s = 60;
+    c.sensors[0].interval_s = 0;
+    ACCEPT(c);
+    c.sensors[0].interval_s = 60;
+    ACCEPT(c);
+    c.sensors[0].interval_s = 65535;
+    ACCEPT(c);
+    // Below the node's is every send, and accepted: the collector's interval
+    // push raises the node's interval without validating, and must not be
+    // able to turn a stored config invalid.
+    c.sensors[0].interval_s = 59;
+    ACCEPT(c);
+    CHECK_EQ((int)sensorEvery(c, c.sensors[0]), 1);
+    c.sensors[0].interval_s = 120;
+    c.interval_s = 300;
+    ACCEPT(c);
+    CHECK_EQ((int)sensorEvery(c, c.sensors[0]), 1);
+
+    // sds011 warm-up: 10..120.
+    c = wifiBase();
+    addSensor(c, sensorDefaults(SensorType::Sds011, Hw::Esp8266));
+    CHECK_EQ((int)c.sensors[1].warmup_s, 30);
+    ACCEPT(c);
+    c.sensors[1].warmup_s = 10;
+    ACCEPT(c);
+    c.sensors[1].warmup_s = 120;
+    ACCEPT(c);
+    c.sensors[1].warmup_s = 9;
+    REJECT(c, "sensors[1].warmup_s", "10..120");
+    c.sensors[1].warmup_s = 121;
+    REJECT(c, "sensors[1].warmup_s", "10..120");
+}
+
+static void test_sensor_schedule() {
+    NodeConfig c = wifiBase();
+    c.interval_s = 60;
+    SensorCfg& s = c.sensors[0];
+
+    s.interval_s = 0;
+    CHECK_EQ((int)sensorEvery(c, s), 1);
+    s.interval_s = 60;
+    CHECK_EQ((int)sensorEvery(c, s), 1);
+    // Rounded up: never read more often than asked.
+    s.interval_s = 61;
+    CHECK_EQ((int)sensorEvery(c, s), 2);
+    s.interval_s = 90;
+    CHECK_EQ((int)sensorEvery(c, s), 2);
+    s.interval_s = 600;
+    CHECK_EQ((int)sensorEvery(c, s), 10);
+    CHECK_EQ((int)sensorPeriodS(c, s), 600);
+
+    // Send 0 reads everything; then every tenth.
+    CHECK(sensorDue(c, 0, 0));
+    for (uint32_t t = 1; t < 10; t++) CHECK(!sensorDue(c, 0, t));
+    CHECK(sensorDue(c, 0, 10));
+    CHECK(sensorDue(c, 0, 20));
+    CHECK(!sensorDue(c, 1, 0));            // no such entry
+
+    // SDS011 sleeps only when the gap is more than twice its warm-up.
+    SensorCfg d = sensorDefaults(SensorType::Sds011, Hw::Esp8266);
+    d.interval_s = 0;                      // every 60 s send, warm-up 30
+    CHECK(!sdsSleeps(c, d));               // 60 is not more than 60
+    d.interval_s = 61;                     // two sends: 120 s
+    CHECK(sdsSleeps(c, d));
+    d.warmup_s = 60;
+    CHECK(!sdsSleeps(c, d));
+    CHECK(!sdsSleeps(c, s));               // not an sds011 at all
+}
+
+static void test_sensor_interval_codec() {
+    // Written for every entry, 0 included, and warmup_s for an sds011.
+    NodeConfig c = wifiBase();
+    SensorCfg d = sensorDefaults(SensorType::Sds011, Hw::Esp8266);
+    d.interval_s = 600;
+    d.warmup_s   = 45;
+    addSensor(c, d);
+    const std::string j = enc(c, 0);
+    CHECK(j.find("\"interval_s\":0") != std::string::npos);
+    CHECK(j.find("\"interval_s\":600") != std::string::npos);
+    CHECK(j.find("\"warmup_s\":45") != std::string::npos);
+
+    NodeConfig r = wifiBase();
+    CHECK(dec(j.c_str(), r, 0));
+    CHECK_EQ((int)r.sensors[0].interval_s, 0);
+    CHECK_EQ((int)r.sensors[1].interval_s, 600);
+    CHECK_EQ((int)r.sensors[1].warmup_s, 45);
+
+    // An entry that keeps its place and type keeps an interval the document
+    // leaves out — which is why the encoder never leaves a 0 out.
+    CHECK(dec("{\"sensors\":[{\"type\":\"bmx280\"},{\"type\":\"sds011\",\"rx\":14,\"tx\":13}]}", r, 0));
+    CHECK_EQ((int)r.sensors[1].interval_s, 600);
+    CHECK(dec("{\"sensors\":[{\"type\":\"bmx280\"},{\"type\":\"sds011\",\"interval_s\":0}]}", r, 0));
+    CHECK_EQ((int)r.sensors[1].interval_s, 0);
+    CHECK_EQ((int)r.sensors[1].warmup_s, 45);
+
+    // A new entry starts at 0 and 30.
+    CHECK(dec("{\"sensors\":[{\"type\":\"bh1750\"}]}", r, 0));
+    CHECK_EQ((int)r.sensors[0].interval_s, 0);
+
+    Issue err;
+    CHECK(!dec("{\"sensors\":[{\"type\":\"bmx280\",\"interval_s\":70000}]}", r, 0, &err));
+    CHECK_STREQ(err.field, "sensors[0].interval_s");
+    CHECK(!dec("{\"sensors\":[{\"type\":\"sds011\",\"warmup_s\":300}]}", r, 0, &err));
+    CHECK_STREQ(err.field, "sensors[0].warmup_s");
 }
 
 static void test_metric_names_unique() {
@@ -1010,6 +1124,7 @@ static void test_documents_fit_their_transports() {
         char m[11] = "probe0000X";                // ten characters, the most
         m[9] = (char)('0' + i);
         copyStr(d.metric, sizeof(d.metric), m);
+        d.interval_s = 65535;                     // five digits, the widest
         addSensor(e, d);
     }
     copyStr(e.name, sizeof(e.name), "abcdefghijklmnop");
@@ -1155,7 +1270,7 @@ static void test_caps_esp8266() {
     CHECK_EQ(d["metric_count"]["bme688"].as<int>(), 5);
     CHECK_EQ(d["metric_count"]["ds18b20"].as<int>(), 1);
     CHECK_EQ(d["max_sensors"].as<int>(), 8);
-    CHECK_EQ(d["max_metrics"].as<int>(), 8);
+    CHECK_EQ(d["max_metrics"].as<int>(), 12);
     CHECK_EQ(d["max_gpio"].as<int>(), 16);
 
     JsonArrayConst forb = d["forbidden_pins"].as<JsonArrayConst>();
@@ -1276,6 +1391,9 @@ int main() {
     RUN(test_legacy_migration);
     RUN(test_caps_esp8266);
     RUN(test_caps_esp32c3);
+    RUN(test_sensor_interval_rules);
+    RUN(test_sensor_schedule);
+    RUN(test_sensor_interval_codec);
     RUN(test_const_char_ptr_keys_are_copied);
     std::printf("       %d rejections provoked, every reason whole\n", g_reasonsSeen);
     return SUMMARY();

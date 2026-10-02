@@ -314,11 +314,11 @@ static inline void promoteNext(NodeConfig& c) {
 /// literals. This is where each distinct name lives for the life of the
 /// process, so a queued reading's pointer never dangles.
 ///
-/// Sixteen is twice the metric budget: the names only change when the sensor
-/// list does, which restarts the node, so a boot never sees more than eight.
+/// Twice the metric budget: the names only change when the sensor list does,
+/// which restarts the node, so a boot never sees more than twelve.
 class NameTable {
 public:
-    static const uint8_t CAP = 16;
+    static const uint8_t CAP = 2 * nodecfg::MAX_METRICS;
     static const size_t  LEN = 16;   ///< nodecfg::METRIC_NAME_CAP
 
     /// The stored copy of `s`, adding it if new. nullptr when `s` is empty or

@@ -320,7 +320,7 @@ static void test_cfg_layout_and_numbers() {
     CHECK_EQ(espnowCfgChunkLen(EN_CFG_CHUNK_MAX), 211);
     CHECK(espnowCfgChunkLen(EN_CFG_CHUNK_MAX) <= ESPNOW_MAX_FRAME);
     CHECK_EQ(espnowData2SampleLen(0), 3);
-    CHECK_EQ(espnowData2SampleLen(EN_DATA2_MAX_VALUES), 57);
+    CHECK_EQ(espnowData2SampleLen(EN_DATA2_MAX_VALUES), 81);
 }
 
 // ---------------------------------------------------------------------------
@@ -376,9 +376,9 @@ static void test_data2_round_trip() {
 
 // ---------------------------------------------------------------------------
 static void test_data2_packs_whole_samples_only() {
-    // Full samples (9 values, 57 bytes) until the frame is full: (250-12)/57
-    // is 4. The fifth must be refused WITHOUT touching the frame, so the node
-    // can send what it has and carry the fifth to the next frame.
+    // Full samples (13 values, 81 bytes) until the frame is full: (250-12)/81
+    // is 2. The third must be refused WITHOUT touching the frame, so the node
+    // can send what it has and carry the third to the next frame.
     uint8_t buf[ESPNOW_MAX_FRAME + 64];
     int len = espnowData2Begin(buf, sizeof(buf), 1, 1, 0, 0);
     Data2Value v[EN_DATA2_MAX_VALUES];
@@ -388,15 +388,15 @@ static void test_data2_packs_whole_samples_only() {
     while (espnowData2Append(buf, sizeof(buf), len, (uint16_t)(fitted * 60), v,
                              EN_DATA2_MAX_VALUES))
         fitted++;
-    CHECK_EQ(fitted, 4);
-    CHECK_EQ(len, 12 + 4 * 57);
-    CHECK_EQ(buf[6], 4);
+    CHECK_EQ(fitted, 2);
+    CHECK_EQ(len, 12 + 2 * 81);
+    CHECK_EQ(buf[6], 2);
     CHECK(len <= ESPNOW_MAX_FRAME);   // even though the buffer was bigger
     CHECK(validates(buf, len, EN_MSG_DATA2));
 
-    // A small sample still fits in what is left (250 - 240 = 10 bytes).
+    // A smaller sample still fits in what is left (250 - 174 = 76 bytes).
     CHECK(espnowData2Append(buf, sizeof(buf), len, 999, v, 1));
-    CHECK_EQ(buf[6], 5);
+    CHECK_EQ(buf[6], 3);
     CHECK(validates(buf, len, EN_MSG_DATA2));
 
     // Bad input.

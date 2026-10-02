@@ -286,8 +286,10 @@ static void waitConversion(uint32_t ms) {
 /// has no humidity sensor, and 0 %RH on the wire would be a reading the
 /// collector could not tell from a real one.
 static uint8_t collectLive(Data2Value* out, uint16_t vbatMv) {
+    // s_wakeCount was just incremented for this wake and is 0 after a cold
+    // boot, so the first wake is send 0 and reads every sensor.
     NodeReading r[NODE_MAX_READINGS];
-    const int k = nodeSensorsRead(s_cfg, r, NODE_MAX_READINGS);
+    const int k = nodeSensorsRead(s_cfg, r, NODE_MAX_READINGS, s_wakeCount - 1);
     uint8_t n = 0;
     for (int i = 0; i < k && n < EN_DATA2_MAX_VALUES - 1; i++) {
         if (!isfinite(r[i].value)) continue;
@@ -841,6 +843,9 @@ void loop() {
                 portalRun(s_cfg, s_link, battVolts);
             }
         }
+        // The button wait above can run past the period: 0, never a wrap.
+        const uint32_t el = millis() - t0;
+        nodeSensorsIdle(s_cfg, s_wakeCount, el < periodMs ? periodMs - el : 0);
         delay(50);
     }
 }
