@@ -1291,7 +1291,7 @@ void loop() {
         // below the 2000ms graceful-reboot threshold, so the reboot never fires
         // and the device floods "[Watchdog] Task N stuck" forever instead of
         // recovering.
-        char why[40];
+        char why[48];
         if (!TaskManager::checkHealth(why, sizeof(why)) && !shouldRestart) {
             requestRestart(why); restartTimer = millis();
         }
@@ -1305,7 +1305,7 @@ void loop() {
         if (g_platformMode == PLATFORM_HYBRID) _manageContinuousPower();
         // C4: software watchdog in hybrid/web mode — rising-edge only so the
         // 2000ms graceful-reboot window can actually elapse (see note above).
-        char why[40];
+        char why[48];
         if (g_platformMode != PLATFORM_LEGACY && !TaskManager::checkHealth(why, sizeof(why)) && !shouldRestart) {
             requestRestart(why); restartTimer = millis();
         }
