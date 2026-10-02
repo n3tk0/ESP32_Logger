@@ -22,12 +22,15 @@ struct GasIaq {
     /// Fold one RAW (uncalibrated) gas reading into the baseline and return
     /// the index. Call once per new measurement: the baseline moves on every
     /// call, so feeding it the same reading twice counts it twice.
-    float update(float humidity, float rawGasOhm) {
+    /// `driftDown` false holds the slow downward drift: while a heater is
+    /// still settling its low readings say nothing about the air, and a
+    /// restored baseline would sink toward them.
+    float update(float humidity, float rawGasOhm, bool driftDown = true) {
         // Baseline: rise quickly toward a higher (cleaner) resistance ceiling,
         // drift down very slowly to absorb sensor aging / ambient drift.
         if (baseline <= 0.0f)          baseline = rawGasOhm;                          // seed
         else if (rawGasOhm > baseline) baseline += (rawGasOhm - baseline) * 0.10f;
-        else                           baseline += (rawGasOhm - baseline) * 0.0005f;
+        else if (driftDown)            baseline += (rawGasOhm - baseline) * 0.0005f;
         if (baseline < 1.0f) baseline = 1.0f;
 
         // Humidity contribution (0..25): peaks in the 38–42 % comfort band.
