@@ -495,6 +495,13 @@ static void kdChartTick(char* buf, size_t n, int i, bool fine) {
     else      snprintf(buf, n, "-%dh", back);
 }
 
+/// <line class="cls" x1 y1 x2 y2/> — the chart's rules.
+static void kdSvgLine(String& out, const char* cls, int x1, int y1, int x2, int y2) {
+    out += F("<line class=\""); out += cls;
+    out += F("\" x1=\""); out += x1; out += F("\" y1=\""); out += y1;
+    out += F("\" x2=\""); out += x2; out += F("\" y2=\""); out += y2; out += F("\"/>");
+}
+
 static void appendChart(String& out,
                         const TrendRing::Hour* a, const TrendRing::Hour* b,
                         bool haveA, bool haveB, int CHART_H, int chartW = CHART_W,
@@ -535,26 +542,18 @@ static void appendChart(String& out,
     // there was nothing to count against. Lighter than the horizontals on
     // purpose — this is scaffolding, not data.
     for (int i = 0; i < TrendRing::HOURS; i += 3) {
-        out += F("<line class=\"vgrid\" x1=\""); out += KD_X(i);
-        out += F("\" y1=\""); out += T;
-        out += F("\" x2=\""); out += KD_X(i);
-        out += F("\" y2=\""); out += B; out += F("\"/>");
+        kdSvgLine(out, "vgrid", KD_X(i), T, KD_X(i), B);
     }
     // 24 hours is not a multiple of 3 from the right-hand end, and "now" is
     // the one hour always worth a line of its own.
-    out += F("<line class=\"vgrid\" x1=\""); out += KD_X(TrendRing::HOURS - 1);
-    out += F("\" y1=\""); out += T;
-    out += F("\" x2=\""); out += KD_X(TrendRing::HOURS - 1);
-    out += F("\" y2=\""); out += B; out += F("\"/>");
+    kdSvgLine(out, "vgrid", KD_X(TrendRing::HOURS - 1), T, KD_X(TrendRing::HOURS - 1), B);
 
     // Five horizontal rules, the lowest doubling as the baseline. Three
     // made the scale too coarse to read a couple of degrees off.
     for (int k = 0; k <= 4; k++) {
         const float v = hi - span * (float)k / 4.0f;
         const int   y = T + (int)((float)(B - T) * (float)k / 4.0f);
-        out += F("<line class=\""); out += (k == 4 ? "base" : "grid");
-        out += F("\" x1=\""); out += L; out += F("\" y1=\""); out += y;
-        out += F("\" x2=\""); out += R; out += F("\" y2=\""); out += y; out += F("\"/>");
+        kdSvgLine(out, k == 4 ? "base" : "grid", L, y, R, y);
         if (empty) continue;
         char lbl[12]; fmtInt(lbl, sizeof(lbl), v);
         out += F("<text class=\"ax\" x=\""); out += L - kdPx(7);
@@ -676,8 +675,18 @@ static void appendKeySwatch(String& out, const char* colour, int width, bool das
 // battery outline and the exclamation are cut OUT of it in white rather than
 // drawn on top: on a screen with no colour, inverted is the loudest a small
 // mark gets.
+/// One of the badge's rects: `rx` rounds it, `white` fills it #fff, else #000.
+static void kdSvgRect(String& out, int x, int y, int w, int h, bool white, int rx = 0) {
+    out += F("<rect x=\""); out += x;
+    out += F("\" y=\"");      out += y;
+    out += F("\" width=\"");  out += w;
+    out += F("\" height=\""); out += h;
+    if (rx) { out += F("\" rx=\""); out += rx; }
+    out += white ? F("\" fill=\"#fff\"/>") : F("\" fill=\"#000\"/>");
+}
+
 static void appendBatteryBadge(String& out) {
-    const int w = kdPx(46), h = kdPx(22), r = kdPx(3);
+    const int w = kdPx(46), h = kdPx(22);
 
     out += F("<svg class=\"bw\" width=\""); out += w;
     out += F("\" height=\"");                 out += h;
@@ -686,46 +695,23 @@ static void appendBatteryBadge(String& out) {
     out += F("\">");
 
     // The plate.
-    out += F("<rect x=\"0\" y=\"0\" width=\""); out += w;
-    out += F("\" height=\"");                     out += h;
-    out += F("\" rx=\"");                         out += r;
-    out += F("\" fill=\"#000\"/>");
+    kdSvgRect(out, 0, 0, w, h, false, kdPx(3));
 
     // Battery body, knocked through in white: a filled shell with the inside
     // punched back to black, which is a stroke drawn as two rects because an
     // e-ink panel renders a 1 px stroke unevenly at this size.
     const int bx = kdPx(7), by = kdPx(6), bw = kdPx(24), bh = kdPx(10), t2 = kdPx(2);
-    out += F("<rect x=\""); out += bx;
-    out += F("\" y=\"");   out += by;
-    out += F("\" width=\"");  out += bw;
-    out += F("\" height=\""); out += bh;
-    out += F("\" fill=\"#fff\"/>");
-    out += F("<rect x=\""); out += bx + t2;
-    out += F("\" y=\"");   out += by + t2;
-    out += F("\" width=\"");  out += bw - 2 * t2;
-    out += F("\" height=\""); out += bh - 2 * t2;
-    out += F("\" fill=\"#000\"/>");
+    kdSvgRect(out, bx, by, bw, bh, true);
+    kdSvgRect(out, bx + t2, by + t2, bw - 2 * t2, bh - 2 * t2, false);
 
     // The terminal nub.
-    out += F("<rect x=\""); out += bx + bw;
-    out += F("\" y=\"");   out += by + kdPx(3);
-    out += F("\" width=\"");  out += kdPx(3);
-    out += F("\" height=\""); out += bh - kdPx(6);
-    out += F("\" fill=\"#fff\"/>");
+    kdSvgRect(out, bx + bw, by + kdPx(3), kdPx(3), bh - kdPx(6), true);
 
     // The exclamation, to the right of the cell. Two marks and a gap, so it
     // survives being scaled down with KINDLE_PAGE_W.
     const int ex = kdPx(38);
-    out += F("<rect x=\""); out += ex;
-    out += F("\" y=\"");   out += kdPx(5);
-    out += F("\" width=\"");  out += kdPx(3);
-    out += F("\" height=\""); out += kdPx(8);
-    out += F("\" fill=\"#fff\"/>");
-    out += F("<rect x=\""); out += ex;
-    out += F("\" y=\"");   out += kdPx(15);
-    out += F("\" width=\"");  out += kdPx(3);
-    out += F("\" height=\""); out += kdPx(3);
-    out += F("\" fill=\"#fff\"/>");
+    kdSvgRect(out, ex, kdPx(5), kdPx(3), kdPx(8), true);
+    kdSvgRect(out, ex, kdPx(15), kdPx(3), kdPx(3), true);
 
     out += F("</svg>");
 }
