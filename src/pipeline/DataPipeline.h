@@ -107,6 +107,34 @@ constexpr size_t RING_SCAN_LIMIT_LAST = 256;
 // build. 2048 leaves headroom for denser configurations while staying bounded.
 constexpr size_t RING_SCAN_LIMIT_SERIES = 2048;
 
+// ---------------------------------------------------------------------------
+// Compact ring storage (ESP32-C3 without PSRAM).
+//
+// A SensorReading is 72 B, and 57 of them are four strings (sensor id, type,
+// metric, unit) that repeat in every reading of the same metric. In compact
+// mode the ring keeps 12 B per reading — timestamp, value, quality and the
+// index of its strings in a small table of RING_KEYS distinct combinations —
+// and rebuilds the full SensorReading on the way out. The API is the same;
+// only the storage changes. The C3's ~227 readings drop from 16 KB to ~5.5 KB.
+//
+// A table entry is reused once no reading in the ring refers to it. A reading
+// whose combination finds no room (more than RING_KEYS distinct metrics in
+// one window) is not stored and is counted in keyDrops().
+//
+// Override with -DRING_COMPACT=0/1; the host tests build both.
+// ---------------------------------------------------------------------------
+#ifndef RING_COMPACT
+#  if defined(CONFIG_IDF_TARGET_ESP32C3) && !LOGGER_PSRAM_AVAILABLE
+#    define RING_COMPACT 1
+#  else
+#    define RING_COMPACT 0
+#  endif
+#endif
+#ifndef RING_KEYS
+#  define RING_KEYS 48
+#endif
+static_assert(RING_KEYS >= 1 && RING_KEYS <= 255, "RING_KEYS must fit the uint8_t key index");
+
 // ============================================================================
 // RingBuffer — SPSC ring buffer (finding #17: proper acquire/release atomics)
 // Producer: ProcessingTask (push).  Consumer: WebTask (copyRecent, read-only).
@@ -131,6 +159,12 @@ constexpr size_t RING_SCAN_LIMIT_SERIES = 2048;
 // PSRAM caveat: this buffer is touched from tasks only.  It must never be read
 // or written from an ISR (the project has IRAM_ATTR handlers for flow, rain and
 // wind) — PSRAM is unreachable whenever the flash cache is disabled.
+//
+// Compact mode keeps the same contract: push() writes a new table entry before
+// it publishes _head, so a reader that acquires _head sees the strings too. An
+// entry is only reused once no reading in the ring refers to it, so the only
+// new tear is the one an overwritten slot already had — a reader still on the
+// evicted reading. In the firmware every access holds webDataMutex anyway.
 // ============================================================================
 class RingBuffer {
 public:
@@ -156,6 +190,16 @@ public:
         _release();
         if (capacity == 0) return false;
 
+#if RING_COMPACT
+        (void)preferPsram;
+        // One block: the key table first (its size is a multiple of 4, so the
+        // slots after it stay aligned), then the slots. Both are plain data.
+        void* p = malloc(capacity * sizeof(Slot) + RING_KEYS * sizeof(Key));
+        if (!p) return false;
+        memset(p, 0, capacity * sizeof(Slot) + RING_KEYS * sizeof(Key));
+        _keys  = static_cast<Key*>(p);
+        _slots = reinterpret_cast<Slot*>(_keys + RING_KEYS);
+#else
         const size_t bytes = capacity * sizeof(SensorReading);
 
 #if LOGGER_PSRAM_AVAILABLE
@@ -176,6 +220,7 @@ public:
         // objects to — and it would silently stop being equivalent the moment
         // the struct gains a member that needs real initialisation.
         for (size_t i = 0; i < capacity; i++) new (&_buf[i]) SensorReading();
+#endif
 
         _cap = capacity;
         _head.store(0, std::memory_order_relaxed);
@@ -186,8 +231,21 @@ public:
     size_t capacity() const { return _cap; }
     bool   isPsram()  const { return _inPsram; }
 
+    // Bytes the ring holds on the heap (slots plus, compact, the key table).
+    size_t bytes() const {
+        if (!_cap) return 0;
+#if RING_COMPACT
+        return _cap * sizeof(Slot) + RING_KEYS * sizeof(Key);
+#else
+        return _cap * sizeof(SensorReading);
+#endif
+    }
+
+    // Readings not stored because the key table was full (compact only).
+    uint32_t keyDrops() const { return _keyDrops; }
+
     void push(const SensorReading& r) {
-        if (!_buf) return;
+        if (!_cap) return;
         const size_t N = _cap;
         // R14 / AUDIT 12.12: ordering matters across the SPSC boundary.
         //  1. write the data slot
@@ -200,7 +258,14 @@ public:
         //     mid-write and read torn data
         size_t h = _head.load(std::memory_order_relaxed);
         size_t newH = h + 1;
+#if RING_COMPACT
+        // The slot being written holds the oldest reading once the ring is
+        // full; that one is evicted, so its key loses a reference.
+        if (!_put(h % N, r, (h - _tail.load(std::memory_order_relaxed)) >= N))
+            return;                                               // 1
+#else
         _buf[h % N] = r;                                          // 1
+#endif
         _head.store(newH, std::memory_order_release);             // 2
         if (newH - _tail.load(std::memory_order_relaxed) > N) {   // 3 — full?
             _tail.store(newH - N, std::memory_order_release);
@@ -210,7 +275,7 @@ public:
     size_t copyRecent(SensorReading* out, size_t maxOut,
                       uint32_t fromTs = 0) const
     {
-        if (!_buf) return 0;
+        if (!_cap) return 0;
         const size_t N = _cap;
         size_t h      = _head.load(std::memory_order_acquire);
         size_t t      = _tail.load(std::memory_order_relaxed);
@@ -229,10 +294,7 @@ public:
 
         size_t copied = 0;
         for (size_t i = start; i < h && copied < maxOut; i++) {
-            const SensorReading& entry = _buf[i % N];
-            if (entry.timestamp >= fromTs) {
-                out[copied++] = entry;
-            }
+            if (_ts(i % N) >= fromTs) _get(i % N, out[copied++]);
         }
         return copied;
     }
@@ -249,7 +311,7 @@ public:
                         const char* sensorId, const char* metric,
                         bool count = false) const
     {
-        if (!_buf || (!count && (!out || maxOut == 0))) return 0;
+        if (!_cap || (!count && (!out || maxOut == 0))) return 0;
         const size_t N = _cap;
         size_t h      = _head.load(std::memory_order_acquire);
         size_t t      = _tail.load(std::memory_order_relaxed);
@@ -260,11 +322,11 @@ public:
         size_t n = 0;
         for (size_t i = h; i > start && (count || n < maxOut); ) {
             --i;
-            const SensorReading& e = _buf[i % N];
-            if (e.timestamp < fromTs || e.timestamp > toTs) continue;
-            if (sensorId && strcmp(e.sensorId, sensorId) != 0) continue;
-            if (metric   && strcmp(e.metric,   metric)   != 0) continue;
-            if (!count) out[maxOut - 1 - n] = e;
+            const size_t s  = i % N;
+            const uint32_t ts = _ts(s);
+            if (ts < fromTs || ts > toTs) continue;
+            if (!_is(s, sensorId, metric)) continue;
+            if (!count) _get(s, out[maxOut - 1 - n]);
             n++;
         }
         if (!count && n < maxOut && n > 0)
@@ -275,7 +337,7 @@ public:
     // The newest reading of each (sensorId, metric) among the newest maxScan
     // entries, newest first, at most maxOut of them. No copy of the window.
     size_t latestPerMetric(SensorReading* out, size_t maxOut, size_t maxScan) const {
-        if (!_buf || !out || maxOut == 0) return 0;
+        if (!_cap || !out || maxOut == 0) return 0;
         const size_t N = _cap;
         size_t h      = _head.load(std::memory_order_acquire);
         size_t t      = _tail.load(std::memory_order_relaxed);
@@ -286,18 +348,17 @@ public:
         size_t n = 0;
         for (size_t i = h; i > start && n < maxOut; ) {
             --i;
-            const SensorReading& e = _buf[i % N];
+            const size_t s = i % N;
             bool seen = false;
             for (size_t j = 0; j < n && !seen; j++)
-                seen = strcmp(out[j].sensorId, e.sensorId) == 0 &&
-                       strcmp(out[j].metric,   e.metric)   == 0;
-            if (!seen) out[n++] = e;
+                seen = _is(s, out[j].sensorId, out[j].metric);
+            if (!seen) _get(s, out[n++]);
         }
         return n;
     }
 
     size_t size() const {
-        if (!_buf) return 0;
+        if (!_cap) return 0;
         size_t h = _head.load(std::memory_order_relaxed);
         size_t t = _tail.load(std::memory_order_relaxed);
         return (h >= t) ? (h - t) : 0;
@@ -306,7 +367,7 @@ public:
     // Scan backwards for the most recent entry matching sensorId + metric
     bool findLast(const char* sensorId, const char* metric,
                   SensorReading& out) const {
-        if (!_buf) return false;
+        if (!_cap) return false;
         const size_t N = _cap;
         size_t h = _head.load(std::memory_order_acquire);
         size_t t = _tail.load(std::memory_order_relaxed);
@@ -318,10 +379,8 @@ public:
         if ((h - start) > RING_SCAN_LIMIT_LAST) start = h - RING_SCAN_LIMIT_LAST;
         for (size_t i = h; i > start; ) {
             --i;
-            const SensorReading& e = _buf[i % N];
-            if (strcmp(e.sensorId, sensorId) == 0 &&
-                strcmp(e.metric, metric) == 0) {
-                out = e;
+            if (_is(i % N, sensorId, metric)) {
+                _get(i % N, out);
                 return true;
             }
         }
@@ -333,7 +392,7 @@ public:
     // sparklines without a separate endpoint.  Returns the number written.
     size_t collectMetricSeries(const char* sensorId, const char* metric,
                                 float* out, size_t maxOut) const {
-        if (maxOut == 0 || !_buf) return 0;
+        if (maxOut == 0 || !_cap) return 0;
         const size_t N = _cap;
         size_t h = _head.load(std::memory_order_acquire);
         size_t t = _tail.load(std::memory_order_relaxed);
@@ -347,10 +406,8 @@ public:
         size_t count = 0;
         for (size_t i = h; i > start && count < maxOut; ) {
             --i;
-            const SensorReading& e = _buf[i % N];
-            if (strcmp(e.sensorId, sensorId) == 0 &&
-                strcmp(e.metric, metric) == 0) {
-                out[maxOut - 1 - count] = e.value;
+            if (_is(i % N, sensorId, metric)) {
+                out[maxOut - 1 - count] = _val(i % N);
                 count++;
             }
         }
@@ -363,22 +420,132 @@ public:
     }
 
 private:
+#if RING_COMPACT
+    // One reading: everything but the strings, which live in _keys.
+    struct Slot {
+        uint32_t ts;
+        float    value;
+        uint8_t  key;       // index into _keys
+        uint8_t  quality;   // SensorQuality
+    };
+    // One distinct (sensorId, sensorType, metric, unit), sized like
+    // SensorReading's own fields so a round trip is exact.
+    struct Key {
+        char     sensorId[sizeof(SensorReading::sensorId)];
+        char     sensorType[sizeof(SensorReading::sensorType)];
+        char     metric[sizeof(SensorReading::metric)];
+        char     unit[sizeof(SensorReading::unit)];
+        uint16_t refs;      // slots in the ring that point here
+    };
+    static_assert(sizeof(Key) % 4 == 0, "the slots follow the key table in one block");
+
+    uint32_t _ts(size_t s)  const { return _slots[s].ts; }
+    float    _val(size_t s) const { return _slots[s].value; }
+
+    // nullptr matches anything.
+    bool _is(size_t s, const char* id, const char* metric) const {
+        const Key& k = _keys[_slots[s].key];
+        return (!id     || strcmp(k.sensorId, id)     == 0) &&
+               (!metric || strcmp(k.metric,   metric) == 0);
+    }
+
+    void _get(size_t s, SensorReading& out) const {
+        const Slot& sl = _slots[s];
+        const Key&  k  = _keys[sl.key];
+        out.timestamp = sl.ts;
+        memcpy(out.sensorId,   k.sensorId,   sizeof(out.sensorId));
+        memcpy(out.sensorType, k.sensorType, sizeof(out.sensorType));
+        memcpy(out.metric,     k.metric,     sizeof(out.metric));
+        out.value   = sl.value;
+        memcpy(out.unit,       k.unit,       sizeof(out.unit));
+        out.quality = (SensorQuality)sl.quality;
+    }
+
+    // Writes slot `s`. `evict`: it holds a live reading that is being dropped.
+    // False (and nothing written) when the key table has no room.
+    bool _put(size_t s, const SensorReading& r, bool evict) {
+        Slot& sl = _slots[s];
+        if (evict && _keys[sl.key].refs) _keys[sl.key].refs--;
+        const int k = _keyFor(r);
+        if (k < 0) {
+            if (evict) _keys[sl.key].refs++;   // the old reading stays
+            _keyDrops++;
+            return false;
+        }
+        _keys[k].refs++;
+        sl.ts      = r.timestamp;
+        sl.value   = r.value;
+        sl.key     = (uint8_t)k;
+        sl.quality = (uint8_t)r.quality;
+        return true;
+    }
+
+    // The entry for r's strings: an existing one, else a free one filled in.
+    static bool _same(const Key& k, const SensorReading& r) {
+        return strcmp(k.sensorId,   r.sensorId)   == 0 &&
+               strcmp(k.metric,     r.metric)     == 0 &&
+               strcmp(k.sensorType, r.sensorType) == 0 &&
+               strcmp(k.unit,       r.unit)       == 0;
+    }
+    int _keyFor(const SensorReading& r) {
+        int freeK = -1;
+        for (int k = 0; k < RING_KEYS; k++) {
+            if (_same(_keys[k], r)) return k;
+            if (freeK < 0 && _keys[k].refs == 0) freeK = k;
+        }
+        if (freeK < 0) return -1;
+        // SensorReading's strings are NUL-terminated within their arrays
+        // (make() and the zeroing constructor see to it); copy them whole and
+        // pin the terminator anyway, so a table entry is always a C string.
+        Key& e = _keys[freeK];
+        memcpy(e.sensorId,   r.sensorId,   sizeof(e.sensorId));   e.sensorId[sizeof(e.sensorId) - 1]     = '\0';
+        memcpy(e.sensorType, r.sensorType, sizeof(e.sensorType)); e.sensorType[sizeof(e.sensorType) - 1] = '\0';
+        memcpy(e.metric,     r.metric,     sizeof(e.metric));     e.metric[sizeof(e.metric) - 1]         = '\0';
+        memcpy(e.unit,       r.unit,       sizeof(e.unit));       e.unit[sizeof(e.unit) - 1]             = '\0';
+        return freeK;
+    }
+#else
+    uint32_t _ts(size_t s)  const { return _buf[s].timestamp; }
+    float    _val(size_t s) const { return _buf[s].value; }
+
+    // nullptr matches anything.
+    bool _is(size_t s, const char* id, const char* metric) const {
+        const SensorReading& e = _buf[s];
+        return (!id     || strcmp(e.sensorId, id)     == 0) &&
+               (!metric || strcmp(e.metric,   metric) == 0);
+    }
+
+    void _get(size_t s, SensorReading& out) const { out = _buf[s]; }
+#endif
+
     void _release() {
+#if RING_COMPACT
+        // _slots lives in the same block as _keys.
+        if (_keys) { free(_keys); _keys = nullptr; _slots = nullptr; }
+#else
         // SensorReading is trivially destructible (no user destructor, all
         // members are scalars/arrays), so the placement-new'd elements need no
         // explicit destructor calls before the storage goes back.
         if (_buf) { free(_buf); _buf = nullptr; }
-        _cap     = 0;
-        _inPsram = false;
+#endif
+        _cap      = 0;
+        _inPsram  = false;
+        _keyDrops = 0;
         _head.store(0, std::memory_order_relaxed);
         _tail.store(0, std::memory_order_relaxed);
     }
 
+#if RING_COMPACT
+    Key*           _keys    = nullptr;
+    Slot*          _slots   = nullptr;
+#else
     // heap_caps_malloc'd PSRAM and plain malloc'd internal RAM are both
     // released with free() on ESP-IDF, so one path covers each case.
     SensorReading* _buf     = nullptr;
+#endif
     size_t         _cap     = 0;
     bool           _inPsram = false;
+    uint32_t       _keyDrops = 0;
     std::atomic<size_t> _head{0};
     std::atomic<size_t> _tail{0};
 };
@@ -390,7 +557,8 @@ private:
 
 // Internal-SRAM fallback: what the buffer gets with no PSRAM.  Unchanged from
 // the pre-PSRAM behaviour (~227 entries at sizeof(SensorReading) ≈ 72 B), so
-// the ESP32-C3 targets keep exactly the footprint they were tuned for.
+// the ESP32-C3 targets keep exactly the history they were tuned for. With
+// RING_COMPACT the same ~227 entries take ~5.5 KB instead (see bytes()).
 constexpr size_t WEB_RING_BYTES_INTERNAL = 16u * 1024u;
 
 // PSRAM budget.  4 MB of an 8 MB part is ~58 000 entries — roughly 8 hours for

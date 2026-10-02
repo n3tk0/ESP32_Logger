@@ -61,9 +61,10 @@ bool webRingBufInit() {
         }
     }
 
-    Serial.printf("[RingBuf] %u entries (%u KB) in %s\n",
+    Serial.printf("[RingBuf] %u entries (%u KB%s) in %s\n",
                   (unsigned)webRingBuf.capacity(),
-                  (unsigned)((webRingBuf.capacity() * sizeof(SensorReading)) / 1024),
+                  (unsigned)(webRingBuf.bytes() / 1024),
+                  RING_COMPACT ? ", compact" : "",
                   webRingBuf.isPsram() ? "PSRAM" : "internal RAM");
     return true;
 }

@@ -1083,7 +1083,11 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         JsonObject ring = doc["ring"].to<JsonObject>();
         ring["capacity"] = (uint32_t)webRingBuf.capacity();
         ring["used"]     = (uint32_t)webRingBuf.size();
-        ring["bytes"]    = (uint32_t)(webRingBuf.capacity() * sizeof(SensorReading));
+        ring["bytes"]    = (uint32_t)webRingBuf.bytes();
+#if RING_COMPACT
+        ring["compact"]   = true;
+        ring["key_drops"] = webRingBuf.keyDrops();
+#endif
         ring["psram"]    = webRingBuf.isPsram();
     }
 

@@ -15,7 +15,7 @@ fs::FS* activeFS          = nullptr;
 bool    sdAvailable       = false;
 bool    littleFsAvailable = false;
 bool    fsAvailable       = false;
-String  currentStorageView = "internal";
+char    currentStorageView[16] = "internal";
 
 // ============================================================================
 // WIFI / NETWORK STATE
@@ -24,8 +24,8 @@ bool   apModeTriggered      = false;
 bool   wifiConnectedAsClient = false;
 bool   wifiFallbackToAP     = false;
 bool   onlineLoggerMode     = false;
-String currentIPAddress     = "";
-String connectedSSID        = "";
+char   currentIPAddress[16]  = "";
+char   connectedSSID[33]     = "";
 
 // ============================================================================
 // LOGGING BUFFER
@@ -88,8 +88,6 @@ unsigned long lastFlowPulseTime = 0;
 bool          rtcValid      = false;
 bool          shouldRestart = false;
 unsigned long restartTimer  = 0;
-String        statusMessage = "";
-String        currentDir    = "/";
 
 // ============================================================================
 // MISC

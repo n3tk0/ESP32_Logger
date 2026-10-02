@@ -73,7 +73,7 @@ String getModeDisplay() {
 }
 
 String getNetworkDisplay() {
-    if (wifiConnectedAsClient) return connectedSSID;
+    if (wifiConnectedAsClient) return String(connectedSSID);
     return String(strlen(config.network.apSSID) > 0 ? config.network.apSSID : config.deviceName);
 }
 
@@ -308,7 +308,17 @@ static String getMime(const String& path) {
 // Hard-cap on entries returned by a single /api/filelist call.  Bounds heap
 // use from JsonDocument and prevents a malformed / crafted filesystem from
 // driving the AsyncTCP worker OOM.
+//
+// The whole list is a JsonDocument before a byte is sent, and every entry
+// copies its name and path: ~110 B each, so 500 entries are ~55 KB plus the
+// serialised copy. A board with PSRAM has that; a C3 has ~40-80 KB free in
+// total and would panic mid-request. 150 keeps it near 16 KB there; the Files
+// page already says when a listing was cut short.
+#if LOGGER_PSRAM_AVAILABLE
 static const size_t SCANDIR_MAX_ENTRIES = 500;
+#else
+static const size_t SCANDIR_MAX_ENTRIES = 150;
+#endif
 
 // Returns true if the scan was truncated because SCANDIR_MAX_ENTRIES was hit.
 static bool scanDir(fs::FS& fs, const String& dir, JsonArray& arr,

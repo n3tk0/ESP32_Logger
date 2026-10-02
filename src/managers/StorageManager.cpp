@@ -192,11 +192,11 @@ bool initStorage() {
     if (config.hardware.storageType == STORAGE_SD_CARD && sdAvailable) {
         activeFS = sdFs();
         fsAvailable = true;
-        currentStorageView = "sdcard";
+        strlcpy(currentStorageView, "sdcard", sizeof(currentStorageView));
     } else if (littleFsAvailable) {
         activeFS = &LittleFS;
         fsAvailable = true;
-        currentStorageView = "internal";
+        strlcpy(currentStorageView, "internal", sizeof(currentStorageView));
     } else {
         activeFS = nullptr;
         fsAvailable = false;
@@ -212,7 +212,7 @@ fs::FS* configFs() {
 }
 
 fs::FS* getCurrentViewFS() {
-    if (currentStorageView == "sdcard" && sdAvailable) return sdFs();
+    if (strcmp(currentStorageView, "sdcard") == 0 && sdAvailable) return sdFs();
     if (littleFsAvailable) return &LittleFS;
     return nullptr;
 }

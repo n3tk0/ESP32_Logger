@@ -27,7 +27,9 @@ extern fs::FS* activeFS;
 extern bool    sdAvailable;
 extern bool    littleFsAvailable;
 extern bool    fsAvailable;
-extern String  currentStorageView;
+// Fixed char arrays, not String: these are written from setup/loop and read
+// by AsyncTCP workers, the same cross-task reason as wakeUpButtonStr below.
+extern char    currentStorageView[16];   // "internal" | "sdcard"
 
 // ============================================================================
 // WIFI / NETWORK STATE
@@ -36,8 +38,8 @@ extern bool   apModeTriggered;
 extern bool   wifiConnectedAsClient;
 extern bool   wifiFallbackToAP;
 extern bool   onlineLoggerMode;
-extern String currentIPAddress;
-extern String connectedSSID;
+extern char   currentIPAddress[16];   // dotted IPv4
+extern char   connectedSSID[33];      // 32 + NUL, the 802.11 maximum
 
 // ============================================================================
 // LOGGING BUFFER (RTC_DATA_ATTR survives deep sleep)
@@ -103,8 +105,6 @@ extern unsigned long lastFlowPulseTime;
 extern bool          rtcValid;
 extern bool          shouldRestart;
 extern unsigned long restartTimer;
-extern String        statusMessage;
-extern String        currentDir;
 
 // ============================================================================
 // PLATFORM MODE

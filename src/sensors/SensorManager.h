@@ -133,7 +133,12 @@ private:
         uint32_t totalLatUs     = 0;    // all-time latency accumulator
         uint32_t latSamples     = 0;    // all-time sample count
     };
-    HealthData  _health[MAX_SENSORS];
+    // One per sensor slot that has ever been filled, allocated when it is
+    // first filled and never freed: a fixed array of MAX_SENSORS was 5 KB of
+    // static RAM for 3-4 sensors on a C3. Grow-only, so toJson() on a web
+    // worker can never read one that a reload has just released; a reload
+    // zeroes them instead (_destroyAll). Non-null for every index < _count.
+    HealthData* _health[MAX_SENSORS] = {};
 
     void _destroyAll();
     ISensor* _createPlugin(const char* type);

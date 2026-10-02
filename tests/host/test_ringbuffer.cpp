@@ -2,6 +2,8 @@
 // Capacity is a runtime argument to begin(); these build the internal-RAM
 // path (preferPsram=false), which is also what the ESP32-C3 targets use.
 // (single-threaded correctness: ordering, overflow, time filter, lookups).
+// test_ringbuffer_compact.cpp builds this same file with RING_COMPACT=1, the
+// C3's storage, and adds the key-table tests at the bottom.
 #include "src/pipeline/DataPipeline.h"
 #include "check.h"
 
@@ -230,7 +232,111 @@ static void test_latestPerMetric() {
     CHECK_EQ((int)out[0].value, 4);
 }
 
+#if RING_COMPACT
+// The whole reading survives the round trip through slot + key table.
+static void test_compact_round_trip() {
+    RingBuffer rb;
+    CHECK(rb.begin(4, false));
+    rb.push(SensorReading::make(7, "outside_node_01", "bme680", "temperature",
+                                21.5f, "C", QUALITY_ESTIMATED));
+    SensorReading r;
+    CHECK(rb.findLast("outside_node_01", "temperature", r));
+    CHECK_EQ((int)r.timestamp, 7);
+    CHECK(strcmp(r.sensorId,   "outside_node_01") == 0);
+    CHECK(strcmp(r.sensorType, "bme680") == 0);
+    CHECK(strcmp(r.metric,     "temperature") == 0);
+    CHECK(strcmp(r.unit,       "C") == 0);
+    CHECK(r.value == 21.5f);
+    CHECK_EQ((int)r.quality, (int)QUALITY_ESTIMATED);
+    // 12 B per reading plus the table, not 72 B per reading.
+    CHECK_EQ(rb.bytes(), 4 * (size_t)12 + RING_KEYS * (size_t)60);
+}
+
+// Keys whose readings have all been overwritten are reused, so a stream of
+// more distinct metrics than RING_KEYS over time never runs out.
+static void test_compact_keys_recycle() {
+    RingBuffer rb;
+    CHECK(rb.begin(8, false));
+    char m[16];
+    for (int i = 0; i < RING_KEYS * 4; i++) {
+        snprintf(m, sizeof(m), "m%d", i);
+        rb.push(mk("s", m, (float)i, (uint32_t)i));
+    }
+    CHECK_EQ(rb.keyDrops(), (uint32_t)0);
+    // The newest 8 are intact, each with its own strings.
+    SensorReading out[8];
+    CHECK_EQ(rb.copyRecent(out, 8), (size_t)8);
+    bool ok = true;
+    for (int k = 0; k < 8; k++) {
+        const int i = RING_KEYS * 4 - 8 + k;
+        snprintf(m, sizeof(m), "m%d", i);
+        if (strcmp(out[k].metric, m) != 0 || out[k].value != (float)i) ok = false;
+    }
+    CHECK(ok);
+}
+
+// More distinct metrics live in the ring than the table holds: the extra
+// readings are dropped and counted, and what was stored stays correct.
+static void test_compact_table_full_drops() {
+    RingBuffer rb;
+    CHECK(rb.begin(RING_KEYS + 8, false));
+    char m[16];
+    for (int i = 0; i < RING_KEYS + 3; i++) {
+        snprintf(m, sizeof(m), "m%d", i);
+        rb.push(mk("s", m, (float)i, (uint32_t)i));
+    }
+    CHECK_EQ(rb.keyDrops(), (uint32_t)3);
+    CHECK_EQ(rb.size(), (size_t)RING_KEYS);
+    SensorReading r;
+    CHECK(rb.findLast("s", "m0", r));
+    snprintf(m, sizeof(m), "m%d", RING_KEYS);   // the first one dropped
+    CHECK(!rb.findLast("s", m, r));
+    // A known key still goes in.
+    rb.push(mk("s", "m0", 99.0f, 1000));
+    CHECK_EQ(rb.keyDrops(), (uint32_t)3);
+    CHECK(rb.findLast("s", "m0", r));
+    CHECK(r.value == 99.0f);
+}
+
+// A drop on a full ring must not lose the reading it would have evicted:
+// that reading keeps its key, so a later push cannot take the entry from it.
+static void test_compact_drop_keeps_evicted_key() {
+    RingBuffer rb;
+    CHECK(rb.begin(RING_KEYS + 1, false));
+    char m[16];
+    rb.push(mk("s", "m0", 0.0f, 0));          // m0 twice: evicting the first
+    for (int i = 0; i < RING_KEYS; i++) {     // leaves its key still in use
+        snprintf(m, sizeof(m), "m%d", i);
+        rb.push(mk("s", m, (float)i, (uint32_t)i + 1));
+    }
+    // Full ring, full table, new metric: dropped, the oldest m0 stays.
+    rb.push(mk("s", "new", 1.0f, 500));
+    CHECK_EQ(rb.keyDrops(), (uint32_t)1);
+    SensorReading all[RING_KEYS + 1];
+    CHECK_EQ(rb.copyRecent(all, RING_KEYS + 1), (size_t)(RING_KEYS + 1));
+    CHECK(strcmp(all[0].metric, "m0") == 0);
+    CHECK_EQ((int)all[0].timestamp, 0);
+    // Two known metrics evict both m0s; then "new" can take m0's entry.
+    rb.push(mk("s", "m5", 5.5f, 501));
+    rb.push(mk("s", "m6", 6.5f, 502));
+    rb.push(mk("s", "new", 2.0f, 503));
+    CHECK_EQ(rb.keyDrops(), (uint32_t)1);
+    SensorReading r;
+    CHECK(rb.findLast("s", "new", r));
+    CHECK(r.value == 2.0f);
+    CHECK(!rb.findLast("s", "m0", r));
+    CHECK(rb.findLast("s", "m2", r));
+    CHECK(strcmp(r.metric, "m2") == 0 && r.value == 2.0f);
+}
+#endif
+
 int main() {
+#if RING_COMPACT
+    RUN(test_compact_round_trip);
+    RUN(test_compact_keys_recycle);
+    RUN(test_compact_table_full_drops);
+    RUN(test_compact_drop_keeps_evicted_key);
+#endif
     RUN(test_push_and_copy_order);
     RUN(test_overflow_keeps_most_recent);
     RUN(test_copyRecent_fromTs_filter);
