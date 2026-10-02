@@ -168,6 +168,25 @@ static void test_history_goes_after_the_derived() {
     CHECK_EQ(remoteIngest.historyPending(), 3);
 }
 
+// BME688Sensor holds the slow downward drift while its heater settles, so a
+// baseline restored from flash is not dragged toward the cold, low readings.
+static void test_gas_baseline_holds_while_warming() {
+    GasIaq held;
+    held.baseline = 80000.0f;
+    held.update(40.0f, 20000.0f, false);
+    CHECK(held.baseline == 80000.0f);
+
+    // A higher reading still lifts it: that is cleaner air, not warm-up.
+    held.update(40.0f, 90000.0f, false);
+    CHECK(fabsf(held.baseline - 81000.0f) < 0.5f);
+
+    // Warmed up (and by default) it drifts down again.
+    GasIaq drift;
+    drift.baseline = 80000.0f;
+    drift.update(40.0f, 20000.0f);
+    CHECK(drift.baseline < 80000.0f);
+}
+
 int main() {
     RUN(test_offset_and_scale_by_metric);
     RUN(test_backlog_is_corrected_too);
@@ -175,5 +194,6 @@ int main() {
     RUN(test_dew_point_and_iaq_are_derived);
     RUN(test_no_humidity_no_derived);
     RUN(test_history_goes_after_the_derived);
+    RUN(test_gas_baseline_holds_while_warming);
     return SUMMARY();
 }
