@@ -228,6 +228,8 @@ void BME688Sensor::_loadBaseline() {
     Serial.printf("[BME688] IAQ baseline %.0f Ohm restored\n", rec.baseline);
 }
 
+// Runs from readAll() in SlowSensorTask (isBlocking), which holds no
+// wireMutex, so waiting on fsMutex here stalls no other sensor.
 void BME688Sensor::_maybeSaveBaseline() {
     const uint32_t now = millis();
     // Readings taken while the heater is still settling are low and would
@@ -247,5 +249,12 @@ void BME688Sensor::_maybeSaveBaseline() {
     const bool ok = atomicWrite(LittleFS, path, [&](File& f) -> bool {
         return f.write((const uint8_t*)&rec, sizeof(rec)) == sizeof(rec);
     }, fsMutex);
-    if (ok) _savedBaseline = _gasBaseline;
+    if (ok) {
+        _savedBaseline = _gasBaseline;
+    } else {
+        // fsMutex busy (a datalog flush) or a write error: try again in
+        // five minutes instead of waiting out the hour.
+        _lastSaveMs = now - IAQ_SAVE_EVERY_MS + 5UL * 60UL * 1000UL;
+        Serial.println("[BME688] IAQ baseline save failed, retrying in 5 min");
+    }
 }
