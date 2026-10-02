@@ -15,6 +15,27 @@
 
 HostSerial Serial;   // the shim declares it; RemoteNodeSensor logs through it
 
+// IaqBaselineStore is firmware-only (LittleFS); these stand in for it and
+// record what RemoteNodeSensor asked of it.
+static float       g_storedBaseline = 0.0f;
+static int         g_saves = 0;
+static char        g_lastPath[32];
+namespace IaqBaselineStore {
+void path(const char* prefix, const char* id, char* out, size_t len) {
+    snprintf(out, len, "/config/%s_%s.bin", prefix, id);
+}
+float load(const char* p, int, int, const char*) {
+    strncpy(g_lastPath, p, sizeof(g_lastPath) - 1);
+    return g_storedBaseline;
+}
+bool save(const char* p, int, int, float baseline, uint32_t) {
+    strncpy(g_lastPath, p, sizeof(g_lastPath) - 1);
+    g_storedBaseline = baseline;
+    g_saves++;
+    return true;
+}
+}
+
 static const uint32_t T0 = 1750000000u;
 
 static void initSensor(RemoteNodeSensor& s, const char* json) {
@@ -187,6 +208,59 @@ static void test_gas_baseline_holds_while_warming() {
     CHECK(drift.baseline < 80000.0f);
 }
 
+// A node's iaq baseline is restored on init, saved hourly, and a new
+// configuration starts from the node's own file only.
+static void test_node_iaq_baseline_is_kept() {
+    remoteIngest = RemoteIngest();
+    g_storedBaseline = 120000.0f;
+    g_saves = 0;
+    hostSetMillis(1000);
+    RemoteNodeSensor s;
+    initSensor(s, "{\"node\":\"air\",\"type\":\"remote\"}");
+    CHECK_STREQ(g_lastPath, "/config/iaqn_air.bin");
+
+    // Restored, so a first reading of 60 kOhm reads as dirtier air rather
+    // than seeding a fresh baseline at 60 kOhm.
+    remoteIngest.put("air", "humidity", 40.0f, "%", T0);
+    remoteIngest.put("air", "gas_resistance", 60000.0f, "Ohm", T0);
+    SensorReading out[16];
+    int n = s.readAll(out, 16);
+    GasIaq ref; ref.baseline = 120000.0f;
+    CHECK(fabsf(valueOf(out, n, "iaq") - ref.update(40.0f, 60000.0f)) < 0.001f);
+    CHECK_EQ(g_saves, 0);              // not before the hour
+
+    // An hour on, the moved baseline is written; it moved by under 2 %, so
+    // only a bigger change is.
+    remoteIngest.put("air", "gas_resistance", 200000.0f, "Ohm", T0 + 60);
+    hostSetMillis(1000 + 3600000);
+    s.readAll(out, 16);
+    CHECK_EQ(g_saves, 1);
+    CHECK(g_storedBaseline > 120000.0f);
+
+    // Re-initialised for another node: that node's file, nothing carried.
+    g_storedBaseline = 0.0f;
+    initSensor(s, "{\"node\":\"shed\",\"type\":\"remote\"}");
+    CHECK_STREQ(g_lastPath, "/config/iaqn_shed.bin");
+    remoteIngest.put("shed", "humidity", 40.0f, "%", T0);
+    remoteIngest.put("shed", "gas_resistance", 60000.0f, "Ohm", T0);
+    n = s.readAll(out, 16);
+    GasIaq fresh;
+    CHECK(fabsf(valueOf(out, n, "iaq") - fresh.update(40.0f, 60000.0f)) < 0.001f);
+}
+
+static void test_saver_cadence() {
+    IaqBaselineStore::Saver sv;
+    sv.reset(0, 100000.0f);
+    CHECK(!sv.due(1000, 150000.0f));                       // within the hour
+    CHECK(!sv.due(3600000, 101000.0f));                    // under 2 %
+    CHECK(sv.due(7200000, 150000.0f));
+    sv.done(7200000, 150000.0f, false);                    // failed: retry in 5 min
+    CHECK(!sv.due(7200000 + 299000, 150000.0f));
+    CHECK(sv.due(7200000 + 300000, 150000.0f));
+    sv.done(7200000 + 300000, 150000.0f, true);
+    CHECK(!sv.due(7200000 + 300000 + 3600000, 150500.0f)); // saved; small change
+}
+
 int main() {
     RUN(test_offset_and_scale_by_metric);
     RUN(test_backlog_is_corrected_too);
@@ -195,5 +269,7 @@ int main() {
     RUN(test_no_humidity_no_derived);
     RUN(test_history_goes_after_the_derived);
     RUN(test_gas_baseline_holds_while_warming);
+    RUN(test_node_iaq_baseline_is_kept);
+    RUN(test_saver_cadence);
     return SUMMARY();
 }

@@ -137,7 +137,10 @@ the warm-up is skipped. A shorter period keeps it running.
 The collector derives `dew_point` (from temperature and humidity) and `iaq`
 (from gas_resistance and humidity) for every node that sends those, the way
 its own BME280/BME688 plugins do (`RemoteNodeSensor`); they are not node
-metrics and do not count in the node's budget.
+metrics and do not count in the node's budget. The `iaq` gas baseline is
+kept on the collector's LittleFS per node (`/config/iaqn_<hash>.bin`, saved at
+most hourly), so a collector restart does not start it over; saving the
+remote sensor with another node id starts that node from its own file.
 
 Units are the ones the collector's own sensor plugins and the WiFi node
 already publish (gas_resistance is `Ohm`, as `BME688Sensor` and node/ report

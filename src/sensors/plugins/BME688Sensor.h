@@ -3,6 +3,7 @@
 #include <Wire.h>   // TwoWire
 #include "../../drivers/BME688_Mini.h"
 #include "../../utils/GasIaq.h"
+#include "../../utils/IaqBaselineStore.h"
 
 // ============================================================================
 // BME680 / BME688 — Temperature / Humidity / Pressure / Gas + IAQ (I2C)
@@ -128,7 +129,6 @@ private:
     // run long enough for the resistance to mean something.
     void _loadBaseline();
     void _maybeSaveBaseline();
-    void _baselinePath(char* out, size_t len) const;
     bool _warmedUp();
 
     // Resolves the air temperature to express humidity against: the configured
@@ -157,10 +157,9 @@ private:
     int      _heaterTemp   = 320;
     int      _heaterDurMs  = 150;
     bool     _ready        = false;
-    float    _savedBaseline = 0.0f;       // value last written to LittleFS
     uint32_t _initMs        = 0;          // heater warm-up reference
     bool     _warm          = false;      // warm-up over (latched)
-    uint32_t _lastSaveMs    = 0;
+    IaqBaselineStore::Saver _saver;       // when to write the baseline
 
     CalibrationAxis _calTemp;
     CalibrationAxis _calHumidity;

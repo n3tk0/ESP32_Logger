@@ -10,6 +10,7 @@
 #include <string.h>
 #include "../RemoteIngest.h"
 #include "../../utils/Psychrometrics.h"
+#include "../../utils/IaqBaselineStore.h"
 
 bool RemoteNodeSensor::init(JsonObjectConst config) {
     // NOTHING HERE TOUCHES _enabled, AND THAT IS THE FIX.
@@ -58,6 +59,13 @@ bool RemoteNodeSensor::init(JsonObjectConst config) {
         Serial.printf("[%s.remote] init refused: no node id\n", getId());
         return false;
     }
+
+    // A new configuration starts the iaq baseline from a clean slate; only
+    // this node's own saved one (under the heater settings node firmware
+    // runs) is restored. Another node id is another file.
+    _iaq      = GasIaq();
+    _iaqValid = false;
+    _loadBaseline();
 
     // Nothing to probe — there is no bus and no device. Success here means
     // "configured", not "the node is alive"; liveness shows up as reading
@@ -148,8 +156,33 @@ int RemoteNodeSensor::readLatest(SensorReading* out, int maxOut) {
     return _derive(out, n, maxOut, rawTemp, rawGas);
 }
 
+// ---------------------------------------------------------------------------
+// The iaq baseline survives a collector restart (utils/IaqBaselineStore.h),
+// one file per node id. The node's heater is never cold on the collector's
+// account, so unlike BME688Sensor there is no warm-up to wait out here.
+void RemoteNodeSensor::_loadBaseline() {
+    char path[32];
+    IaqBaselineStore::path("iaqn", _node, path, sizeof(path));
+    _iaq.baseline = IaqBaselineStore::load(path, NODE_HEATER_TEMP, NODE_HEATER_DUR_MS, getId());
+    _saver.reset(millis(), _iaq.baseline);
+}
+
+void RemoteNodeSensor::_maybeSaveBaseline() {
+    if (!_iaqValid) return;
+    const uint32_t now = millis();
+    if (!_saver.due(now, _iaq.baseline)) return;
+    char path[32];
+    IaqBaselineStore::path("iaqn", _node, path, sizeof(path));
+    // The sensor task reads every sensor in turn: a busy fsMutex is not
+    // worth stalling it for, the saver retries in five minutes.
+    const bool ok = IaqBaselineStore::save(path, NODE_HEATER_TEMP, NODE_HEATER_DUR_MS,
+                                           _iaq.baseline, 50);
+    _saver.done(now, _iaq.baseline, ok);
+}
+
 int RemoteNodeSensor::readAll(SensorReading* out, int maxOut) {
     int n = readLatest(out, maxOut);
+    _maybeSaveBaseline();
 
     // Queued history last, in whatever room is left — behind the live values
     // and their derived ones, so an outage's backlog never pushes the current

@@ -46,6 +46,7 @@
 
 #include "../ISensor.h"
 #include "../../utils/GasIaq.h"
+#include "../../utils/IaqBaselineStore.h"
 
 class RemoteNodeSensor : public ISensor {
 public:
@@ -105,4 +106,14 @@ private:
     float    _iaqGas   = 0.0f;
     uint32_t _iaqTs    = 0;
     bool     _iaqValid = false;
+
+    // Kept across restarts, one file per node. The heater settings stored
+    // with it are the ones node firmware runs: BME688_Mini::begin()'s
+    // setGasHeater(320, 150). Keep the two in step; changing these makes
+    // every saved node baseline start over.
+    static constexpr int NODE_HEATER_TEMP   = 320;
+    static constexpr int NODE_HEATER_DUR_MS = 150;
+    IaqBaselineStore::Saver _saver;
+    void _loadBaseline();
+    void _maybeSaveBaseline();
 };
