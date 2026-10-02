@@ -658,6 +658,10 @@ static bool beginSds(const SensorCfg& s) {
             NS_LOG("[sensor] SDS011 setting 0x%02X was %d; set to 0\n", (unsigned)cmd, v);
             sdsSet(cmd, 0);
             delay(100);
+            // What it is now, for the diagnostics page; the log line above
+            // keeps what it was.
+            if (cmd == 0x02) s_sdsDiag.reportMode = 0;
+            else             s_sdsDiag.period     = 0;
         } else if (v < 0) {
             NS_LOG("[sensor] SDS011 did not answer query 0x%02X\n", (unsigned)cmd);
         }

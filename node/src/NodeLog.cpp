@@ -2,6 +2,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 // The ring: plain text, each line stamped with the uptime it began at. When
 // full the oldest bytes go, so the first line shown may start mid-line.
@@ -19,13 +20,19 @@ static void put(const char* p, size_t n) {
 }
 
 void nodeLogP(PGM_P fmt, ...) {
-    char line[160];
+    char line[192];
     va_list ap;
     va_start(ap, fmt);
     int n = vsnprintf_P(line, sizeof(line), fmt, ap);
     va_end(ap);
     if (n <= 0) return;
-    if ((size_t)n >= sizeof(line)) n = sizeof(line) - 1;   // cut, not lost
+    if ((size_t)n >= sizeof(line)) {
+        // Cut, not lost — and a cut line keeps its newline, or the next one
+        // runs on into it without a stamp.
+        n = sizeof(line) - 1;
+        const size_t fl = strlen_P(fmt);
+        if (fl && pgm_read_byte(fmt + fl - 1) == '\n') line[n - 1] = '\n';
+    }
     Serial.write((const uint8_t*)line, n);
 
     // A line may come in pieces ("connecting ..." then " ok"): stamp it once,
