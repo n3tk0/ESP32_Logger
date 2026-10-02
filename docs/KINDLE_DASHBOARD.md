@@ -688,8 +688,11 @@ sized by 0.5 was cut at its cell's right edge.
 
 The headline and the value beside it share one line in a 270 px column, and
 "23.5° / 1013 hPa" does not fit it at 88 and 44. When the two are too wide
-for the column, the value beside the headline gets smaller first, down to 28
-px, then the headline itself. They are measured by what they print, so the
+for the column, the value beside the headline gets smaller first, but only
+to eight tenths of its size (35 px, 38 on a grown page), near the indoor
+row's second values; then the headline itself, down to 40 px; and only then
+the value beside it again, down to 28 px. "21.7° / 37%" used to take the
+humidity to 28, and it could not be read. They are measured by what they print, so the
 ordinary "8.4° / 71%" keeps its 88 and 44, and a line that fits is never
 touched. The indoor row keeps the unshrunk headline size as its limit.
 
