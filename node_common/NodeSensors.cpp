@@ -86,7 +86,11 @@
 // Log lines with their format in flash: on the ESP8266 every string literal
 // otherwise sits in RAM. arduino-esp32 maps printf_P and PSTR straight
 // through, so the same line builds on both.
-#define NS_LOG(fmt, ...) Serial.printf_P(PSTR(fmt), ##__VA_ARGS__)
+// A firmware that keeps its own copy of the log (the WiFi node's /api/log)
+// defines NS_LOG before including this file.
+#ifndef NS_LOG
+#  define NS_LOG(fmt, ...) Serial.printf_P(PSTR(fmt), ##__VA_ARGS__)
+#endif
 
 using nodecfg::NodeConfig;
 using nodecfg::SensorCfg;
@@ -110,6 +114,11 @@ struct EntryState {
     uint8_t       addr  = 0;        ///< the I2C address that answered
     uint8_t       found = 0;        ///< ds18b20: probes on the bus
     DS18B20_Mini* ds    = nullptr;  ///< ds18b20: this entry's bus
+    // Diagnostics (nodeSensorsDiag()): reads that gave at least one value,
+    // reads that gave none, and when the last good one was.
+    uint32_t      reads  = 0;
+    uint32_t      empty  = 0;
+    uint32_t      lastOkMs = 0;
 };
 
 /// The hardware part of one entry — everything but the ds18b20 metric name.
@@ -222,6 +231,9 @@ bool     s_sdsWarmed  = false;
 /// A read fell due and has not been sent yet: the fan had not run its
 /// warm-up (the first send after boot), so it is taken on the next send.
 bool     s_sdsPending = false;
+/// Diagnostics (nodeSensorsSdsDiag()); kept across re-inits so a sensor that
+/// is brought up again does not hide what it did before.
+NodeSdsDiag s_sdsDiag;
 
 // Pulse counter. Touched by the ISR, so volatile and read in a critical
 // section.
@@ -572,6 +584,7 @@ static int sdsQuery(uint8_t cmd, uint32_t ms) {
     while ((uint32_t)(millis() - t0) < ms) {
         if (!s_sdsPort.available()) { delay(2); continue; }
         const uint8_t b = (uint8_t)s_sdsPort.read();
+        s_sdsDiag.bytes++;
         if (pos == 0 && b != 0xAA) continue;
         f[pos++] = b;
         if (pos < sizeof(f)) continue;
@@ -639,10 +652,16 @@ static bool beginSds(const SensorCfg& s) {
     for (uint8_t cmd : {(uint8_t)0x02, (uint8_t)0x08}) {   // reporting mode, period
         int v = sdsQuery(cmd, 400);
         if (v < 0) v = sdsQuery(cmd, 400);
+        if (cmd == 0x02) s_sdsDiag.reportMode = (int16_t)v;
+        else             s_sdsDiag.period     = (int16_t)v;
         if (v > 0) {
             NS_LOG("[sensor] SDS011 setting 0x%02X was %d; set to 0\n", (unsigned)cmd, v);
             sdsSet(cmd, 0);
             delay(100);
+            // What it is now, for the diagnostics page; the log line above
+            // keeps what it was.
+            if (cmd == 0x02) s_sdsDiag.reportMode = 0;
+            else             s_sdsDiag.period     = 0;
         } else if (v < 0) {
             NS_LOG("[sensor] SDS011 did not answer query 0x%02X\n", (unsigned)cmd);
         }
@@ -763,6 +782,32 @@ const char* nodeSensorsDescribe() { return s_describe[0] ? s_describe : "none"; 
 
 void nodeSensorsSetWait(void (*wait)(uint32_t ms)) { s_waitConv = wait; }
 
+int nodeSensorsDiag(NodeSensorDiag* out, int maxOut) {
+    int n = 0;
+    for (uint8_t i = 0; i < s_setup.count && i < MAX_SENSORS && n < maxOut; i++) {
+        const EntryState& e = s_entry[i];
+        NodeSensorDiag& d = out[n++];
+        d.type     = nodecfg::sensorTypeName(e.type);
+        d.ok       = e.ok;
+        d.addr     = e.addr;
+        d.found    = e.found;
+        d.reads    = e.reads;
+        d.empty    = e.empty;
+        d.lastOkMs = e.lastOkMs;
+    }
+    return n;
+}
+
+const NodeSdsDiag& nodeSensorsSdsDiag() {
+    s_sdsDiag.up      = s_sdsUp;
+    s_sdsDiag.awake   = s_sdsAwake;
+    s_sdsDiag.warmed  = s_sdsWarmed;
+    s_sdsDiag.pending = s_sdsPending;
+    s_sdsDiag.wokeMs  = s_sdsWokeMs;
+    s_sdsDiag.frameMs = s_sdsFrameMs;
+    return s_sdsDiag;
+}
+
 // ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
@@ -775,14 +820,19 @@ void nodeSensorsSetWait(void (*wait)(uint32_t ms)) { s_waitConv = wait; }
 static void drainSds(uint8_t warmupS) {
     while (s_sdsPort.available()) {
         const uint8_t b = (uint8_t)s_sdsPort.read();
+        s_sdsDiag.bytes++;
         if (s_sdsPos == 0 && b != 0xAA) continue;
         s_sdsFrame[s_sdsPos++] = b;
         if (s_sdsPos < sizeof(s_sdsFrame)) continue;
         s_sdsPos = 0;
-        if (s_sdsFrame[1] != 0xC0 || s_sdsFrame[9] != 0xAB) continue;
+        if (s_sdsFrame[1] != 0xC0 || s_sdsFrame[9] != 0xAB) {
+            s_sdsDiag.other++;                         // a reply, or misaligned
+            continue;
+        }
         uint8_t sum = 0;
         for (int i = 2; i <= 7; i++) sum += s_sdsFrame[i];
-        if (sum != s_sdsFrame[8]) continue;          // corrupt frame, drop it
+        if (sum != s_sdsFrame[8]) { s_sdsDiag.badSum++; continue; }   // corrupt frame, drop it
+        s_sdsDiag.frames++;
         s_sdsPm25 = (float)((s_sdsFrame[3] << 8) | s_sdsFrame[2]) / 10.0f;
         s_sdsPm10 = (float)((s_sdsFrame[5] << 8) | s_sdsFrame[4]) / 10.0f;
         s_sdsFrameMs = millis();
@@ -961,15 +1011,28 @@ int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut, uint32_
 
         float v[nodecfg::DS_MAX_COUNT];
         uint8_t nv = 0;
-        if (live)
+        if (live) {
             nv = readEntry(si, s, cfg.altitude_m, bhOnce, v, (uint8_t)(sizeof(v) / sizeof(v[0])));
+            bool any = false;
+            for (uint8_t q = 0; q < nv; q++) if (isfinite(v[q])) any = true;
+            EntryState& es = s_entry[si];
+            if (any) { es.reads++; es.lastOkMs = millis(); }
+            else     es.empty++;
+        }
 
         if (live && s.type == SensorType::Sds011) {
             const bool got = nv >= 2 && isfinite(v[0]);
             s_sdsPending = !got && !sdsGiveUp(s);
-            if (!got && !s_sdsPending)
+            if (got) {
+                s_sdsDiag.used++;
+                s_sdsDiag.pm25 = v[0];
+                s_sdsDiag.pm10 = v[1];
+            }
+            if (!got && !s_sdsPending) {
+                s_sdsDiag.giveUps++;
                 NS_LOG("[sensor] SDS011 sent nothing usable in %us; skipped\n",
                        (unsigned)s.warmup_s + 30u);
+            }
             // Read (or given up on): back to sleep until the next one is due.
             if (!s_sdsPending && nodecfg::sdsSleeps(cfg, s) && s_sdsAwake)
                 sdsSetWorking(false);
@@ -1009,10 +1072,21 @@ void nodeSensorsIdle(const NodeConfig& cfg, uint32_t nextTick, uint32_t msToNext
         // (the warm-up test needs it) and the port's buffer never overflows.
         if (s_sdsAwake) drainSds(s.warmup_s);
 
+        // Due within its warm-up: not only the next send but any send that
+        // close. With a node interval shorter than the warm-up (10 s against
+        // 30 s) the next send is never more than one interval away, so
+        // looking at it alone woke the fan one interval ahead instead of a
+        // warm-up ahead, and every read waited out the rest of the warm-up
+        // as empty sends.
+        const uint32_t leadMs = (uint32_t)s.warmup_s * 1000u + SDS_WAKE_LEAD_MS;
+        const uint32_t ivMs   = (uint32_t)cfg.interval_s * 1000u;
+        bool dueSoon = false;
+        for (uint32_t k = 0, at = msToNext; at <= leadMs; k++, at += ivMs) {
+            if (nodecfg::sensorDue(cfg, i, nextTick + k)) { dueSoon = true; break; }
+            if (ivMs == 0) break;
+        }
         const bool sleeps = nodecfg::sdsSleeps(cfg, s);
-        const bool wanted = !sleeps || s_sdsPending ||
-                            (nodecfg::sensorDue(cfg, i, nextTick) &&
-                             msToNext <= (uint32_t)s.warmup_s * 1000u + SDS_WAKE_LEAD_MS);
+        const bool wanted = !sleeps || s_sdsPending || dueSoon;
         const uint32_t now = millis();
         if (wanted && !s_sdsAwake) {
             sdsSetWorking(true);
