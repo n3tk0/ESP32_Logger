@@ -119,6 +119,11 @@ static inline void encodeSensor(const SensorCfg& s, JsonObject o) {
         default:
             break;
     }
+    // Always written, 0 included: a decoded entry that keeps its place and
+    // type keeps every field the document leaves out, so an omitted 0 would
+    // leave the node on its previous interval.
+    o["interval_s"] = s.interval_s;
+    if (s.type == SensorType::Sds011) o["warmup_s"] = s.warmup_s;
 }
 
 }  // namespace detail
@@ -334,6 +339,9 @@ static inline bool decodeSensor(JsonVariantConst in, uint8_t idx, const SensorCf
     // mention; anything else starts from the type's defaults for this chip.
     out = (prev && prev->type == type) ? *prev : sensorDefaults(type, hw);
 
+    if (!readInt(o["interval_s"], 0, 65535, out.interval_s, d, d.at(pre, "interval_s")))
+        return false;
+
     switch (type) {
         case SensorType::Bmx280:
         case SensorType::Bme688:
@@ -346,7 +354,8 @@ static inline bool decodeSensor(JsonVariantConst in, uint8_t idx, const SensorCf
                            d.at(pre, "metric"));
         case SensorType::Sds011:
             return readInt(o["rx"], 0, 255, out.rx, d, d.at(pre, "rx")) &&
-                   readInt(o["tx"], 0, 255, out.tx, d, d.at(pre, "tx"));
+                   readInt(o["tx"], 0, 255, out.tx, d, d.at(pre, "tx")) &&
+                   readInt(o["warmup_s"], 0, 255, out.warmup_s, d, d.at(pre, "warmup_s"));
         case SensorType::Pulse: {
             JsonVariantConst mv = o["mode"];
             if (!mv.isNull()) {

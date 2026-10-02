@@ -117,11 +117,12 @@
 #endif
 
 // ── Metric budget ───────────────────────────────────────────────────────────
-// The collector drains a remote node through the ordinary plugin path, and
-// SensorManager hands every plugin a fixed array of 8 readings per tick
-// (MAX_METRICS_PER_TICK). A node publishing more than that is not an error
-// anywhere — the surplus is simply not copied, which is exactly the kind of
-// silent loss that is painful to diagnose from the dashboard end.
+// A node may publish at most nodecfg::MAX_METRICS (12) metrics per reading:
+// what the collector's SensorManager copies per tick for one remote node,
+// with room for the battery and the dew_point/iaq it derives. A node
+// publishing more than that is not an error anywhere — the surplus is simply
+// not copied, which is exactly the kind of silent loss that is painful to
+// diagnose from the dashboard end.
 //
 // The validator (src/nodecfg/NodeConfigValidate.h) refuses such a config from
 // the page or the collector — but a default list is not validated before the
@@ -168,8 +169,8 @@
 #define NODE_METRIC_COUNT (NODE_MC_BMX280 + NODE_MC_BME688 + NODE_MC_BH1750 + \
                            NODE_MC_SDS011 + NODE_MC_PULSE  + NODE_MC_DS18B20)
 
-#if NODE_METRIC_COUNT > 8
-#  warning "This sensor set emits more than 8 metrics; the collector copies only the first 8 per tick and drops the rest silently. Split the sensors across two nodes, or trim the set."
+#if NODE_METRIC_COUNT > 12
+#  warning "This sensor set emits more than 12 metrics; the collector copies only the first 12 per tick and drops the rest silently. Split the sensors across two nodes, or trim the set."
 #endif
 
 // ── I2C pins ────────────────────────────────────────────────────────────────

@@ -51,13 +51,16 @@ public:
     /// `_mux` below: that is what keeps the global out of flash.
     RemoteIngest() { portMUX_INITIALIZE(&_mux); }
 
-    // A node posts one metric set per interval. Four nodes × eight metrics
-    // covers the intended shape (a handful of BME280/BMP280 satellites)
-    // without making the linear scan interesting. Slots are claimed
-    // first-come and never freed: a node that stops reporting goes stale
-    // rather than surrendering its slot to a newcomer, so a flapping node
-    // cannot evict a healthy one.
-    static constexpr int MAX_ENTRIES        = 32;
+    // A node posts one metric set per interval. 48 slots hold four typical
+    // nodes (a BME280 and a light or PM sensor each), or three at the full
+    // twelve-metric budget plus an ESP-NOW node's battery, without making the
+    // linear scan interesting. Slots are claimed first-come and never freed:
+    // a node that stops reporting goes stale rather than surrendering its
+    // slot to a newcomer, so a flapping node cannot evict a healthy one.
+#ifndef REMOTE_MAX_ENTRIES
+#  define REMOTE_MAX_ENTRIES 48
+#endif
+    static constexpr int MAX_ENTRIES        = REMOTE_MAX_ENTRIES;
     static constexpr int MAX_NODE_ID        = 17;   // matches SensorReading::sensorId
     static constexpr int MAX_METRIC         = 16;   // matches SensorReading::metric
     static constexpr int MAX_UNIT           = 12;   // matches SensorReading::unit
@@ -142,6 +145,23 @@ public:
     int drain(const char* nodeId, SensorReading* out, int maxOut,
               uint32_t staleAfterMs);
 
+    /// drain()'s two halves, for a caller that puts something between them
+    /// (RemoteNodeSensor's derived dew_point and iaq go after the live values
+    /// and before the history). drainLatest() consumes nothing;
+    /// drainHistory() removes what it returns.
+    int drainLatest(const char* nodeId, SensorReading* out, int maxOut,
+                    uint32_t staleAfterMs);
+    int drainHistory(const char* nodeId, SensorReading* out, int maxOut);
+
+    /// The age past which one mailbox value counts as stale: `staleAfterMs`,
+    /// or two and a half times the gap at which that metric has been
+    /// arriving when that is longer. A node may read a sensor far less often
+    /// than it posts (a per-sensor interval_s, docs/NODE_CONFIG.md §1.1), and
+    /// one node-wide limit would call a PM reading taken every 30 minutes
+    /// dead between readings. The SHORTER of the last two gaps, so one outage
+    /// does not stretch the limit for the next one. 0 when staleAfterMs is 0.
+    static uint32_t staleLimitMs(uint32_t staleAfterMs, uint32_t gapA, uint32_t gapB);
+
     /// millis() since the most recent put() for `nodeId`, or UINT32_MAX when
     /// the node has never reported. Used by the diagnostics endpoint and the
     /// Kindle dashboard to show "last seen".
@@ -208,6 +228,7 @@ private:
         uint32_t ts;         // node-supplied epoch seconds, 0 = none
         uint32_t rxMillis;   // local millis() at receipt
         uint32_t seenMs;     // local millis() the node last posted at all
+        uint32_t gapMs[2];   // the last two intervals between put()s, newest first
         bool     used;
     };
 

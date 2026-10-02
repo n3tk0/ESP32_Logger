@@ -55,9 +55,19 @@ int nodeSensorsBegin(const nodecfg::NodeConfig& cfg);
 bool nodeSensorsReady();
 
 /// Read one value of every metric the config publishes, in listMetrics()
-/// order, skipping metrics whose sensor is not answering and pressure_sea
-/// when altitude_m == 0. Returns how many were written (<= maxOut).
-int nodeSensorsRead(const nodecfg::NodeConfig& cfg, NodeReading* out, int maxOut);
+/// order, skipping metrics whose sensor is not answering, pressure_sea when
+/// altitude_m == 0, and every entry whose own interval_s has not come round
+/// on send number `tick` (nodecfg::sensorDue(); tick 0 reads everything).
+/// An SDS011 that is due but has not finished its warm-up is skipped and
+/// read on a later send instead. Returns how many were written (<= maxOut).
+int nodeSensorsRead(const nodecfg::NodeConfig& cfg, NodeReading* out, int maxOut,
+                    uint32_t tick);
+
+/// Between sends, on a node that stays awake: call often (every loop pass).
+/// `nextTick` is the number the next send will have and `msToNext` how long
+/// until it. Wakes a sleeping SDS011 its warm-up ahead of the send that reads
+/// it, and takes its frames as they arrive. Does nothing without an SDS011.
+void nodeSensorsIdle(const nodecfg::NodeConfig& cfg, uint32_t nextTick, uint32_t msToNext);
 
 /// How the sensor layer waits for a sensor to finish measuring: a DS18B20
 /// conversion (up to 760 ms at 12 bits) and a one-shot BH1750 measurement

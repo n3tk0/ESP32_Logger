@@ -239,7 +239,9 @@ def wifi(b):
     check(body["net"]["port"] == 8080 and body["name"] == "balcony-2" and body["interval_s"] == 120,
           "edited values are sent as numbers and strings")
     check(body["board"] == 1 and body["i2c"] == {"sda": 4, "scl": 5}, "board and I2C as GPIO numbers (%r)" % body["i2c"])
-    check(body["sensors"][1] == {"type": "ds18b20", "pin": 14, "count": 1, "metric": "probe_temp"},
+    # interval_s always goes out, 0 for an emptied field: null would keep the
+    # node's previous interval (docs/NODE_CONFIG.md §1.1).
+    check(body["sensors"][1] == {"type": "ds18b20", "pin": 14, "count": 1, "metric": "probe_temp", "interval_s": 0},
           "the DS18B20 row (%r)" % body["sensors"][1])
     st = mock("/__state")
     check(st["net"]["pass"] == "hunter22" and st["local"] is True, "the mock kept the passphrase and marked it local")

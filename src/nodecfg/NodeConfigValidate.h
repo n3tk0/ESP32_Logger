@@ -159,10 +159,12 @@ static inline void useField(const PinUse& u, char out[EN_CFG_FIELD_LEN]) {
 ///                 bh1750 addr 0x23 or 0x5C
 ///                 ds18b20 count 1..8, metric 1..10 of [a-z0-9_] from a letter
 ///                 pulse per_pulse > 0, debounce_us <= 1 s
+///                 sds011 warmup_s 10..120
+///                 interval_s 0 or >= the node's interval_s
 ///               no sds011/pulse on a sleeping ESP-NOW node
 ///               one entry per type, except ds18b20
 ///               not bmx280 and bme688 together
-///               at most 8 metrics in total (pressure_sea always counted)
+///               at most 12 metrics in total (pressure_sea always counted)
 ///               no two metrics with the same name
 ///   pins        every pin in use exists on the chip, is not forbidden, and
 ///               is used once (I2C only when an I2C sensor is present, the
@@ -271,8 +273,23 @@ static inline bool validate(const NodeConfig& c, Validation& out) {
                     return fail(out, f, "must be rain or flow");
                 }
                 break;
+            case SensorType::Sds011:
+                if (s.warmup_s < SDS_WARMUP_MIN_S || s.warmup_s > SDS_WARMUP_MAX_S) {
+                    sensorFieldPath(f, sizeof(f), i, "warmup_s");
+                    return fail(out, f, "must be %u..%u seconds",
+                                (unsigned)SDS_WARMUP_MIN_S, (unsigned)SDS_WARMUP_MAX_S);
+                }
+                break;
             default:
                 break;
+        }
+
+        // 0 = every send. Anything else no shorter than the node's own
+        // interval: the node only reads when it sends, so a shorter one could
+        // not be honoured and would only look as if it were.
+        if (s.interval_s != 0 && s.interval_s < c.interval_s) {
+            sensorFieldPath(f, sizeof(f), i, "interval_s");
+            return fail(out, f, "0 or at least the node's %u s", (unsigned)c.interval_s);
         }
 
         sensorFieldPath(f, sizeof(f), i, "type");

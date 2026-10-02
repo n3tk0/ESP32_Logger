@@ -229,6 +229,36 @@ static void test_staleness_still_marks_the_live_value() {
     CHECK_EQ((int)out[0].quality, (int)QUALITY_ERROR);
 }
 
+// A metric that arrives less often than the node posts (a sensor with its own,
+// longer interval_s) is judged by its own gap, not the node-wide limit — but
+// only once two gaps have been seen, and by the shorter of them, so one outage
+// does not stretch the limit for the next.
+static void test_staleness_follows_a_metrics_own_gap() {
+    RemoteIngest& ri = fresh();
+    const uint32_t tenMin = 600000;
+    ri.put("air", "pm25", 5.0f, "ug/m3", T0);
+    hostAdvanceMillis(30 * 60000);
+    ri.put("air", "pm25", 6.0f, "ug/m3", T0 + 1800);
+    hostAdvanceMillis(30 * 60000);
+    ri.put("air", "pm25", 7.0f, "ug/m3", T0 + 3600);   // two 30-minute gaps
+
+    SensorReading out[2];
+    hostAdvanceMillis(40 * 60000);                      // 40 min: within 75
+    CHECK_EQ(ri.drainLatest("air", out, 2, tenMin), 1);
+    CHECK_EQ((int)out[0].quality, (int)QUALITY_GOOD);
+    CHECK_EQ(ri.peekLatest("air", out, 2, tenMin), 1);
+    CHECK_EQ((int)out[0].quality, (int)QUALITY_GOOD);
+    hostAdvanceMillis(36 * 60000);                      // 76 min: past 2.5 gaps
+    CHECK_EQ(ri.drainLatest("air", out, 2, tenMin), 1);
+    CHECK_EQ((int)out[0].quality, (int)QUALITY_ERROR);
+
+    CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 0, 0), tenMin);       // nothing seen
+    CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 60000, 0), tenMin);   // one gap only
+    CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 60000, 60000), tenMin);
+    CHECK_EQ(RemoteIngest::staleLimitMs(tenMin, 1800000, 7200000), 4500000u);
+    CHECK_EQ(RemoteIngest::staleLimitMs(0, 1800000, 1800000), 0u);   // disabled stays so
+}
+
 // History is never marked stale by the same rule. It is old BY DEFINITION —
 // that is what makes it history — and flagging it as an error would throw away
 // exactly the readings the queue exists to deliver.
@@ -332,6 +362,7 @@ int main() {
     RUN(test_full_queue_drops_the_oldest);
     RUN(test_ring_wraps_cleanly);
     RUN(test_staleness_still_marks_the_live_value);
+    RUN(test_staleness_follows_a_metrics_own_gap);
     RUN(test_history_is_not_stale_merely_for_being_old);
     RUN(test_touch_moves_last_seen_not_the_values);
     RUN(test_history_room_counts_down_to_zero_and_stops);

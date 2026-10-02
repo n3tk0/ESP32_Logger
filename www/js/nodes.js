@@ -521,7 +521,7 @@ function ndField(ctx, path, label, kind, opt) {
       }).join("") + "</select>";
   } else {
     var shown = raw !== null ? raw : kind === "pin" ? ndPinLabel(key, v) : kind === "secret" ? "" : (v == null ? "" : v);
-    var type = kind === "secret" ? "password" : (kind === "int" || kind === "float") ? "number" : "text";
+    var type = kind === "secret" ? "password" : (kind === "int" || kind === "int0" || kind === "float") ? "number" : "text";
     ctl = '<input class="input mono' + (err || (d && d.bad[path]) ? " nd-bad" : "") + '" type="' + type + '"' + common +
       ' value="' + esc(shown) + '"' +
       (opt.min != null ? ' min="' + opt.min + '"' : "") + (opt.max != null ? ' max="' + opt.max + '"' : "") +
@@ -577,7 +577,8 @@ function ndSensorHtml(ctx, s, i) {
         ndField(ctx, p + ".metric", ndT("nodes.cfgProbeMetric"), "str", { maxlength: 10, placeholder: "probe_temp" });
       break;
     case "sds011":
-      f = ndField(ctx, p + ".rx", ndT("nodes.cfgRx"), "pin") + ndField(ctx, p + ".tx", ndT("nodes.cfgTx"), "pin");
+      f = ndField(ctx, p + ".rx", ndT("nodes.cfgRx"), "pin") + ndField(ctx, p + ".tx", ndT("nodes.cfgTx"), "pin") +
+        ndField(ctx, p + ".warmup_s", ndT("nodes.cfgWarmup"), "int", { min: 10, max: 120, hint: ndT("nodes.cfgWarmupHint") });
       break;
     case "pulse":
       f = ndField(ctx, p + ".pin", ndT("nodes.cfgPin"), "pin") +
@@ -587,6 +588,9 @@ function ndSensorHtml(ctx, s, i) {
         ndField(ctx, p + ".debounce_us", ndT("nodes.cfgDebounce"), "int", { min: 0 });
       break;
   }
+  // Every type: how often it is read. 0 / empty = with every report.
+  f += ndField(ctx, p + ".interval_s", ndT("nodes.cfgSensorInterval"), "int0", { min: 0, max: 65535, placeholder: "0",
+    hint: ndT("nodes.cfgSensorIntervalHint", { n: ctx.doc.interval_s }) });
   var unsafe = sleeping && ND_SLEEP_UNSAFE[s.type]
     ? '<p class="nd-ferr">' + esc(ndT("nodes.cfgSleepUnsafe")) + "</p>" : "";
   return '<div class="nd-sensor">' + head + (f ? '<div class="kd-fields">' + f + "</div>" : "") + unsafe + "</div>";
@@ -594,7 +598,7 @@ function ndSensorHtml(ctx, s, i) {
 
 function ndBudgetHtml(cfgKey) {
   var doc = ndDoc(cfgKey) || {};
-  var max = ndCaps(cfgKey).max_metrics || 8;
+  var max = ndCaps(cfgKey).max_metrics || 12;
   var used = ndMetricCount(doc.sensors);
   return '<span class="badge ' + (used > max ? "err" : "dim") + ' mono" data-nd-budget="' + esc(cfgKey) + '" title="' +
     esc(ndT("nodes.cfgBudgetTitle")) + '">' + esc(ndT("nodes.cfgBudget", { n: used, max: max })) + "</span>";
@@ -758,8 +762,9 @@ function nodesCfgInput() {
 
   if (kind === "bool") {
     v = el.checked;
-  } else if (kind === "int") {
-    v = el.value.trim() === "" ? NaN : Number(el.value);
+  } else if (kind === "int" || kind === "int0") {
+    // int0: an emptied field means 0 (a sensor's "every send"), not a typo.
+    v = el.value.trim() === "" ? (kind === "int0" ? 0 : NaN) : Number(el.value);
     bad = !isFinite(v) || Math.floor(v) !== v;
   } else if (kind === "float") {
     v = el.value.trim() === "" ? NaN : Number(el.value);
@@ -833,7 +838,7 @@ function ndSensorDefaults(type) {
     case "bmx280": case "bme688": return { type: type, addr: 0 };
     case "bh1750": return { type: type, addr: 0x23 };
     case "ds18b20": return { type: type, pin: null, count: 1, metric: "probe_temp" };
-    case "sds011": return { type: type, rx: null, tx: null };
+    case "sds011": return { type: type, rx: null, tx: null, warmup_s: 30, interval_s: 0 };
     case "pulse": return { type: type, pin: null, mode: "rain", per_pulse: 0.2794, debounce_us: 5000 };
   }
   return { type: type };

@@ -113,8 +113,31 @@ Decoding details (`src/nodecfg/NodeConfigJson.h`, shared by every side):
 | `bme688` | `addr` | the above + gas_resistance Ohm | 5 | yes |
 | `ds18b20` | `pin`, `count` (1–8), `metric` (≤10 chars, default `probe_temp`) | probe_temp, probe_temp_1, … C | count | yes |
 | `bh1750` | `addr` (0x23/0x5C) | lux lx | 1 | yes |
-| `sds011` | `rx`, `tx` | pm25, pm10 ug/m3 | 2 | **no** |
+| `sds011` | `rx`, `tx`, `warmup_s` (10–120, default 30) | pm25, pm10 ug/m3 | 2 | **no** |
 | `pulse` | `pin`, `mode` (`rain`/`flow`), `per_pulse`, `debounce_us` | rain_rate mm/h + rain_total mm, or flow_rate L/min + flow_total L | 2 | **no** |
+
+Every entry also takes **`interval_s`**: how often it is read, in seconds.
+`0` (the default, and what an entry without the key gets) reads it on every
+send; anything else must be at least the node's own `interval_s`, and is
+rounded **up** to a whole number of sends (`nodecfg::sensorEvery()`): a node
+at 60 s with an entry at 90 s reads it every second send. A send carries only
+the values read for it, and the first send after a boot (send 0) reads every
+entry. A pulse counter counts all the time; its `interval_s` is how often it
+reports. The encoder always writes `interval_s` (and `warmup_s` for an
+sds011), because a decoded entry keeps the fields a document leaves out.
+
+An `sds011` sleeps between readings — fan and laser off, through the
+datasheet's 0xB4/0x06 work-mode command — when its period is more than twice
+`warmup_s` (`nodecfg::sdsSleeps()`). The node wakes it `warmup_s` before the
+send that reads it and sends only a frame that arrived after the warm-up; a
+read that falls due before the warm-up is done (the first send after a boot)
+goes out on the next send instead, and one with no usable frame 30 s past
+the warm-up is skipped. A shorter period keeps it running.
+
+The collector derives `dew_point` (from temperature and humidity) and `iaq`
+(from gas_resistance and humidity) for every node that sends those, the way
+its own BME280/BME688 plugins do (`RemoteNodeSensor`); they are not node
+metrics and do not count in the node's budget.
 
 Units are the ones the collector's own sensor plugins and the WiFi node
 already publish (gas_resistance is `Ohm`, as `BME688Sensor` and node/ report
@@ -133,8 +156,11 @@ battery_days itself).
 
 Rejected, with a machine-readable `field` and a human `reason`:
 
-- more than 8 sensor entries, or a total metric count > 8 (the collector's
-  `MAX_METRICS_PER_TICK`);
+- more than 8 sensor entries, or a total metric count > 12
+  (`nodecfg::MAX_METRICS`; the collector's `MAX_METRICS_PER_TICK` is sized
+  for those plus the battery, the derived metrics and some history);
+- an entry's `interval_s` other than 0 and below the node's `interval_s`;
+- an sds011 `warmup_s` outside 10–120;
 - `bmx280` and `bme688` together (same metric names);
 - two entries of the same `type` except `ds18b20` (one entry per bus pin);
 - a pin used twice (I2C pair counts only if an I2C sensor is present);
@@ -415,7 +441,7 @@ unknown types in `espnowValidate()`.
   entry*. Before any config has been reported, index k is named
   `probe_temp` / `probe_temp_k`. An unknown metric id is dropped (the rest of
   the sample is kept); a non-finite value is dropped. A sample carries at most
-  9 values (`EN_DATA2_MAX_VALUES`: the 8-metric budget + battery_voltage) and
+  13 values (`EN_DATA2_MAX_VALUES`: the 12-metric budget + battery_voltage) and
   may carry none — a node whose sensors all failed still sends a frame, so it
   still gets its ACK. `count` ≥ 1.
 
@@ -472,7 +498,7 @@ HTTP API served by both nodes:
               "left":["A0","RSV",…], "right":["D0","D1",…]}, …],
   "forbidden_pins": [6,7,8,9,10,11],
   "warn_pins": {"0":"boot strap, must be high at reset", …},
-  "max_sensors": 8, "max_metrics": 8 }
+  "max_sensors": 8, "max_metrics": 12 }
 ```
 
 `encodeCaps()` (`src/nodecfg/NodeConfigJson.h`) also writes, all optional for

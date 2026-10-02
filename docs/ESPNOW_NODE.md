@@ -283,9 +283,10 @@ RTC memory and send them as one burst when the link comes back, with `dt_s` on
 each sample giving it an honest timestamp.
 
 With `DATA2` a sample is as wide as the config makes it — 27 bytes for a
-BME280 with battery, 57 for nine values — so the node keeps its backlog as a
-1 KB pool of variable-length samples (`node_espnow/src/Backlog.h`) rather than
-a fixed array: 35 BME280 readings, or 17 of the widest. A frame carries the
+BME280 with battery, 83 for the widest (thirteen values) — so the node keeps
+its backlog as a 1 KB pool of variable-length samples
+(`node_espnow/src/Backlog.h`) rather than a fixed array: 35 BME280 readings,
+or 12 of the widest. A frame carries the
 oldest ones that fit (seven, for the BME280 node) beside the live reading,
 which is always last; the ACK removes exactly those, and a longer backlog
 drains over the next wakes. When the pool fills it drops the **oldest**,

@@ -45,18 +45,24 @@ namespace nodecfg {
 // Limits
 // ---------------------------------------------------------------------------
 
-/// Sensor entries in one config. Also the metric budget below — a list of
-/// eight entries that each produced one metric is the most that could fit.
+/// Sensor entries in one config.
 static const uint8_t MAX_SENSORS = 8;
 
 /// Metrics a node may publish per reading, counted over every sensor entry.
 ///
-/// This is the collector's MAX_METRICS_PER_TICK (src/sensors/SensorManager.cpp)
-/// and it is a hard limit there: RemoteIngest hands at most that many metrics
-/// of one node to the pipeline per tick, and the ninth is dropped without an
-/// error anywhere. So the validator refuses a config that would produce a
-/// ninth rather than let the node publish one nobody will ever see.
-static const uint8_t MAX_METRICS = 8;
+/// Twelve covers every real combination (a BME688's five, an SDS011's two, a
+/// BH1750 and four DS18B20 probes) and is what the rest of the chain is sized
+/// for: the collector's MAX_METRICS_PER_TICK (src/sensors/SensorManager.cpp)
+/// leaves room for these plus the battery and the derived dew_point and iaq,
+/// and a DATA2 frame carries them plus battery_voltage (EN_DATA2_MAX_VALUES).
+/// Anything past what the collector copies is dropped without an error
+/// anywhere, so the validator refuses a config that would produce a
+/// thirteenth rather than let the node publish one nobody will ever see.
+///
+/// It was 8. A collector from before the change refuses a DATA2 frame with
+/// more than nine values, so the collector is updated before a node is given
+/// a ninth metric.
+static const uint8_t MAX_METRICS = 12;
 
 /// A node name: the WiFi node's ingest id (the collector clamps ids to 16
 /// characters), and the label an ESP-NOW node shows on the collector.
@@ -72,6 +78,12 @@ static const uint8_t DS_MAX_COUNT = 8;
 
 static const uint16_t INTERVAL_MIN_S = 10;
 static const uint16_t INTERVAL_MAX_S = 65535;
+
+/// SDS011 warm-up: how long the fan runs before the reading that is sent.
+/// The datasheet asks for 30 s after waking before a value means anything.
+static const uint8_t SDS_WARMUP_DEFAULT_S = 30;
+static const uint8_t SDS_WARMUP_MIN_S     = 10;
+static const uint8_t SDS_WARMUP_MAX_S     = 120;
 
 // String capacities, terminator included.
 static const size_t SSID_CAP   = 33;   ///< 802.11: at most 32 bytes
@@ -218,6 +230,17 @@ struct SensorCfg {
     PulseMode mode        = PulseMode::Rain;
     float     per_pulse   = 0.2794f;   // the common 0.011" tipping bucket
     uint32_t  debounce_us = 10000;
+
+    /// Every type: how often this entry is read, in seconds. 0 = on every
+    /// send (the node's own interval_s). Otherwise at least the node's
+    /// interval, and rounded UP to a whole number of sends — see sensorEvery().
+    /// A pulse counter counts all the time; this is how often it reports.
+    uint16_t  interval_s  = 0;
+
+    /// sds011: seconds the fan runs before a reading is taken. Between
+    /// readings the sensor is put to sleep (fan and laser off) when the gap
+    /// is long enough to be worth it — see sdsSleeps().
+    uint8_t   warmup_s    = SDS_WARMUP_DEFAULT_S;
 };
 
 struct I2cCfg {
@@ -429,6 +452,35 @@ static inline NodeConfig configDefaults(Transport t, Hw hw) {
     // TCP connection); the flag means nothing there and says so honestly.
     c.sleep = (t == Transport::EspNow);
     return c;
+}
+
+/// How many sends apart two reads of `s` are: its interval_s over the node's,
+/// rounded up, and never less than one. Rounding up, so a sensor is never
+/// read more often than asked; a node at 60 s with a sensor at 90 s reads it
+/// every second send.
+static inline uint32_t sensorEvery(const NodeConfig& c, const SensorCfg& s) {
+    if (s.interval_s == 0 || c.interval_s == 0 || s.interval_s <= c.interval_s) return 1;
+    return ((uint32_t)s.interval_s + c.interval_s - 1) / c.interval_s;
+}
+
+/// Is entry `i` read on send number `tick`? Send 0 (the first after a cold
+/// boot) reads every entry, so a node that just came up says everything once.
+static inline bool sensorDue(const NodeConfig& c, uint8_t i, uint32_t tick) {
+    if (i >= c.sensor_count) return false;
+    return tick % sensorEvery(c, c.sensors[i]) == 0;
+}
+
+/// Seconds between two reads of `s`, as sensorEvery() schedules them.
+static inline uint32_t sensorPeriodS(const NodeConfig& c, const SensorCfg& s) {
+    return sensorEvery(c, s) * (uint32_t)c.interval_s;
+}
+
+/// Does an SDS011 entry sleep between readings? Only when the gap is more
+/// than twice its warm-up: a shorter one would spend most of it waking up,
+/// and the fan's start is the part of its life that wears it most.
+static inline bool sdsSleeps(const NodeConfig& c, const SensorCfg& s) {
+    return s.type == SensorType::Sds011 &&
+           sensorPeriodS(c, s) > 2u * (uint32_t)s.warmup_s;
 }
 
 /// Append a sensor entry. False when the list is full.

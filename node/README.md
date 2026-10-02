@@ -88,19 +88,46 @@ and `/api/status` say what answered:
 sensors: bmx280@0x76 ok, ds18b20x2@GPIO12 ok, pulse@GPIO4 rain
 ```
 
-### The 8-metric ceiling
+### The 12-metric ceiling
 
+A node may publish at most **12 metrics per reading** (`nodecfg::MAX_METRICS`).
 The collector drains a remote node through the ordinary plugin path, and
-`SensorManager` hands every plugin a fixed array of **8 readings per tick**. A
-node publishing more is not an error anywhere on the collector — the surplus
-is simply not copied, silently.
+`SensorManager` hands every plugin a fixed array per tick, sized for those 12
+plus the battery and the `dew_point` / `iaq` the collector derives itself
+(see below). A node publishing more is not an error anywhere on the collector
+— the surplus is simply not copied, silently.
 
 So the validator (`../src/nodecfg/NodeConfigValidate.h`) counts what a config
-would publish and **refuses** one over 8, on the page and on the collector
+would publish and **refuses** one over 12, on the page and on the collector
 alike. `pressure_sea` counts even while the altitude is 0, so setting an
-altitude later cannot push an accepted config over. If you need more than 8,
+altitude later cannot push an accepted config over. If you need more than 12,
 split the sensors across two nodes with different names — the collector treats
 each as its own series.
+
+A BME680 and an SDS011 on one node are 7: temperature, humidity, pressure,
+pressure_sea, gas_resistance, pm25, pm10. The collector adds `dew_point` (any
+node sending temperature and humidity) and `iaq` (a node sending
+gas_resistance) from those, the same way its own BME280/BME688 plugins do, so
+they cost the node and the radio nothing.
+
+The limit was 8 before. An older collector refuses an ESP-NOW frame with more
+than nine values, so update the collector before giving a node a ninth metric.
+
+### How often each sensor is read
+
+The node sends every `interval_s`. Each sensor entry has its own `interval_s`
+as well: 0 (the default) reads it on every send; anything else, at least the
+node's interval, reads it only every so many sends — rounded up, so a node at
+60 s with a sensor at 90 s reads that sensor every second send. A send carries
+only what was read for it, so the collector stores no repeated values. The
+first send after a boot reads every sensor.
+
+An SDS011 sleeps between its readings (fan and laser off — the laser is rated
+for about 8000 hours) when the gap is more than twice its `warmup_s` (default
+30 s). The node wakes it `warmup_s` ahead of the send that reads it and sends
+only a frame measured after the warm-up. On the first send after a boot it has
+not warmed up yet, so its first values go out on the next send. A gap of
+twice the warm-up or less keeps it running, as before.
 
 ### Two constraints worth knowing
 
@@ -174,7 +201,7 @@ config wins, and a reflash with different flags changes nothing on a node that
 already has one — erase the filesystem to start over from them.
 
 The seed is not validated before it runs, so the header still warns at compile
-time when the default list would publish more than 8 metrics, and enabling
+time when the default list would publish more than 12 metrics, and enabling
 both `NODE_SENSOR_BMX280` and `NODE_SENSOR_BME688` is still a compile error.
 
 `-U` will not turn the default sensor off. The toggles use

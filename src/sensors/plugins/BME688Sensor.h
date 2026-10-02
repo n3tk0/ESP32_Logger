@@ -2,6 +2,7 @@
 #include "../ISensor.h"
 #include <Wire.h>   // TwoWire
 #include "../../drivers/BME688_Mini.h"
+#include "../../utils/GasIaq.h"
 
 // ============================================================================
 // BME680 / BME688 — Temperature / Humidity / Pressure / Gas + IAQ (I2C)
@@ -116,8 +117,9 @@ private:
     // IAQ (Indoor Air Quality) — derived 0..500 index (lower = cleaner air,
     // BSEC convention) from humidity + a self-calibrating gas-resistance
     // baseline. Heuristic only (no Bosch BSEC); accuracy ramps up over the
-    // first minutes as the baseline settles.
-    float _computeIaq(float humidity, float rawGasOhm);
+    // first minutes as the baseline settles. Shared with RemoteNodeSensor:
+    // see utils/GasIaq.h.
+    GasIaq _iaq;
 
     // Resolves the air temperature to express humidity against: the configured
     // reference sensor when it has a fresh reading, otherwise `fallbackC`.
@@ -145,7 +147,6 @@ private:
     int      _heaterTemp   = 320;
     int      _heaterDurMs  = 150;
     bool     _ready        = false;
-    float    _gasBaseline  = 0.0f;        // clean-air resistance ceiling (Ω)
 
     CalibrationAxis _calTemp;
     CalibrationAxis _calHumidity;

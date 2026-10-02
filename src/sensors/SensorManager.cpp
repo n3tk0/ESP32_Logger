@@ -220,12 +220,20 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
     int pushed = 0;
     uint32_t ms = millis();
 
-    // Up to 8 metrics per sensor per tick.  The fattest producer is BME68x at
-    // 7 (T/H/P/gas/IAQ + dew_point + humidity_amb); SPS30 emits 5
-    // (4 × PM + device_status).  Keep this >= the largest getMetrics() count
-    // of any registered plugin — readAll() silently truncates otherwise.
-    SensorReading readings[8];
-    constexpr int MAX_METRICS_PER_TICK = 8;
+    // Up to 24 metrics per sensor per tick. The fattest producer is a remote
+    // node: nodecfg::MAX_METRICS (12) of its own, three battery metrics on an
+    // ESP-NOW node and the dew_point + iaq RemoteNodeSensor derives — 17 —
+    // with the rest of the buffer left for its queued history, which drains
+    // behind the live values. Of the wired plugins BME68x is the largest at 7
+    // (T/H/P/gas/IAQ + dew_point + humidity_amb). Keep this >= the largest
+    // getMetrics() count of any registered plugin — readAll() silently
+    // truncates otherwise.
+    //
+    // Static, not on the stack: 24 readings are ~1.7 KB, more than SensorTask
+    // and SlowSensorTask (4 KB stacks) should carry. One buffer serves both,
+    // because every use of it is inside configMutex, held below for the whole
+    // loop by whichever of the two is ticking.
+    static SensorReading readings[MAX_METRICS_PER_TICK];
 
     // R14 / AUDIT 3.19 + 15.3: hold configMutex for the read iteration so
     // a concurrent reloadConfig() can't _destroyAll() the sensor pointer

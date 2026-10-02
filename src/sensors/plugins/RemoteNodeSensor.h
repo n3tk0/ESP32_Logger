@@ -26,6 +26,10 @@
 // applied here, on the collector, so WiFi and ESP-NOW nodes are corrected
 // the same way without the node firmware or the radio protocol knowing.
 //
+// Besides what the node sends, it publishes `dew_point` (from temperature and
+// humidity) and `iaq` (from gas_resistance and humidity), the way the wired
+// BME280/BME688 plugins do — see _derive().
+//
 // `node` defaults to `id` when omitted, which is the common case — name the
 // node after the place and the sensor id after the same place.
 //
@@ -34,10 +38,14 @@
 // nine missed posts before its readings start being marked QUALITY_ERROR.
 // Too tight and a single dropped WiFi packet flags the station as failed;
 // too loose and a dead node keeps publishing a plausible frozen value.
+// A metric the node sends less often than that (a sensor with its own, longer
+// interval_s) gets two and a half times its own gap instead — see
+// RemoteIngest::staleLimitMs().
 // ============================================================================
 #pragma once
 
 #include "../ISensor.h"
+#include "../../utils/GasIaq.h"
 
 class RemoteNodeSensor : public ISensor {
 public:
@@ -68,7 +76,9 @@ private:
     // Metric names seen from this node, remembered so getMetrics() can
     // answer before the next drain. Pointers handed out must stay valid,
     // so these are owned storage rather than pointers into RemoteIngest.
-    static constexpr int MAX_METRICS = 8;
+    // A node's own twelve (nodecfg::MAX_METRICS), an ESP-NOW node's three
+    // battery metrics and the derived dew_point and iaq: 17, and room over.
+    static constexpr int MAX_METRICS = 20;
     mutable char _metricNames[MAX_METRICS][16] = {};
     mutable int  _metricCount = 0;
 
@@ -76,4 +86,17 @@ private:
     struct MetricCal { char metric[16]; CalibrationAxis axis; };
     MetricCal _cal[MAX_METRICS] = {};
     int       _calCount = 0;
+
+    void _calibrate(SensorReading* out, int n) const;
+    /// Append dew_point and iaq to the n live readings in `out`; returns the
+    /// new count.
+    int  _derive(SensorReading* out, int n, int maxOut, float rawTemp, float rawGas);
+
+    // iaq for this node's BME688: the baseline, and the last gas reading it
+    // was fed (by its time and value) so a mailbox repeat is not fed twice.
+    GasIaq   _iaq;
+    float    _iaqLast  = 0.0f;
+    float    _iaqGas   = 0.0f;
+    uint32_t _iaqTs    = 0;
+    bool     _iaqValid = false;
 };

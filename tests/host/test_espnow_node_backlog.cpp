@@ -212,8 +212,8 @@ static void test_full_drops_the_oldest_and_keeps_the_newest() {
     CHECK_EQ(n, 9);
 
     // Too many values for any sample is refused, not truncated.
-    Data2Value ten[10] = {};
-    CHECK(!push(g_pool, 1, ten, 10));
+    Data2Value many[EN_DATA2_MAX_VALUES + 1] = {};
+    CHECK(!push(g_pool, 1, many, EN_DATA2_MAX_VALUES + 1));
     CHECK(valid(g_pool));
 }
 

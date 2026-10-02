@@ -44,6 +44,9 @@ class SensorManager {
 public:
     static constexpr int MAX_SENSORS = 16;
     static constexpr int MAX_PLUGINS = 16;
+    /// Readings one plugin may hand back per tick (readAll's maxOut). See
+    /// tickFiltered() for what it is sized for.
+    static constexpr int MAX_METRICS_PER_TICK = 24;
 
     // ------------------------------------------------------------------
     // Plugin registration (call before loadAndInit)

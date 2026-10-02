@@ -208,6 +208,16 @@ float   s_sdsPm25 = NAN;
 float   s_sdsPm10 = NAN;
 uint8_t s_sdsFrame[10];
 uint8_t s_sdsPos  = 0;
+// Sleep between readings (sdsSleeps()). The SDS011 keeps its work/sleep state
+// for as long as it has power, through a node restart, so begin() always
+// sends "work" rather than assume the fan is running.
+bool     s_sdsAwake   = false;   ///< what we last told it
+uint32_t s_sdsWokeMs  = 0;       ///< when we last told it to work
+uint32_t s_sdsCmdMs   = 0;       ///< when we last sent any command
+uint32_t s_sdsFrameMs = 0;       ///< when the newest valid frame arrived
+/// A read fell due and has not been sent yet: the fan had not run its
+/// warm-up (the first send after boot), so it is taken on the next send.
+bool     s_sdsPending = false;
 
 // Pulse counter. Touched by the ISR, so volatile and read in a critical
 // section.
@@ -369,6 +379,9 @@ static void releaseAll() {
     s_sdsPm25 = NAN;
     s_sdsPm10 = NAN;
     s_sdsPos  = 0;
+    s_sdsAwake   = false;
+    s_sdsFrameMs = 0;
+    s_sdsPending = false;
     s_pulses  = 0;
     s_pulseTotal = 0.0f;
     s_bhFresh   = false;
@@ -516,6 +529,30 @@ static bool beginDs(EntryState& e, const SensorCfg& s) {
     return true;
 }
 
+/// Put the SDS011 to work (fan and laser on) or to sleep. The datasheet's
+/// "set sleep and work" query, 0xB4 / 0x06, as a set (0x01), for every
+/// sensor (device id FF FF). It answers with an AA C5 frame, which
+/// drainSds() steps over: it only keeps AA C0 measurement frames.
+static void sdsSetWorking(bool work) {
+    uint8_t c[19] = {0xAA, 0xB4, 0x06, 0x01, (uint8_t)(work ? 1 : 0),
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0, 0xAB};
+    uint8_t sum = 0;
+    for (int i = 2; i <= 16; i++) sum += c[i];
+    c[17] = sum;
+    s_sdsPort.write(c, sizeof(c));
+    const uint32_t now = millis();
+    s_sdsCmdMs = now;
+    if (work && !s_sdsAwake) {
+        s_sdsWokeMs = now;
+        s_sdsPos    = 0;
+    }
+    s_sdsAwake = work;
+    if (!work) {
+        s_sdsPm25 = NAN;
+        s_sdsPm10 = NAN;
+    }
+}
+
 static bool beginSds(const SensorCfg& s) {
     if (pinUnusable(s.rx) || pinUnusable(s.tx) ||
         !nodecfg::pinHasInterrupt(s_hw, s.rx)) {
@@ -531,9 +568,14 @@ static bool beginSds(const SensorCfg& s) {
 #endif
         s_sdsUp = true;
     }
-    // No handshake to confirm: the SDS011 simply streams a frame a second
-    // once powered. The port being up is "ok"; whether a valid frame arrives
-    // decides whether pm25/pm10 are published.
+    // Awake to start with, whatever it was left in: the first send reads
+    // every entry (sensorDue() at tick 0), and a sensor that sleeps between
+    // readings is put back to sleep after that one.
+    s_sdsAwake = false;
+    sdsSetWorking(true);
+    // No handshake to confirm: the SDS011 streams a frame a second while it
+    // works. The port being up is "ok"; whether a valid frame arrives decides
+    // whether pm25/pm10 are published.
     char rx[20], tx[20];
     describePin(rx, sizeof(rx), s.rx);
     describePin(tx, sizeof(tx), s.tx);
@@ -669,7 +711,26 @@ static void drainSds() {
         if (sum != s_sdsFrame[8]) continue;          // corrupt frame, drop it
         s_sdsPm25 = (float)((s_sdsFrame[3] << 8) | s_sdsFrame[2]) / 10.0f;
         s_sdsPm10 = (float)((s_sdsFrame[5] << 8) | s_sdsFrame[4]) / 10.0f;
+        s_sdsFrameMs = millis();
     }
+}
+
+/// Has the fan run its warm-up, and is the newest frame from after it? A
+/// frame from the first seconds after waking is the sensor still clearing
+/// the chamber, and a frame older than a few seconds is from before a stall.
+static bool sdsWarm(const SensorCfg& s) {
+    if (!s_sdsAwake || !isfinite(s_sdsPm25)) return false;
+    const uint32_t now = millis();
+    // Signed: a frame from before the wake is a negative age, not a huge one.
+    return (int32_t)(s_sdsFrameMs - s_sdsWokeMs) >= (int32_t)s.warmup_s * 1000 &&
+           (uint32_t)(now - s_sdsFrameMs) < 5000u;
+}
+
+/// A due read that has waited this long past its warm-up with no usable frame
+/// is given up: the sensor is unplugged or stalled, and keeping it awake for
+/// ever waiting on it would undo the point of sleeping it.
+static bool sdsGiveUp(const SensorCfg& s) {
+    return (uint32_t)(millis() - s_sdsWokeMs) > (uint32_t)s.warmup_s * 1000u + 30000u;
 }
 
 /// One entry's values, in the order sensorTypeMetricIds() lists them (for a
@@ -723,8 +784,13 @@ static uint8_t readEntry(uint8_t si, const SensorCfg& s, float altitude, bool bh
         }
         case SensorType::Sds011:
             drainSds();
+            if (!sdsWarm(s)) return 2;          // both stay NAN: not yet
             v[0] = s_sdsPm25;
             v[1] = s_sdsPm10;
+            // Used up: the next send needs a frame of its own, never this one
+            // again (a sensor asleep since sends no new one).
+            s_sdsPm25 = NAN;
+            s_sdsPm10 = NAN;
             return 2;
         case SensorType::Pulse: {
             const uint32_t pulses  = takePulses();
@@ -763,7 +829,14 @@ static uint8_t readEntry(uint8_t si, const SensorCfg& s, float altitude, bool bh
     }
 }
 
-int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut) {
+/// Is entry `i` read this send? Due by its own interval, or an SDS011 whose
+/// due read is still waiting for its warm-up.
+static bool entryDue(const NodeConfig& cfg, uint8_t i, uint32_t tick) {
+    if (nodecfg::sensorDue(cfg, i, tick)) return true;
+    return cfg.sensors[i].type == SensorType::Sds011 && s_sdsPending;
+}
+
+int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut, uint32_t tick) {
     if (!out || maxOut <= 0) return 0;
 
     nodecfg::MetricSlot slots[nodecfg::MAX_METRIC_SLOTS];
@@ -786,6 +859,7 @@ int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut) {
     for (uint8_t i = 0; i < k; i++) {
         EntryState& e = s_entry[i];
         if (e.type != cfg.sensors[i].type || !e.ok) continue;
+        if (!entryDue(cfg, i, tick)) continue;
         if (e.type == SensorType::Ds18b20) {
             if (!e.ds || e.found == 0) continue;
             e.ds->requestTemperatures();
@@ -805,13 +879,25 @@ int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut) {
         const SensorCfg& s = cfg.sensors[si];
         const EntryState& e = s_entry[si];
         // Skip an entry that is not the one begin() set up (the list changed
-        // without a new nodeSensorsBegin()) or that is not answering.
-        const bool live = (e.type == s.type) && e.ok;
+        // without a new nodeSensorsBegin()), that is not answering, or whose
+        // interval has not come round.
+        const bool live = (e.type == s.type) && e.ok && entryDue(cfg, si, tick);
 
         float v[nodecfg::DS_MAX_COUNT];
         uint8_t nv = 0;
         if (live)
             nv = readEntry(si, s, cfg.altitude_m, bhOnce, v, (uint8_t)(sizeof(v) / sizeof(v[0])));
+
+        if (live && s.type == SensorType::Sds011) {
+            const bool got = nv >= 2 && isfinite(v[0]);
+            s_sdsPending = !got && !sdsGiveUp(s);
+            if (!got && !s_sdsPending)
+                NS_LOG("[sensor] SDS011 sent nothing usable in %us; skipped\n",
+                       (unsigned)s.warmup_s + 30u);
+            // Read (or given up on): back to sleep until the next one is due.
+            if (!s_sdsPending && nodecfg::sdsSleeps(cfg, s) && s_sdsAwake)
+                sdsSetWorking(false);
+        }
 
         // The slots of this entry, in order: the k-th of them is v[k].
         uint8_t j = 0;
@@ -833,4 +919,37 @@ int nodeSensorsRead(const NodeConfig& cfg, NodeReading* out, int maxOut) {
         }
     }
     return n;
+}
+
+void nodeSensorsIdle(const NodeConfig& cfg, uint32_t nextTick, uint32_t msToNext) {
+    if (!s_sdsUp) return;
+    const uint8_t k = cfg.sensor_count <= MAX_SENSORS ? cfg.sensor_count : MAX_SENSORS;
+    for (uint8_t i = 0; i < k; i++) {
+        const SensorCfg& s = cfg.sensors[i];
+        if (s.type != SensorType::Sds011) continue;
+        if (s_entry[i].type != s.type || !s_entry[i].ok) return;
+
+        // Frames are taken as they come, so each one's arrival time is real
+        // (the warm-up test needs it) and the port's buffer never overflows.
+        if (s_sdsAwake) drainSds();
+
+        const bool sleeps = nodecfg::sdsSleeps(cfg, s);
+        const bool wanted = !sleeps || s_sdsPending ||
+                            (nodecfg::sensorDue(cfg, i, nextTick) &&
+                             msToNext <= (uint32_t)s.warmup_s * 1000u);
+        const uint32_t now = millis();
+        if (wanted && !s_sdsAwake) {
+            sdsSetWorking(true);
+        } else if (wanted && (uint32_t)(now - s_sdsFrameMs) > 5000u &&
+                   (uint32_t)(now - s_sdsCmdMs) > 5000u) {
+            // Awake by our account but silent: a sensor that was asleep can
+            // miss the first command. Ask again, without resetting the
+            // warm-up clock — it may well have been running all along.
+            sdsSetWorking(true);
+        } else if (!wanted && s_sdsAwake) {
+            // A config change made it a sleeper between reads.
+            sdsSetWorking(false);
+        }
+        return;   // one sds011 per node (§1.2)
+    }
 }
