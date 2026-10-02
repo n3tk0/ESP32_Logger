@@ -544,13 +544,48 @@ const uint32_t SDS_WAKE_LEAD_MS = 5000;
 /// "set sleep and work" query, 0xB4 / 0x06, as a set (0x01), for every
 /// sensor (device id FF FF). It answers with an AA C5 frame, which
 /// drainSds() steps over: it only keeps AA C0 measurement frames.
-static void sdsSetWorking(bool work) {
-    uint8_t c[19] = {0xAA, 0xB4, 0x06, 0x01, (uint8_t)(work ? 1 : 0),
+/// One "set" command (0xB4 / `cmd`, data byte `value`) to every sensor
+/// (device id FF FF).
+static void sdsSet(uint8_t cmd, uint8_t value) {
+    uint8_t c[19] = {0xAA, 0xB4, cmd, 0x01, value,
                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0, 0xAB};
     uint8_t sum = 0;
     for (int i = 2; i <= 16; i++) sum += c[i];
     c[17] = sum;
     s_sdsPort.write(c, sizeof(c));
+}
+
+/// Ask a "query" (0xB4 / `cmd`, mode 0x00) and wait up to `ms` for its
+/// AA C5 `cmd` answer, stepping over measurement frames; the setting's value
+/// (byte 4), or -1 when nothing answered.
+static int sdsQuery(uint8_t cmd, uint32_t ms) {
+    uint8_t c[19] = {0xAA, 0xB4, cmd, 0x00, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0, 0xAB};
+    uint8_t sum = 0;
+    for (int i = 2; i <= 16; i++) sum += c[i];
+    c[17] = sum;
+    while (s_sdsPort.available()) s_sdsPort.read();
+    s_sdsPort.write(c, sizeof(c));
+    uint8_t f[10];
+    uint8_t pos = 0;
+    const uint32_t t0 = millis();
+    while ((uint32_t)(millis() - t0) < ms) {
+        if (!s_sdsPort.available()) { delay(2); continue; }
+        const uint8_t b = (uint8_t)s_sdsPort.read();
+        if (pos == 0 && b != 0xAA) continue;
+        f[pos++] = b;
+        if (pos < sizeof(f)) continue;
+        pos = 0;
+        if (f[1] != 0xC5 || f[2] != cmd || f[9] != 0xAB) continue;
+        uint8_t fs = 0;
+        for (int i = 2; i <= 7; i++) fs += f[i];
+        if (fs == f[8]) return f[4];
+    }
+    return -1;
+}
+
+static void sdsSetWorking(bool work) {
+    sdsSet(0x06, work ? 1 : 0);
     const uint32_t now = millis();
     s_sdsCmdMs = now;
     if (work && !s_sdsAwake) {
@@ -585,6 +620,33 @@ static bool beginSds(const SensorCfg& s) {
     // readings is put back to sleep after that one.
     s_sdsAwake = false;
     sdsSetWorking(true);
+    // Streaming, whatever it was left in. Both settings live in the SDS011's
+    // own flash and survive a power cycle, and the collector's SDS011 plugin
+    // writes a working period of 1 minute by default: a sensor that was ever
+    // wired to the collector then sends one frame a minute, and in query mode
+    // none at all. This node reads a frame a second and wants one under 5 s
+    // old at send time (sdsWarm()), so either one silences pm25/pm10 for
+    // good. Continuous (period 0) and active reporting; the node does its own
+    // sleeping with the work/sleep command (sdsSetWorking()).
+    //
+    // Asked first and written only when the sensor says it is wrong: each
+    // set is a write to its flash, and the ESP-NOW node comes through here on
+    // every wake. After the wake above, and given a moment and a second try,
+    // because a sensor that was asleep can miss the first command. One that
+    // never answers is left alone: a write it could not hear would only be
+    // repeated on every wake.
+    delay(200);
+    for (uint8_t cmd : {(uint8_t)0x02, (uint8_t)0x08}) {   // reporting mode, period
+        int v = sdsQuery(cmd, 400);
+        if (v < 0) v = sdsQuery(cmd, 400);
+        if (v > 0) {
+            NS_LOG("[sensor] SDS011 setting 0x%02X was %d; set to 0\n", (unsigned)cmd, v);
+            sdsSet(cmd, 0);
+            delay(100);
+        } else if (v < 0) {
+            NS_LOG("[sensor] SDS011 did not answer query 0x%02X\n", (unsigned)cmd);
+        }
+    }
     // No handshake to confirm: the SDS011 streams a frame a second while it
     // works. The port being up is "ok"; whether a valid frame arrives decides
     // whether pm25/pm10 are published.
