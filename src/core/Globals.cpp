@@ -15,7 +15,7 @@ fs::FS* activeFS          = nullptr;
 bool    sdAvailable       = false;
 bool    littleFsAvailable = false;
 bool    fsAvailable       = false;
-String  currentStorageView = "internal";
+char    currentStorageView[16] = "internal";
 
 // ============================================================================
 // WIFI / NETWORK STATE
@@ -24,8 +24,7 @@ bool   apModeTriggered      = false;
 bool   wifiConnectedAsClient = false;
 bool   wifiFallbackToAP     = false;
 bool   onlineLoggerMode     = false;
-String currentIPAddress     = "";
-String connectedSSID        = "";
+char   connectedSSID[33]     = "";
 
 // ============================================================================
 // LOGGING BUFFER
@@ -87,9 +86,13 @@ unsigned long lastFlowPulseTime = 0;
 // ============================================================================
 bool          rtcValid      = false;
 bool          shouldRestart = false;
+char          g_restartCause[40] = "";
+
+void requestRestart(const char* cause) {
+    if (!shouldRestart) strlcpy(g_restartCause, cause ? cause : "", sizeof(g_restartCause));
+    shouldRestart = true;
+}
 unsigned long restartTimer  = 0;
-String        statusMessage = "";
-String        currentDir    = "/";
 
 // ============================================================================
 // MISC

@@ -78,7 +78,7 @@ void SensorManager::_destroyAll() {
     }
     _count = 0;
     memset(_lastReadMs, 0, sizeof(_lastReadMs));
-    memset(_health,     0, sizeof(_health));
+    for (HealthData* h : _health) if (h) *h = HealthData{};
     // Reset arbitration tables so a reload or a failed-init doesn't
     // permanently block re-claiming the same resource.
     _serial1Owner = nullptr;
@@ -157,6 +157,14 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 
         const char* type = sensor["type"] | "";
         const char* id   = sensor["id"]   | type;
+
+        if (!_health[_count]) {
+            _health[_count] = new (std::nothrow) HealthData();
+            if (!_health[_count]) {
+                Serial.printf("[SensorManager] Sensor '%s' skipped: out of memory\n", id);
+                continue;
+            }
+        }
 
         ISensor* s = _createPlugin(type);
         if (!s) {
@@ -285,7 +293,7 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
         // ------------------------------------------------------------------
         {
             constexpr uint32_t ONE_HOUR_MS = 3600UL * 1000UL;
-            HealthData& h = _health[i];
+            HealthData& h = *_health[i];
             if (h.slotStartMs == 0) h.slotStartMs = ms;   // first ever read
             if (h.firstSeenMs == 0) h.firstSeenMs = ms;   // stable init reference
             while ((ms - h.slotStartMs) >= ONE_HOUR_MS) {
@@ -570,7 +578,7 @@ void SensorManager::toJson(JsonArray arr) const {
     // ------------------------------------------------------------------
     uint32_t nowMs = millis();
     for (int i = 0; i < slotCount; i++) {
-        const HealthData& h  = _health[slots[i].idx];
+        const HealthData& h  = *_health[slots[i].idx];
         uint32_t  lastMs     = _lastReadMs[slots[i].idx];
 
         uint32_t reads = 0, errors = 0, latSum = 0;

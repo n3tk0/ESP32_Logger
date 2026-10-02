@@ -384,15 +384,28 @@ static const char* _resetReasonStr(esp_reset_reason_t r) {
     }
 }
 
+// The line a requested restart leaves behind: who asked for it and when, so a
+// SW_RESET in the log has a cause next to it.
+static void _logRestart() {
+    char at[24];
+    eventLogNow(at, sizeof(at));
+    eventLogPrintf("boot#%u  restart  cause=%s  at=%s  up=%lus", (unsigned)bootCount,
+                   g_restartCause[0] ? g_restartCause : "?", at,
+                   (unsigned long)(millis() / 1000UL));
+}
+
 static void _writeResetLog() {
     if (!activeFS) return;
     esp_reset_reason_t reason = esp_reset_reason();
     // Only log notable resets (skip normal power-on and deep-sleep wake)
     if (reason == ESP_RST_POWERON || reason == ESP_RST_DEEPSLEEP) return;
 
-    // RTC time may not be valid at this point, so the boot number is the only
-    // ordering the line carries.
-    eventLogPrintf("boot#%u  reason=%s", (unsigned)bootCount, _resetReasonStr(reason));
+    // The system clock survives a software reset, a panic and a watchdog
+    // reset, so after one of those this is the real time of the boot (and,
+    // within a second or two, of the crash). "?" when it was never set.
+    char at[24];
+    eventLogNow(at, sizeof(at));
+    eventLogPrintf("boot#%u  reason=%s  at=%s", (unsigned)bootCount, _resetReasonStr(reason), at);
     DBGF("[WDT] Reset log entry: boot#%u reason=%s\n",
          (unsigned)bootCount, _resetReasonStr(reason));
 }
@@ -935,6 +948,7 @@ void setup() {
                 // ESP_RST_SW. Setting g_consecutiveResets=0 alone is
                 // insufficient — setup() would increment it on the SW reset.
                 g_resetMagic = 0;
+                _logRestart();
                 safeWiFiShutdown();
                 delay(100);
                 ESP.restart();
@@ -1191,7 +1205,7 @@ void loop() {
         OtaManager::rollback();
         // rollback() normally resets the device; if it returns, trigger the
         // normal restart path so the device doesn't hang.
-        shouldRestart = true;
+        requestRestart("ota rollback");
         restartTimer  = millis();
     }
 
@@ -1228,6 +1242,7 @@ void loop() {
         // reason will be ESP_RST_SW. Three rapid /restart presses must NOT
         // trip safe-mode.
         g_resetMagic = 0;
+        _logRestart();
         safeWiFiShutdown();   // ← КЛЮЧОВО: изчиства WiFi преди рестарт
         delay(100);
         ESP.restart();
@@ -1276,8 +1291,9 @@ void loop() {
         // below the 2000ms graceful-reboot threshold, so the reboot never fires
         // and the device floods "[Watchdog] Task N stuck" forever instead of
         // recovering.
-        if (!TaskManager::checkHealth() && !shouldRestart) {
-            shouldRestart = true; restartTimer = millis();
+        char why[40];
+        if (!TaskManager::checkHealth(why, sizeof(why)) && !shouldRestart) {
+            requestRestart(why); restartTimer = millis();
         }
         delay(10);
         return;
@@ -1289,8 +1305,9 @@ void loop() {
         if (g_platformMode == PLATFORM_HYBRID) _manageContinuousPower();
         // C4: software watchdog in hybrid/web mode — rising-edge only so the
         // 2000ms graceful-reboot window can actually elapse (see note above).
-        if (g_platformMode != PLATFORM_LEGACY && !TaskManager::checkHealth() && !shouldRestart) {
-            shouldRestart = true; restartTimer = millis();
+        char why[40];
+        if (g_platformMode != PLATFORM_LEGACY && !TaskManager::checkHealth(why, sizeof(why)) && !shouldRestart) {
+            requestRestart(why); restartTimer = millis();
         }
         delay(10);
         // Hybrid must fall through to the idle-sleep check at the bottom of loop().

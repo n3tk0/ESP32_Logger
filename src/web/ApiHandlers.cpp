@@ -1083,7 +1083,11 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         JsonObject ring = doc["ring"].to<JsonObject>();
         ring["capacity"] = (uint32_t)webRingBuf.capacity();
         ring["used"]     = (uint32_t)webRingBuf.size();
-        ring["bytes"]    = (uint32_t)(webRingBuf.capacity() * sizeof(SensorReading));
+        ring["bytes"]    = (uint32_t)webRingBuf.bytes();
+#if RING_COMPACT
+        ring["compact"]   = true;
+        ring["key_evictions"] = webRingBuf.keyEvictions();
+#endif
         ring["psram"]    = webRingBuf.isPsram();
     }
 
@@ -1183,7 +1187,8 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         net["txPower"] = (int)WiFi.getTxPower();   // quarter-dBm, as applied
     }
 
-    // R19.D — tail of the diagnostic log (last ≤16 lines).
+    // R19.D — tail of the diagnostic log (last ≤24 lines: a requested restart
+    // leaves two, its cause and the boot after it).
     // The JSON key stays `resetLog`: it is what the failsafe page and every
     // saved diagnostic bundle already read, and renaming a field to match a
     // filename would break those for nothing.
@@ -1196,11 +1201,11 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
             if (f && f.size() <= 8 * 1024) {
                 String buf = f.readString();
                 f.close();
-                // Tail: keep only the last 16 lines
+                // Tail: keep only the last 24 lines
                 int newlines = 0;
                 for (int i = (int)buf.length() - 1; i >= 0; i--) {
                     if (buf[i] == '\n') newlines++;
-                    if (newlines > 16) { buf = buf.substring(i + 1); break; }
+                    if (newlines > 24) { buf = buf.substring(i + 1); break; }
                 }
                 int start = 0;
                 for (int i = 0; i < (int)buf.length(); i++) {

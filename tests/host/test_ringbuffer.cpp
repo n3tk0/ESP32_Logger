@@ -2,6 +2,8 @@
 // Capacity is a runtime argument to begin(); these build the internal-RAM
 // path (preferPsram=false), which is also what the ESP32-C3 targets use.
 // (single-threaded correctness: ordering, overflow, time filter, lookups).
+// test_ringbuffer_compact.cpp builds this same file with RING_COMPACT=1, the
+// C3's storage, and adds the key-table tests at the bottom.
 #include "src/pipeline/DataPipeline.h"
 #include "check.h"
 
@@ -230,7 +232,120 @@ static void test_latestPerMetric() {
     CHECK_EQ((int)out[0].value, 4);
 }
 
+#if RING_COMPACT
+// The whole reading survives the round trip through slot + key table.
+static void test_compact_round_trip() {
+    RingBuffer rb;
+    CHECK(rb.begin(4, false));
+    rb.push(SensorReading::make(7, "outside_node_01", "bme680", "temperature",
+                                21.5f, "C", QUALITY_ESTIMATED));
+    SensorReading r;
+    CHECK(rb.findLast("outside_node_01", "temperature", r));
+    CHECK_EQ((int)r.timestamp, 7);
+    CHECK(strcmp(r.sensorId,   "outside_node_01") == 0);
+    CHECK(strcmp(r.sensorType, "bme680") == 0);
+    CHECK(strcmp(r.metric,     "temperature") == 0);
+    CHECK(strcmp(r.unit,       "C") == 0);
+    CHECK(r.value == 21.5f);
+    CHECK_EQ((int)r.quality, (int)QUALITY_ESTIMATED);
+    // 12 B per reading plus the table, not 72 B per reading.
+    CHECK_EQ(rb.bytes(), 4 * (size_t)12 + RING_KEYS * (size_t)60);
+}
+
+// Keys whose readings have all been overwritten are reused, so a stream of
+// more distinct metrics than RING_KEYS over time never runs out.
+static void test_compact_keys_recycle() {
+    RingBuffer rb;
+    CHECK(rb.begin(8, false));
+    char m[16];
+    for (int i = 0; i < RING_KEYS * 4; i++) {
+        snprintf(m, sizeof(m), "m%d", i);
+        rb.push(mk("s", m, (float)i, (uint32_t)i));
+    }
+    CHECK_EQ(rb.keyEvictions(), (uint32_t)0);
+    // The newest 8 are intact, each with its own strings.
+    SensorReading out[8];
+    CHECK_EQ(rb.copyRecent(out, 8), (size_t)8);
+    bool ok = true;
+    for (int k = 0; k < 8; k++) {
+        const int i = RING_KEYS * 4 - 8 + k;
+        snprintf(m, sizeof(m), "m%d", i);
+        if (strcmp(out[k].metric, m) != 0 || out[k].value != (float)i) ok = false;
+    }
+    CHECK(ok);
+}
+
+// More distinct metrics live in the ring than the table holds: the oldest
+// readings go early so every new metric gets in, and what is left is right.
+static void test_compact_table_full_evicts_oldest() {
+    RingBuffer rb;
+    CHECK(rb.begin(RING_KEYS + 8, false));
+    char m[16];
+    for (int i = 0; i < RING_KEYS + 3; i++) {
+        snprintf(m, sizeof(m), "m%d", i);
+        rb.push(mk("s", m, (float)i, (uint32_t)i));
+    }
+    CHECK_EQ(rb.keyEvictions(), (uint32_t)3);
+    CHECK_EQ(rb.size(), (size_t)RING_KEYS);
+    SensorReading r;
+    CHECK(!rb.findLast("s", "m0", r));              // the oldest went
+    CHECK(!rb.findLast("s", "m2", r));
+    CHECK(rb.findLast("s", "m3", r));
+    snprintf(m, sizeof(m), "m%d", RING_KEYS + 2);   // the newest got in
+    CHECK(rb.findLast("s", m, r));
+    CHECK(r.value == (float)(RING_KEYS + 2));
+    // Every reader agrees on the shorter window.
+    SensorReading all[RING_KEYS + 8];
+    CHECK_EQ(rb.copyRecent(all, RING_KEYS + 8), (size_t)RING_KEYS);
+    CHECK(strcmp(all[0].metric, "m3") == 0);
+    CHECK_EQ(rb.copyMatching(nullptr, 0, RING_KEYS + 8, 0, UINT32_MAX,
+                             nullptr, nullptr, true), (size_t)RING_KEYS);
+    CHECK_EQ(rb.latestPerMetric(all, RING_KEYS + 8, RING_KEYS + 8), (size_t)RING_KEYS);
+    // A known key goes in without evicting anything.
+    rb.push(mk("s", "m3", 99.0f, 1000));
+    CHECK_EQ(rb.keyEvictions(), (uint32_t)3);
+    CHECK_EQ(rb.size(), (size_t)RING_KEYS + 1);
+}
+
+// The ring is full AND the table is full: the overwritten slot frees nothing
+// (its metric is still in the ring), so the next oldest goes too, and the
+// window stays contiguous.
+static void test_compact_full_ring_full_table() {
+    RingBuffer rb;
+    CHECK(rb.begin(RING_KEYS + 1, false));
+    char m[16];
+    rb.push(mk("s", "m0", 0.0f, 0));          // m0 twice: overwriting the first
+    for (int i = 0; i < RING_KEYS; i++) {     // leaves its key in use
+        snprintf(m, sizeof(m), "m%d", i);
+        rb.push(mk("s", m, (float)i, (uint32_t)i + 1));
+    }
+    rb.push(mk("s", "new", 1.0f, 500));
+    CHECK_EQ(rb.keyEvictions(), (uint32_t)1);   // m0 (overwritten) + m0 (evicted)
+    CHECK_EQ(rb.size(), (size_t)RING_KEYS);
+    SensorReading r;
+    CHECK(!rb.findLast("s", "m0", r));
+    CHECK(rb.findLast("s", "new", r));
+    CHECK(r.value == 1.0f);
+    SensorReading all[RING_KEYS + 1];
+    CHECK_EQ(rb.copyRecent(all, RING_KEYS + 1), (size_t)RING_KEYS);
+    CHECK(strcmp(all[0].metric, "m1") == 0);
+    CHECK(strcmp(all[RING_KEYS - 1].metric, "new") == 0);
+    // Normal wrapping carries on from the shorter window.
+    for (int i = 0; i < 3 * RING_KEYS; i++) rb.push(mk("s", "m1", (float)i, 600 + i));
+    CHECK_EQ(rb.size(), (size_t)RING_KEYS + 1);
+    CHECK_EQ(rb.keyEvictions(), (uint32_t)1);
+    CHECK(rb.findLast("s", "m1", r));
+    CHECK(r.value == (float)(3 * RING_KEYS - 1));
+}
+#endif
+
 int main() {
+#if RING_COMPACT
+    RUN(test_compact_round_trip);
+    RUN(test_compact_keys_recycle);
+    RUN(test_compact_table_full_evicts_oldest);
+    RUN(test_compact_full_ring_full_table);
+#endif
     RUN(test_push_and_copy_order);
     RUN(test_overflow_keeps_most_recent);
     RUN(test_copyRecent_fromTs_filter);

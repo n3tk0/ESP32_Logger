@@ -27,7 +27,9 @@ bool webRingBufInit() {
     size_t bytes     = WEB_RING_BYTES_INTERNAL;
     bool   wantPsram = false;
 
-#if LOGGER_PSRAM_AVAILABLE
+    // The compact layout lives in internal RAM; a build that forces it on a
+    // PSRAM board keeps the internal budget rather than asking for 4 MB.
+#if LOGGER_PSRAM_AVAILABLE && !RING_COMPACT
     const size_t freePsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     if (freePsram > 0) {
         // Cap by both the fixed budget and a share of what is actually there,
@@ -61,9 +63,10 @@ bool webRingBufInit() {
         }
     }
 
-    Serial.printf("[RingBuf] %u entries (%u KB) in %s\n",
+    Serial.printf("[RingBuf] %u entries (%u KB%s) in %s\n",
                   (unsigned)webRingBuf.capacity(),
-                  (unsigned)((webRingBuf.capacity() * sizeof(SensorReading)) / 1024),
+                  (unsigned)(webRingBuf.bytes() / 1024),
+                  RING_COMPACT ? ", compact" : "",
                   webRingBuf.isPsram() ? "PSRAM" : "internal RAM");
     return true;
 }

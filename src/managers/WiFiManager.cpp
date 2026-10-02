@@ -112,9 +112,8 @@ bool connectToWiFi() {
 
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnectedAsClient = true;
-        currentIPAddress      = WiFi.localIP().toString();
-        connectedSSID         = config.network.clientSSID;
-        Serial.printf("\nWiFi connected: %s\n", currentIPAddress.c_str());
+        strlcpy(connectedSSID, config.network.clientSSID, sizeof(connectedSSID));
+        Serial.printf("\nWiFi connected: %s\n", WiFi.localIP().toString().c_str());
         return true;
     }
 
@@ -144,9 +143,8 @@ void startAPMode() {
     // same reason as the DNS bind below — softAPIP() can transiently return
     // 0.0.0.0 right after softAP() while the netif finishes coming up
     // (gemini review PR #48).
-    currentIPAddress      = apIP.toString();
     wifiConnectedAsClient = false;
-    DBGF("WiFi: AP IP: %s\n", currentIPAddress.c_str());
+    DBGF("WiFi: AP IP: %s\n", apIP.toString().c_str());
 
     // Start the captive-portal DNS responder.  TTL=60s keeps phones from
     // hammering us with re-queries; wildcard "*" matches every label so a

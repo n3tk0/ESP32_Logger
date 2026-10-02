@@ -245,7 +245,7 @@ void handlePostFirstRun(AsyncWebServerRequest* req,
     // included). Earlier in-function `extern` declarations resolved to
     // the surrounding anonymous-namespace scope and linked to a phantom
     // symbol — Gemini PR #87 CI failure.
-    shouldRestart  = true;
+    requestRestart("first-run setup");
     restartTimer   = millis();
 
     req->send(200, "application/json",

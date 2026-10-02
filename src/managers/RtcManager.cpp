@@ -56,14 +56,12 @@ void initRtc() {
                                           config.hardware.pinRtcCE);
     if (!rtcWire) {
         DBGLN("RTC: alloc ThreeWire failed");
-        statusMessage = "RTC alloc failed (low heap)";
         rtcValid = false;
         return;
     }
     Rtc = new(std::nothrow) RtcDS1302<ThreeWire>(*rtcWire);
     if (!Rtc) {
         DBGLN("RTC: alloc RtcDS1302 failed");
-        statusMessage = "RTC alloc failed (low heap)";
         delete rtcWire; rtcWire = nullptr;
         rtcValid = false;
         return;
@@ -80,7 +78,6 @@ void initRtc() {
 
     if (!timeOk) {
         DBGLN("RTC: Time invalid, setting baseline 2024-01-01...");
-        statusMessage = "RTC time invalid — set via web UI";
         RtcDateTime compiled = RtcDateTime(2024, 1, 1, 0, 0, 0);
         for (int i = 0; i < 3 && !timeOk; i++) {
             Rtc->SetIsWriteProtected(false);
@@ -286,7 +283,6 @@ void configureWakeup() {
 
     if (config.hardware.wakeupMode != WAKEUP_GPIO_ACTIVE_HIGH) {
         DBGLN("WAKEUP CONFIG: EXT1 wake requires ACTIVE_HIGH on ESP32/S2/S3");
-        statusMessage = "EXT1 wake requires ACTIVE_HIGH on this chip";
         return;
     }
 

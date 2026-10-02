@@ -15,6 +15,7 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_cpu_freq.cpp` | `CpuFreq.h`: which CPU speeds the settings accept (240 MHz only on an S3), and the 160 MHz default while the web server is up |
 | `test_ringbuffer.cpp` | `RingBuffer<N>` single-thread correctness: ordering, overflow, `fromTs` filter, `findLast`, `collectMetricSeries`, `copyMatching`, `latestPerMetric` |
 | `test_ringbuffer_concurrency.cpp` | `RingBuffer<N>` SPSC acquire/release visibility (ThreadSanitizer target) |
+| `test_ringbuffer_compact.cpp`, `test_ringbuffer_concurrency_compact.cpp` | the same two with `RING_COMPACT=1` (the C3's 12 B/reading storage), plus key-table reuse and the oldest-first eviction when the table is full |
 | `test_aggregation.cpp` | `AggregationEngine` — `lttb()` (endpoint preservation, bounds), `bucket()` (raw/avg/min/max/sum), `aggregate()` pipeline bounds |
 | `test_pathutils.cpp` | security-critical `Utils.cpp` helpers — `sanitizePath`, `sanitizeFilename`, `isPathProtected`, `buildPath`, `urlEncode` |
 | `test_ringbuffer_concurrency.cpp` | the SPSC acquire/release ordering, under ThreadSanitizer |

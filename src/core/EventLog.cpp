@@ -4,6 +4,9 @@
 #include <LittleFS.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #include "Globals.h"                   // activeFS, littleFsAvailable
 #include "../pipeline/DataPipeline.h"  // fsMutex
@@ -73,8 +76,49 @@ void eventLogPrintf(const char* fmt, ...) {
     MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !g.isLocked()) return;
 
+    // Bounded: /api/diag reads the file whole (and gives up past 8 KB), and
+    // every boot adds a line. Past EVENT_LOG_MAX the newest EVENT_LOG_KEEP
+    // bytes, from a line start, are kept and the rest goes.
+    constexpr size_t EVENT_LOG_MAX  = 6 * 1024;
+    constexpr size_t EVENT_LOG_KEEP = 3 * 1024;
+    if (File old = fs->open(EVENT_LOG_PATH, FILE_READ)) {
+        const size_t size = old.size();
+        if (size + len > EVENT_LOG_MAX) {
+            char* tail = (char*)malloc(EVENT_LOG_KEEP);
+            size_t n = 0;
+            if (tail) {
+                old.seek(size - EVENT_LOG_KEEP);
+                n = old.read((uint8_t*)tail, EVENT_LOG_KEEP);
+            }
+            old.close();
+            if (tail) {
+                const char* nl  = (const char*)memchr(tail, '\n', n);
+                const size_t at = nl ? (size_t)(nl - tail) + 1 : n;
+                if (File f = fs->open(EVENT_LOG_PATH, FILE_WRITE)) {
+                    f.write((const uint8_t*)tail + at, n - at);
+                    f.print(line);
+                    f.close();
+                }
+                free(tail);
+                return;
+            }
+            // No heap for the tail: append anyway, a long log beats a lost line.
+        } else {
+            old.close();
+        }
+    }
+
     File f = fs->open(EVENT_LOG_PATH, FILE_APPEND);
     if (!f) return;
     f.print(line);
     f.close();
+}
+
+void eventLogNow(char* out, size_t cap) {
+    if (!out || cap == 0) return;
+    const time_t now = time(nullptr);
+    struct tm t;
+    if (now < 1600000000 || !localtime_r(&now, &t) ||
+        strftime(out, cap, "%Y-%m-%d %H:%M:%S", &t) == 0)
+        strlcpy(out, "?", cap);
 }

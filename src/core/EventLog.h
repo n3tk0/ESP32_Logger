@@ -16,6 +16,8 @@
 // ============================================================================
 #pragma once
 
+#include <stddef.h>
+
 /// Where the log lives now.
 extern const char* const EVENT_LOG_PATH;
 
@@ -37,3 +39,9 @@ void eventLogMigrate();
 /// Safe from any task. NOT safe from an ISR or from inside a critical section:
 /// it takes a mutex and writes flash.
 void eventLogPrintf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/// The wall-clock time as "2026-10-02 10:12:03" (local zone), or "?" while the
+/// clock is not set. The system clock survives a software reset, a panic and
+/// a watchdog reset on the ESP32, so a boot line written after one of those
+/// carries a real time even before NTP has run again.
+void eventLogNow(char* out, size_t cap);
