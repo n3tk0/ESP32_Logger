@@ -276,6 +276,7 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
             n = s->readAll(readings, MAX_METRICS_PER_TICK);
             latUs = (uint32_t)(micros() - t0us);
         }
+        s->afterRead();
 
         // ------------------------------------------------------------------
         // Health tracking — rotate hourly buckets for every elapsed hour.

@@ -75,6 +75,10 @@ public:
     // dashboard and in the exporters.
     bool countEmptyReadAsError() const override { return false; }
 
+    /// Writes the iaq baseline when it is due — here rather than in
+    /// readAll(), which the tick runs holding the I2C bus lock.
+    void afterRead() override { _maybeSaveBaseline(); }
+
 private:
     char     _node[17]      = {0};
     uint32_t _staleAfterMs  = 600000;

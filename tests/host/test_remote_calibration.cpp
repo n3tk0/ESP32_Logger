@@ -227,6 +227,7 @@ static void test_node_iaq_baseline_is_kept() {
     int n = s.readAll(out, 16);
     GasIaq ref; ref.baseline = 120000.0f;
     CHECK(fabsf(valueOf(out, n, "iaq") - ref.update(40.0f, 60000.0f)) < 0.001f);
+    s.afterRead();
     CHECK_EQ(g_saves, 0);              // not before the hour
 
     // An hour on, the moved baseline is written; it moved by under 2 %, so
@@ -234,6 +235,8 @@ static void test_node_iaq_baseline_is_kept() {
     remoteIngest.put("air", "gas_resistance", 200000.0f, "Ohm", T0 + 60);
     hostSetMillis(1000 + 3600000);
     s.readAll(out, 16);
+    CHECK_EQ(g_saves, 0);              // not inside readAll (bus lock held)
+    s.afterRead();
     CHECK_EQ(g_saves, 1);
     CHECK(g_storedBaseline > 120000.0f);
 

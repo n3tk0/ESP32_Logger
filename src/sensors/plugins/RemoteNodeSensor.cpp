@@ -182,7 +182,6 @@ void RemoteNodeSensor::_maybeSaveBaseline() {
 
 int RemoteNodeSensor::readAll(SensorReading* out, int maxOut) {
     int n = readLatest(out, maxOut);
-    _maybeSaveBaseline();
 
     // Queued history last, in whatever room is left — behind the live values
     // and their derived ones, so an outage's backlog never pushes the current

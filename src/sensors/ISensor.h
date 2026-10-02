@@ -80,6 +80,11 @@ public:
     // so they do not stall the main SensorTask tick loop.
     virtual bool isBlocking() const { return false; }
 
+    // Called by the sensor tick right after readAll(), once the I2C bus lock
+    // is released: for slow housekeeping (a flash write) that must not hold
+    // up every other sensor on the bus. Not called by /api/sensors/read_now.
+    virtual void afterRead() {}
+
     // Periodic ("duty-cycled") sensors sleep between measurement bursts to save
     // hardware life (e.g. SDS011 in hw-periodic mode parks its fan/laser). While
     // asleep, polls legitimately return no data — the health accounting uses

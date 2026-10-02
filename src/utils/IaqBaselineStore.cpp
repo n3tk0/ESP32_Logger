@@ -25,6 +25,8 @@ void path(const char* prefix, const char* id, char* out, size_t len) {
 }
 
 float load(const char* path, int heaterTemp, int heaterDurMs, const char* tag) {
+    // Asked first: opening a missing file for reading logs an error on ESP32.
+    if (!LittleFS.exists(path)) return 0.0f;
     File f = LittleFS.open(path, FILE_READ);
     if (!f) return 0.0f;
     IaqBaselineFile rec{};
