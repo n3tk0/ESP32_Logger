@@ -13,6 +13,7 @@
 //   ./flow_dump json ...
 //   ./flow_dump adv  'pressure:1008:hPa:1;dew_point:-3.1:°'
 //   ./flow_dump adv1 'temperature:21.0:°'   (each as the indoor row's first place)
+//   ./flow_dump pair 'humidity:37:%'        (as the value beside the headline is sized)
 //
 // grid= and in= are each place's kdFlowWorstAdvance(), comma-separated; or
 // place=metric:text:unit[:arrow] pairs through gridp= and inp=, which are
@@ -41,7 +42,8 @@ static int parseList(const char* v, uint16_t* out, int max) {
 }
 
 /// "pressure:1008:hPa:1;dew_point:3.1:°" -> each place's advance.
-static int parsePlaces(const char* v, uint16_t* out, int max, bool firstIn = false) {
+static int parsePlaces(const char* v, uint16_t* out, int max, bool firstIn = false,
+                       bool pair = false) {
     int n = 0;
     std::string all(v);
     size_t at = 0;
@@ -60,7 +62,9 @@ static int parsePlaces(const char* v, uint16_t* out, int max, bool firstIn = fal
             }
             // The indoor row's first place as KindleDashboard.cpp's
             // kdFlowFor() measures it.
-            out[n] = (uint16_t)(firstIn && n == 0
+            out[n] = (uint16_t)(pair
+                ? kdFlowPairAdvance(f[0].c_str(), f[1].c_str(), f[2].c_str(), f[3] == "1")
+                : firstIn && n == 0
                 ? kdFlowFirstInAdvance(f[0].c_str(), f[1].c_str(), f[2].c_str(), f[3] == "1")
                 : kdFlowWorstAdvance(f[0].c_str(), f[1].c_str(), f[2].c_str(), f[3] == "1"));
             n++;
@@ -76,7 +80,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string mode = argv[1];
-    if (mode == "adv" || mode == "adv1") {
+    if (mode == "adv" || mode == "adv1" || mode == "pair") {
         // flow_dump adv "pressure:1008:hPa:1;dew_point:3.1:°" -> one per line;
         // adv1 measures each as the indoor row's first place.
         for (int i = 2; i < argc; i++) {
@@ -95,7 +99,7 @@ int main(int argc, char** argv) {
                 }
                 continue;
             }
-            const int n = parsePlaces(argv[i], a, 64);
+            const int n = parsePlaces(argv[i], a, 64, false, mode == "pair");
             for (int k = 0; k < n; k++) printf("%u\n", (unsigned)a[k]);
         }
         return 0;
@@ -124,6 +128,7 @@ int main(int argc, char** argv) {
         else if (k == "inp%")  in.inPct    = (uint8_t)atoi(v);
         else if (k == "hero")  in.heroAdv  = (uint16_t)atoi(v);
         else if (k == "big")   in.bigAdv   = (uint16_t)atoi(v);
+        else if (k == "bigfit") in.bigFitAdv = (uint16_t)atoi(v);
         else if (k == "res")   res   = (unsigned)atoi(v);
         else if (k == "pagew") pagew = (unsigned)atoi(v);
         else if (k == "clock") clock = atoi(v);

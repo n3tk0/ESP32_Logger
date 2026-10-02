@@ -60,9 +60,11 @@ PLACES = [
 
 PCTS = [(100, 100), (100, 100), (90, 60), (70, 80), (60, 100)]
 
-# The headline and the value beside it: none measured, a lone headline, the
-# ordinary "8.4° / 1008 hPa ↑", and a pair too wide for the column.
-HEADS = [(0, 0), (2202, 0), (2202, 3615), (3400, 4200)]
+# The headline and the value beside it, as printed and as sized: none
+# measured, a lone headline, the ordinary "-00.0° / 37%", the same at "100%",
+# "8.4° / 1008 hPa ↑", and a pair too wide for the column.
+HEADS = [(0, 0, 0), (2562, 0, 0), (2562, 1576, 1576), (2562, 2196, 1576),
+         (2202, 3615, 2335), (3400, 4200, 4200)]
 
 WIDTHS = [
     [3135, 2202, 2376, 1836, 1500, 2600],   # an ordinary page
@@ -99,7 +101,7 @@ def cases():
                         'sub': (mask >> 3) & 1, 'grid': w[:ng], 'in': w[:ni][::-1],
                         'clk': 1 - ((mask >> 4) & 1), 'land': (mask >> 5) & 1,
                         'outp': pct[0], 'inp': pct[1],
-                        'hero': head[0], 'big': head[1],
+                        'hero': head[0], 'big': head[1], 'bigfit': head[2],
                     }
 
 
@@ -111,6 +113,8 @@ def run(js_text):
         c_adv = [int(x) for x in subprocess.check_output([exe, 'adv', spec], text=True).split()]
         # And each as the indoor row's first place (kdFlowFirstInAdvance).
         c_adv1 = [int(x) for x in subprocess.check_output([exe, 'adv1', spec], text=True).split()]
+        # And each as the value beside the headline is sized (kdFlowPairAdvance).
+        c_pair = [int(x) for x in subprocess.check_output([exe, 'pair', spec], text=True).split()]
         c_out = []
         for c in all_cases:
             args = ['json', 'chart=%d' % c['chart'], 'fc=%d' % c['fc'],
@@ -119,7 +123,7 @@ def run(js_text):
                     'grid=' + ','.join(map(str, c['grid'])),
                     'in=' + ','.join(map(str, c['in'])),
                     'outp=%d' % c['outp'], 'inp%%=%d' % c['inp'],
-                    'hero=%d' % c['hero'], 'big=%d' % c['big']]
+                    'hero=%d' % c['hero'], 'big=%d' % c['big'], 'bigfit=%d' % c['bigfit']]
             c_out.append(json.loads(subprocess.check_output([exe] + args, text=True)))
 
         driver = js_engine(js_text) + '''
@@ -128,13 +132,15 @@ var out = { adv: input.places.map(function (p) {
               return kdFlowWorstAdvance(p[0], p[1], p[2], !!p[3]); }),
             adv1: input.places.map(function (p) {
               return kdFlowFirstInAdvance(p[0], p[1], p[2], !!p[3]); }),
+            pair: input.places.map(function (p) {
+              return kdFlowPairAdvance(p[0], p[1], p[2], !!p[3]); }),
             flows: input.cases.map(function (c) {
               return kdFlowCompute({ chart: !!c.chart, forecast: !!c.fc, week: !!c.week,
                                      sub: !!c.sub, clock: !!c.clk, land: !!c.land,
                                      nGrid: c.grid.length, gridAdv: c.grid,
                                      nIn: c.in.length, inAdv: c.in,
                                      outPct: c.outp, inPct: c.inp,
-                                     heroAdv: c.hero, bigAdv: c.big }); }) };
+                                     heroAdv: c.hero, bigAdv: c.big, bigFitAdv: c.bigfit }); }) };
 process.stdout.write(JSON.stringify(out));
 '''
         js_file = os.path.join(tmp, 'flow.js')
@@ -151,6 +157,11 @@ process.stdout.write(JSON.stringify(out));
     for p, a, b in zip(PLACES, c_adv1, js['adv1']):
         if a != b:
             bad.append('first indoor width of %s %r %r: C %d, JS %d' % (p[0], p[1], p[2], a, b))
+    for p, a, b in zip(PLACES, c_pair, js['pair']):
+        if a != b:
+            bad.append('sized width beside the headline of %s %r %r: C %d, JS %d' % (p[0], p[1], p[2], a, b))
+    if len(c_pair) != len(PLACES):
+        bad.append('flow_dump pair measured %d of %d places' % (len(c_pair), len(PLACES)))
     if len(c_adv1) != len(PLACES):
         bad.append('flow_dump adv1 measured %d of %d places' % (len(c_adv1), len(PLACES)))
     for c, a, b in zip(all_cases, c_out, js['flows']):

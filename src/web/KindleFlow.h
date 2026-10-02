@@ -209,6 +209,27 @@ static inline unsigned kdFlowWorstAdvance(const char* metric, const char* text,
     return kdFlowFieldAdvance(worst, unit, arrow);
 }
 
+/// What the value beside the headline is SIZED by: two figures, a sign where
+/// the metric can go below zero, and the decimals as printed. "37%" and "5%"
+/// are one size; "100%", which fog does give, is wider and makes only this
+/// value smaller (see kdFlowHeadFit()). Not kdFlowWorstAdvance(): it keeps
+/// room for three figures of a humidity, and the headline would pay for it.
+static inline unsigned kdFlowPairAdvance(const char* metric, const char* text,
+                                         const char* unit, bool arrow) {
+    char sized[24];
+    size_t at = 0;
+    const char* p = text ? text : "";
+    bool neg = false;
+    if (*p == '-' || *p == '+') { neg = (*p == '-'); p++; }
+    while (*p >= '0' && *p <= '9') p++;
+    if (neg || kdFlowSigned(metric)) sized[at++] = '-';
+    sized[at++] = '0';
+    sized[at++] = '0';
+    for (; *p && at < sizeof(sized) - 1; p++) sized[at++] = *p;
+    sized[at] = '\0';
+    return kdFlowFieldAdvance(sized, unit, arrow);
+}
+
 /// What the indoor row's FIRST place is sized by — every producer of
 /// KdFlowIn::inAdv[0] calls this, and the settings page's copy of it.
 ///
@@ -285,8 +306,9 @@ struct KdFlowIn {
     uint16_t inAdv[3]   = {0, 0, 0};
     uint8_t outPct   = 100;     ///< the grid's values, per cent of the most that fits
     uint8_t inPct    = 100;     ///< the indoor values, likewise
-    uint16_t heroAdv = 0;       ///< the headline's kdFlowFieldAdvance(); 0 for none
-    uint16_t bigAdv  = 0;       ///< the value beside it; 0 when there is none
+    uint16_t heroAdv = 0;       ///< the headline's kdFlowWorstAdvance(); 0 for none
+    uint16_t bigAdv  = 0;       ///< the value beside it as printed; 0 when there is none
+    uint16_t bigFitAdv = 0;     ///< ...and its kdFlowPairAdvance(); 0: bigAdv
     /// Whoever draws it knows the two-column indoor row. An FBInk script from
     /// before it would draw the column's two readings side by side in the
     /// column's width, one over the other; it says ?col=1 when it knows.
@@ -421,24 +443,40 @@ static inline void kdFlowClockSizes(int gc, KdFlow& f) {
 /// The headline made to fit its column. It grew with the room above and
 /// below it and nothing looked across: "23.5° / 1013 hPa" at 88 and 44 is
 /// wider than the 270 px the column has, and the pressure ran off its right
-/// edge. The value beside the headline gives way first, but only down to
-/// eight tenths of its size (KDF_BIG_KEEP_PM): "21.7° / 37%" took it all the
-/// way to 28, smaller than the indoor row's second values, and it could not
-/// be read. Then the headline, down to KDF_HERO_MIN; and only then the value
-/// beside it again, down to KDF_BIG_MIN, so the two still read as one line.
-static const int KDF_BIG_MIN     = 28;
-static const int KDF_HERO_MIN    = 40;
-static const int KDF_BIG_KEEP_PM = 800;
+/// edge.
+///
+/// SIZED FOR THE WIDEST IT WILL BE, NOT FOR WHAT IT READS NOW. The headline
+/// comes in as kdFlowWorstAdvance(), "-00.0°" for a temperature, and the
+/// value beside it as kdFlowPairAdvance(), "00%": the line is laid out once
+/// for -40 to +40 and does not jump when the reading crosses 10 or zero.
+/// Sized by what they printed, "21.7° / 37%" took the humidity down to 28
+/// and it could not be read; the value beside the headline now keeps its
+/// size and the headline gives way, as far as KDF_HERO_KEEP; then the value
+/// beside it, down to KDF_BIG_MIN; then the headline again, down to
+/// KDF_HERO_MIN. "-00.0° / 00%" in 270 px comes out at 70 and 38: the
+/// headline about the indoor row's first value, the humidity a little
+/// larger than its second ones. Only a value wider than it was sized for —
+/// "100%" — takes from itself, and the headline stays where it was.
+static const int KDF_BIG_MIN   = 28;
+static const int KDF_HERO_MIN  = 40;
+static const int KDF_HERO_KEEP = 70;
 static inline void kdFlowHeadFit(const KdFlowIn& in, KdFlow& f) {
     if (!in.heroAdv) return;
     const int heroA = in.heroAdv;
     const int bigA  = in.bigAdv;
+    const int bigS  = bigA ? (in.bigFitAdv ? in.bigFitAdv : bigA) : 0;
     int hero = f.heroSz, big = f.bigSz;
-    const int keep = kdfMax(KDF_BIG_MIN, big * KDF_BIG_KEEP_PM / 1000);
     const int room = f.colLW - (bigA ? f.headGap + f.slashW : 0);
-    while (hero * heroA / 1000 + (bigA ? big * bigA / 1000 : 0) > room) {
-        if (bigA && big > keep)            big--;
-        else if (hero > KDF_HERO_MIN)      hero--;
+    const int keep = kdfMin(hero, KDF_HERO_KEEP);
+    while (hero > keep && hero * heroA / 1000 + big * bigS / 1000 > room) hero--;
+    while (bigA && big > KDF_BIG_MIN && hero * heroA / 1000 + big * bigS / 1000 > room) big--;
+    // Wider than it was sized for ("100%"), or still too wide: the two give
+    // way in turn, so neither is the only one to pay.
+    bool turn = false;
+    while (hero * heroA / 1000 + (bigA ? big * kdfMax(bigA, bigS) / 1000 : 0) > room) {
+        turn = !turn;
+        if (bigA && big > KDF_BIG_MIN && (turn || hero <= KDF_HERO_MIN)) big--;
+        else if (hero > KDF_HERO_MIN) hero--;
         else if (bigA && big > KDF_BIG_MIN) big--;
         else break;
     }
