@@ -55,6 +55,7 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _bme.setGasHeater(_heaterTemp, _heaterDurMs);
 
     _initMs     = millis();
+    _warm       = false;
     _lastSaveMs = _initMs;
     _loadBaseline();
 
@@ -177,7 +178,7 @@ float BME688Sensor::_computeIaq(float humidity, float rawGasOhm) {
     else if (rawGasOhm > _gasBaseline) _gasBaseline += (rawGasOhm - _gasBaseline) * 0.10f;
     // No downward drift while the heater settles: those low readings say
     // nothing about the air, and a restored baseline would sink toward them.
-    else if (millis() - _initMs >= IAQ_WARMUP_MS)
+    else if (_warmedUp())
                                        _gasBaseline += (rawGasOhm - _gasBaseline) * 0.0005f;
     if (_gasBaseline < 1.0f) _gasBaseline = 1.0f;
 
@@ -200,6 +201,12 @@ float BME688Sensor::_computeIaq(float humidity, float rawGasOhm) {
     if (iaq < 0.0f)   iaq = 0.0f;
     if (iaq > 500.0f) iaq = 500.0f;
     return iaq;
+}
+
+// Latched, so the 49.7-day millis() wrap does not bring the warm-up back.
+bool BME688Sensor::_warmedUp() {
+    if (!_warm && millis() - _initMs >= IAQ_WARMUP_MS) _warm = true;
+    return _warm;
 }
 
 void BME688Sensor::_baselinePath(char* out, size_t len) const {
@@ -234,7 +241,7 @@ void BME688Sensor::_maybeSaveBaseline() {
     const uint32_t now = millis();
     // Readings taken while the heater is still settling are low and would
     // drag the stored baseline toward "polluted".
-    if (now - _initMs < IAQ_WARMUP_MS) return;
+    if (!_warmedUp()) return;
     if (now - _lastSaveMs < IAQ_SAVE_EVERY_MS) return;
     _lastSaveMs = now;
     if (_gasBaseline < 1.0f) return;

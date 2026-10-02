@@ -127,6 +127,7 @@ private:
     void _loadBaseline();
     void _maybeSaveBaseline();
     void _baselinePath(char* out, size_t len) const;
+    bool _warmedUp();
 
     // Resolves the air temperature to express humidity against: the configured
     // reference sensor when it has a fresh reading, otherwise `fallbackC`.
@@ -157,6 +158,7 @@ private:
     float    _gasBaseline  = 0.0f;        // clean-air resistance ceiling (Ω)
     float    _savedBaseline = 0.0f;       // value last written to LittleFS
     uint32_t _initMs        = 0;          // heater warm-up reference
+    bool     _warm          = false;      // warm-up over (latched)
     uint32_t _lastSaveMs    = 0;
 
     CalibrationAxis _calTemp;
