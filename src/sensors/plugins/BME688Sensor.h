@@ -62,7 +62,8 @@
 //   "pressure"         hPa
 //   "gas_resistance"   Ω    — MOX resistance (higher = cleaner air)
 //   "iaq"              0..500 air-quality index (LOWER = cleaner; BSEC scale)
-//                      derived from humidity + a self-calibrating gas baseline.
+//                      derived from humidity + a self-calibrating gas baseline,
+//                      kept on LittleFS across restarts (/config/iaq_<hash>.bin).
 //                      NOTE: heuristic, not a Bosch-BSEC gas classification — it
 //                      indicates overall air quality, not the specific gas type.
 //   "dew_point"        °C   — true ambient dew point; invariant under heating
@@ -119,6 +120,14 @@ private:
     // first minutes as the baseline settles.
     float _computeIaq(float humidity, float rawGasOhm);
 
+    // The gas baseline survives a restart in a small LittleFS file per sensor
+    // id (/config/iaq_<hash>.bin), so IAQ does not start over from whatever
+    // the air was at boot. Saved at most hourly, and only once the heater has
+    // run long enough for the resistance to mean something.
+    void _loadBaseline();
+    void _maybeSaveBaseline();
+    void _baselinePath(char* out, size_t len) const;
+
     // Resolves the air temperature to express humidity against: the configured
     // reference sensor when it has a fresh reading, otherwise `fallbackC`.
     float _ambientTempC(float fallbackC) const;
@@ -146,6 +155,9 @@ private:
     int      _heaterDurMs  = 150;
     bool     _ready        = false;
     float    _gasBaseline  = 0.0f;        // clean-air resistance ceiling (Ω)
+    float    _savedBaseline = 0.0f;       // value last written to LittleFS
+    uint32_t _initMs        = 0;          // heater warm-up reference
+    uint32_t _lastSaveMs    = 0;
 
     CalibrationAxis _calTemp;
     CalibrationAxis _calHumidity;
