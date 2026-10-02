@@ -1072,10 +1072,21 @@ void nodeSensorsIdle(const NodeConfig& cfg, uint32_t nextTick, uint32_t msToNext
         // (the warm-up test needs it) and the port's buffer never overflows.
         if (s_sdsAwake) drainSds(s.warmup_s);
 
+        // Due within its warm-up: not only the next send but any send that
+        // close. With a node interval shorter than the warm-up (10 s against
+        // 30 s) the next send is never more than one interval away, so
+        // looking at it alone woke the fan one interval ahead instead of a
+        // warm-up ahead, and every read waited out the rest of the warm-up
+        // as empty sends.
+        const uint32_t leadMs = (uint32_t)s.warmup_s * 1000u + SDS_WAKE_LEAD_MS;
+        const uint32_t ivMs   = (uint32_t)cfg.interval_s * 1000u;
+        bool dueSoon = false;
+        for (uint32_t k = 0, at = msToNext; at <= leadMs; k++, at += ivMs) {
+            if (nodecfg::sensorDue(cfg, i, nextTick + k)) { dueSoon = true; break; }
+            if (ivMs == 0) break;
+        }
         const bool sleeps = nodecfg::sdsSleeps(cfg, s);
-        const bool wanted = !sleeps || s_sdsPending ||
-                            (nodecfg::sensorDue(cfg, i, nextTick) &&
-                             msToNext <= (uint32_t)s.warmup_s * 1000u + SDS_WAKE_LEAD_MS);
+        const bool wanted = !sleeps || s_sdsPending || dueSoon;
         const uint32_t now = millis();
         if (wanted && !s_sdsAwake) {
             sdsSetWorking(true);
