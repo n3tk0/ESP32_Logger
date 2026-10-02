@@ -322,7 +322,13 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 h.totalLatUs += latUs;
                 h.latSamples++;
                 // Recovered: clear a prior 'overdue' fault so status returns OK.
-                if (s->isPeriodic()) s->resetErrorCount();
+                // Also for a sensor whose empty polls are not faults (a remote
+                // node): its only errors are "overdue" ones, and one of those
+                // is all it takes at boot, before a node with a longer
+                // interval has posted once. Kept, it showed ERR on every one
+                // of the node's metrics until the next restart, values
+                // arriving throughout.
+                if (s->isPeriodic() || !s->countEmptyReadAsError()) s->resetErrorCount();
             } else if (!expectedSleep) {
                 // Rate-limit overdue errors for a periodic sensor to one per
                 // expected data interval, so a dead sensor records ~1 missed
