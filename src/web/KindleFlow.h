@@ -421,19 +421,25 @@ static inline void kdFlowClockSizes(int gc, KdFlow& f) {
 /// The headline made to fit its column. It grew with the room above and
 /// below it and nothing looked across: "23.5° / 1013 hPa" at 88 and 44 is
 /// wider than the 270 px the column has, and the pressure ran off its right
-/// edge. The value beside the headline gives way first, down to KDF_BIG_MIN;
-/// then the headline itself, so the two still read as one line.
-static const int KDF_BIG_MIN  = 28;
-static const int KDF_HERO_MIN = 40;
+/// edge. The value beside the headline gives way first, but only down to
+/// eight tenths of its size (KDF_BIG_KEEP_PM): "21.7° / 37%" took it all the
+/// way to 28, smaller than the indoor row's second values, and it could not
+/// be read. Then the headline, down to KDF_HERO_MIN; and only then the value
+/// beside it again, down to KDF_BIG_MIN, so the two still read as one line.
+static const int KDF_BIG_MIN     = 28;
+static const int KDF_HERO_MIN    = 40;
+static const int KDF_BIG_KEEP_PM = 800;
 static inline void kdFlowHeadFit(const KdFlowIn& in, KdFlow& f) {
     if (!in.heroAdv) return;
     const int heroA = in.heroAdv;
     const int bigA  = in.bigAdv;
     int hero = f.heroSz, big = f.bigSz;
+    const int keep = kdfMax(KDF_BIG_MIN, big * KDF_BIG_KEEP_PM / 1000);
     const int room = f.colLW - (bigA ? f.headGap + f.slashW : 0);
     while (hero * heroA / 1000 + (bigA ? big * bigA / 1000 : 0) > room) {
-        if (bigA && big > KDF_BIG_MIN) big--;
-        else if (hero > KDF_HERO_MIN)  hero--;
+        if (bigA && big > keep)            big--;
+        else if (hero > KDF_HERO_MIN)      hero--;
+        else if (bigA && big > KDF_BIG_MIN) big--;
         else break;
     }
     f.heroSz = (uint8_t)hero;

@@ -235,6 +235,19 @@ static void test_a_wide_reading_fits_its_column() {
     KdFlowIn plain = defaultPage();
     CHECK_EQ(f.inValSz1, kdFlowCompute(plain).inValSz1);
 
+    // "21.7° / 37%": the value beside the headline keeps eight tenths of its
+    // size, near the indoor row's second values, and the headline gives way
+    // instead. It used to go down to 28 and could not be read.
+    KdFlowIn hum = defaultPage();
+    hum.heroAdv = (uint16_t)kdFlowFieldAdvance("21.7", "\xC2\xB0", false);
+    hum.bigAdv  = (uint16_t)kdFlowFieldAdvance("37", "%", false);
+    const KdFlow h = kdFlowCompute(hum);
+    CHECK(h.heroSz * (int)hum.heroAdv / 1000 + h.headGap + h.slashW
+          + h.bigSz * (int)hum.bigAdv / 1000 <= h.colLW);
+    CHECK_EQ(h.bigSz, 44 * KDF_BIG_KEEP_PM / 1000);
+    CHECK(h.bigSz + 4 >= h.inValSz);
+    CHECK(h.heroSz < 88 && h.heroSz > KDF_HERO_MIN);
+
     // The headline alone, with the column to itself, stays as it was.
     KdFlowIn lone = defaultPage();
     lone.heroAdv = (uint16_t)T;

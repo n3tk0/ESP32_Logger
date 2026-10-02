@@ -409,7 +409,7 @@ function kdScaleG(v, g) { return kdQ(v * g + 500, 1000); }
 var KDF = {
   FOOT_Y:764, WEEK_H:88, FC_H:124, TOP_Y:20, CHART_ABOVE:26, CHART_BELOW:24,
   CHART_MIN:220, TOP_MIN:262, TOP_GROWN:386, COL_L:270, COL_R:252, CL_Y:26,
-  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6, FIG_SIZE:620, BIG_MIN:28, HERO_MIN:40,
+  HERO_Y:38, CELL_PAD:6, IN_CAP_W:66, GRID_GAP:6, FIG_SIZE:620, BIG_MIN:28, HERO_MIN:40, BIG_KEEP_PM:800,
   GROW_MAX:1180, GROW_CLOCK:1146, GROW_BIG:1090, GROW_SUB:1120,
   LAND_FOOT_Y:564, LAND_X1:782, LAND_COL:300, LAND_SEP:328, LAND_CLOCK:840,
   LAND_ROW_W:77, IN_H:102, LAND_GROW_MIN:640, OL_PITCH:92
@@ -528,10 +528,12 @@ function kdFlowClockSizes(gc, f) {
 function kdFlowHeadFit(inp, f) {
   if (!inp.heroAdv) return;
   var hA = inp.heroAdv, bA = inp.bigAdv || 0, hero = f.heroSz, big = f.bigSz;
+  var keep = Math.max(KDF.BIG_MIN, kdQ(big * KDF.BIG_KEEP_PM, 1000));
   var room = f.colLW - (bA ? f.headGap + f.slashW : 0);
   while (kdQ(hero * hA, 1000) + (bA ? kdQ(big * bA, 1000) : 0) > room) {
-    if (bA && big > KDF.BIG_MIN) big--;
+    if (bA && big > keep) big--;
     else if (hero > KDF.HERO_MIN) hero--;
+    else if (bA && big > KDF.BIG_MIN) big--;
     else break;
   }
   f.heroSz = hero; f.bigSz = big;
