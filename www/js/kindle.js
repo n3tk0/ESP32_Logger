@@ -200,7 +200,7 @@ var kdOrder   = [];     // [{key, group, role}] from the firmware's own enum
 var kdSensors = [];     // [{id, name, metrics: []}]
 var kdGroups  = { out: "", in: "" };               // the reader's headings
 var kdGroupPh = { out: "OUTSIDE", in: "INSIDE" };  // what "" renders as
-var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8 };
+var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8, heavy: 16, inv: 32, bar: 64 };
 var kdInks    = [];     // [{id, css}] from the firmware's own enum
 var kdAutoDec = 255;
 var kdOpen    = "hero"; // which row is expanded
@@ -331,12 +331,59 @@ function kdPvInk(n) {
   return ["#000000","#444444","#777777","#aaaaaa"][n] || "#000000";
 }
 
+// Inside a place set white on black (kdPvPlate), every string is white.
+var kdPvInvOn = false;
 function kdT(x, y, size, text, o) {
   if (text === "" || text == null) return "";
   o = o || {};
   return "<i style='left:" + x + "px;top:" + y + "px;font-size:" + size + "px;color:" +
-    (o.ink || "#111111") + ";font-weight:" + (o.bold ? 600 : 400) +
+    (kdPvInvOn ? "#ffffff" : (o.ink || "#111111")) +
+    ";font-weight:" + (o.heavy ? 900 : (o.bold ? 600 : 400)) +
+    (o.heavy ? ";text-shadow:.025em 0 0 currentColor,-.025em 0 0 currentColor" : "") +
     (o.ls ? ";letter-spacing:" + o.ls + "px" : "") + "'>" + kdEsc(text) + "</i>";
+}
+// A place's black plate, when it asked to be white on black: zone_plate()
+// in update_dash.sh. Turns the strings after it white until kdPvPlateEnd().
+function kdPvPlate(z, x, y, w, h) {
+  if (!(z.flags & kdFlags.inv)) return "";
+  kdPvInvOn = true;
+  return "<u style='left:" + x + "px;top:" + y + "px;width:" + w + "px;height:" + h +
+         "px;background:#000'></u>";
+}
+function kdPvPlateEnd() { kdPvInvOn = false; }
+// kdBarScore() in KindleFlow.h: how good a reading is, 0..100, or -1.
+function kdPvBarScore(metric, v) {
+  var s;
+  if (isNaN(v)) return -1;
+  if (metric === "humidity" || metric === "humidity_amb")
+    s = v < 40 ? (v - 10) * 100 / 30 : (v > 60 ? (90 - v) * 100 / 30 : 100);
+  else if (metric === "aqi") s = 100 - v / 5;
+  else if (metric === "co2" || metric === "eco2") s = (2000 - v) / 16;
+  else if (metric === "tvoc") s = 100 - v / 22;
+  else if (metric === "pm1" || metric === "pm25") s = 100 - v * 4 / 3;
+  else if (metric === "pm4" || metric === "pm10") s = 100 - v * 2 / 3;
+  else if (metric === "battery_percent") s = v;
+  else return -1;
+  return s < 0 ? 0 : (s > 100 ? 100 : Math.round(s));
+}
+// The place's bar, or -1: switched on, a metric with a scale, a reading.
+function kdPvBarOf(z) {
+  if (!(z.flags & kdFlags.bar)) return -1;
+  var v = kdPvValue(z);
+  return v === "" ? -1 : kdPvBarScore(z.metric, parseFloat(v));
+}
+// The bar after a value drawn at x..`x` (its right end), `top` and size `sz`:
+// draw_field() in update_dash.sh.
+function kdPvBar(x, top, sz, fill) {
+  if (fill < 0) return "";
+  var bw = Math.max(6, Math.round(sz * 0.20)), bt = Math.max(2, Math.round(sz * 0.04));
+  var bh = Math.round(sz * 0.72), bx = x + Math.round(sz * 0.16);
+  var by = top + Math.round(sz * 0.85) - bh, fg = kdPvInvOn ? "#fff" : "#000";
+  var f = Math.round((bh - 2 * bt) * fill / 100);
+  return "<u style='left:" + bx + "px;top:" + by + "px;width:" + bw + "px;height:" +
+         (bh - 2 * bt) + "px;border:" + bt + "px solid " + fg + "'></u>" +
+         "<u style='left:" + (bx + bt) + "px;top:" + (by + bh - bt - f) + "px;width:" + bw +
+         "px;height:" + f + "px;background:" + fg + "'></u>";
 }
 function kdBox(x, y, w, h, cls) {
   return "<u class='" + cls + "' style='left:" + x + "px;top:" + y + "px;width:" +
@@ -421,9 +468,10 @@ var KDF = {
   GROW_MAX:1180, GROW_CLOCK:1146, GROW_BIG:1090, GROW_SUB:1120,
   LAND_FOOT_Y:564, LAND_X1:782, LAND_COL:300, LAND_SEP:328, LAND_CLOCK:840,
   LAND_ROW_W:77, IN_H:102, LAND_GROW_MIN:640, OL_PITCH:92, BIG_SZ:52,
-  WALL_X1:582, WALL_W:564, WALL_COL:352, WALL_SEP:376, WALL_RX:394, WALL_LAB:18,
+  WALL_X1:582, WALL_W:564, WALL_COL:352, WALL_SEP:376, WALL_RX:394, WALL_LAB:22,
   WALL_HERO:160, WALL_BIG:96, WALL_SUB:22, WALL_BAND:200, WALL_CLOCK:1300,
-  WALL_CLOCK_1:1500, WALL_FC_ICON:80, WALL_FC_TEXT:22, WALL_FC_TEMP:58, IN_V_GAP:10,
+  WALL_CLOCK_1:1500, WALL_FC_ICON:100, WALL_FC_TEXT:24, WALL_FC_TEMP:58, WALL_FC_WIND:18,
+  WALL_HEAD_GAP:28, IN_V_GAP:10,
   FC_TEMP_ADV:4 * 620 + 2 * 330 + 330 + 2 * 330
 };
 
@@ -796,7 +844,7 @@ function kdFlowWall(inp, f) {
   f.labSz = K.WALL_LAB;
   f.groupY = K.TOP_Y; f.heroY = K.TOP_Y + f.labSz + 8;
   f.colLX = X0; f.colLW = K.WALL_W; f.headW = K.WALL_W;
-  f.heroSz = K.WALL_HERO; f.bigSz = K.WALL_BIG; f.headGap = 12; f.slashW = 30;
+  f.heroSz = K.WALL_HERO; f.bigSz = K.WALL_BIG; f.headGap = K.WALL_HEAD_GAP; f.slashW = 30;
   f.subSz = K.WALL_SUB;
   kdFlowHeadFit(inp, f);
   f.grow = kdQ(f.heroSz * 1000, 88);
@@ -830,18 +878,17 @@ function kdFlowWall(inp, f) {
   var fx = inp.clock ? K.WALL_RX : X0, fw = X1 - fx;
   var I = K.WALL_FC_ICON;
   f.labFcX = fx; f.labFcY = f.rule3Y + 10;
-  f.fcIconX = fx; f.fcIconY = f.rule3Y + 32;
-  f.fcTextX = fx + I + 8; f.fcTextW = fw - I - 8; f.fcTextSz = K.WALL_FC_TEXT;
-  f.fcTextY = f.fcIconY + kdQ(I - K.WALL_FC_TEXT, 2);
-  f.fcWindSz = 17; f.fcWindX = fx;
-  f.fcWindY = f.rule3Y + K.WALL_BAND - 4 - f.fcWindSz;
+  f.fcTextX = fx; f.fcTextY = f.labFcY; f.fcTextW = fw; f.fcTextSz = K.WALL_FC_TEXT;
+  f.fcIconX = fx; f.fcIconY = f.rule3Y + 10 + K.WALL_FC_TEXT + 6;
+  f.fcWindSz = K.WALL_FC_WIND; f.fcWindX = fx + I + 8;
+  f.fcWindY = f.fcIconY + kdQ(I - 3 * K.WALL_FC_WIND - 2 * 6, 2);
   f.fcTempX = fx; f.fcTempY = f.fcIconY + I + 4;
   f.fcTempSz = Math.min(kdWallFcTempMax(f), kdQ(fw * 1000, K.FC_TEMP_ADV));
 }
 
 // kdWallFcTempMax() in KindleFlow.h: the most the high and low can be.
 function kdWallFcTempMax(f) {
-  return Math.min(KDF.WALL_FC_TEMP, f.fcWindY - 4 - f.fcTempY);
+  return Math.min(KDF.WALL_FC_TEMP, f.rule3Y + KDF.WALL_BAND - 4 - f.fcTempY);
 }
 
 // The forecast's current conditions where the layout file has them.
@@ -918,9 +965,15 @@ function kdFlowInput(show) {
     var z = kdSlot(key), v = kdPvValue(z), u = kdPvUnit(z);
     if (v === "") return 0;
     var arrow = !!(z.flags & kdFlags.trend) && !!(show & 0x0004) && z.metric === "pressure";
-    if (inp.wall && key.charAt(0) === "g" && kdPvUnitToCaption(u)) u = "";
-    return firstIn ? kdFlowFirstInAdvance(z.metric, v, u, arrow)
-                   : kdFlowWorstAdvance(z.metric, v, u, arrow);
+    if (inp.wall && key.charAt(0) === "g") {
+      // The wall page's grid: unit and arrow on the caption's line.
+      if (kdPvUnitToCaption(u)) u = "";
+      arrow = false;
+    }
+    // The bar beside it, KDF_BAR_ADV in KindleFlow.h.
+    var bar = kdPvBarOf(z) >= 0 ? 440 : 0;
+    return (firstIn ? kdFlowFirstInAdvance(z.metric, v, u, arrow)
+                    : kdFlowWorstAdvance(z.metric, v, u, arrow)) + bar;
   }
   // The headline and the value beside it by what they print, and the value
   // also by the two figures it is sized for, as the collector measures them
@@ -1087,8 +1140,20 @@ function kdRenderPreview() {
   var valB = !!L.wall;
 
   // ── Left column: the headline, its line, its grid ──
+  // The wall page's outdoor line behind the headline: the chart's switch on a
+  // page with no chart — appendHeroLine() and graph.bmp?line=1.
+  if (L.wall && (show & 0x0020)) {
+    h += "<svg style='left:" + X + "px;top:" + L.heroY + "px;width:" + HW + "px;height:" +
+         (L.subY - L.heroY) + "px' viewBox='0 0 560 100' preserveAspectRatio='none'" +
+         " aria-hidden='true'><polyline points='0,70 70,78 140,84 210,62 280,36 350,22" +
+         " 420,30 490,48 560,40' fill='none' stroke='#c0c0c0' stroke-width='5'" +
+         " vector-effect='non-scaling-stroke'/></svg>";
+  }
+  z = kdSlot("hero");
+  h += kdPvPlate(z, X - 6, L.groupY - 6, HW + 12,
+                 (L.headRuleY ? L.headRuleY - 4 : L.subY + L.subSz + 6) - L.groupY + 6);
   h += kdT(X, L.groupY, L.labSz, kdGroups.out || kdGroupPh.out, { ink:capInk, bold:capB });
-  z = kdSlot("hero"); v = kdPvValue(z);
+  v = kdPvValue(z);
   u = kdPvUnit(z);
   usz = Math.round(L.heroSz * 0.34);
   // Nothing beside the headline: it is centred in its column, and the line
@@ -1096,7 +1161,8 @@ function kdRenderPreview() {
   var zb = kdSlot("big"), lone = !((show & 0x0001) && kdPvValue(zb));
   var hx = lone ? X + Math.max(0, kdQ(HW - kdTw(v || "—", L.heroSz) - kdTw(u, usz), 2)) : X;
   h += kdT(hx, L.heroY, L.heroSz, v || "—",
-           { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0001), ink:kdPvInk(z.ink) });
+           { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0001), ink:kdPvInk(z.ink),
+             heavy:!!(z.flags & kdFlags.heavy) });
   x = hx + kdTw(v || "—", L.heroSz);
   // The unit and the second value hang off the headline's size rather than
   // carrying coordinates of their own: they sit on its baseline, and a table
@@ -1114,7 +1180,8 @@ function kdRenderPreview() {
       h += kdT(x, by, L.bigSz, "/", { ink:L.wall ? "#000000" : "#aaaaaa" });
       x += kdTw("/", L.bigSz) + 6;
       h += kdT(x, by, L.bigSz, v,
-               { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0002), ink:kdPvInk(z.ink) });
+               { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0002), ink:kdPvInk(z.ink),
+                 heavy:!!(z.flags & kdFlags.heavy) });
       h += kdT(x + kdTw(v, L.bigSz), by + 6, Math.round(L.bigSz * 0.42),
                kdPvUnit(z), { ink:"#444444", bold:unitB });
     }
@@ -1124,6 +1191,7 @@ function kdRenderPreview() {
     h += kdT(lone ? X + Math.max(0, kdQ(HW - kdTw(sub, L.subSz), 2)) : X,
              L.subY, L.subSz, sub, { ink:capInk });
   }
+  kdPvPlateEnd();
   // The wall page's rule under the headline's row, across the page.
   if (L.headRuleY) h += kdRl(18, L.headRuleY, RW, 1);
 
@@ -1143,21 +1211,27 @@ function kdRenderPreview() {
         u = kdPvUnit(z);
         var cap = kdPvCaption(z), lx = x;
         if (L.wall && kdPvUnitToCaption(u)) { cap += " / " + u; u = ""; }
+        var tend = (z.flags & kdFlags.trend) && (show & 0x0004) && z.metric === "pressure";
+        if (L.wall && tend) { cap += " ↘"; tend = false; }
         usz = Math.round(vs * (u === "°" ? 0.34 : 0.42));
         // A row of one is centred in the column, caption and value each.
         if (rows[r].length === 1) {
           lx = x + Math.max(0, kdQ(cw - kdTw(cap, L.labSz), 2));
           x += Math.max(0, kdQ(cw - kdTw(v, vs) - kdTw(u, usz), 2));
         }
+        h += kdPvPlate(z, X + i * cw - 6, gy - 6, cw - 6, L.labSz + 4 + vs + 12);
         h += kdT(lx, gy, L.labSz, cap, { ink:capInk, bold:capB });
         h += kdT(x, gy + L.labSz + 6, vs, v,
-                 { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0004), ink:kdPvInk(z.ink) });
+                 { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0004), ink:kdPvInk(z.ink),
+                   heavy:!!(z.flags & kdFlags.heavy) });
         ux = x + kdTw(v, vs) + (u === "°" || u === "%" ? 0 : 3);
         var uy = gy + L.labSz + 10;
         h += kdT(ux, uy, usz, u, { ink:"#444444", bold:unitB });
-        if ((z.flags & kdFlags.trend) && (show & 0x0004) && z.metric === "pressure") {
+        if (tend) {
           h += kdT(ux + kdTw(u, usz) + 4, uy, 16, "↘", { ink:"#444444" });
         }
+        h += kdPvBar(ux + kdTw(u, usz), gy + L.labSz + 6, vs, kdPvBarOf(z));
+        kdPvPlateEnd();
       }
     }
   }
@@ -1212,14 +1286,20 @@ function kdRenderPreview() {
         var fw = kdTw(v, ivs) + kdTw(kdPvUnit(z), Math.round(ivs * (kdPvUnit(z) === "°" ? 0.34 : 0.42)));
         if (fw < IW) x = IX + Math.floor((IW - fw) / 2);
       }
+      var ptop = big ? iy - 6 : iy - L.labSz - 10;
+      h += kdPvPlate(z, x - 6, ptop, big || L.inVcol ? IW : (L.inCol ? IW - w1 : cw2),
+                     iy + ivs + 6 - ptop);
       if (!big) h += kdT(x, iy - L.labSz - 4, L.labSz, kdPvCaption(z),
                          { ink:capInk, bold:capB });
       h += kdT(x, iy, ivs, v,
-               { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0010), ink:kdPvInk(z.ink) });
+               { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0010), ink:kdPvInk(z.ink),
+                 heavy:!!(z.flags & kdFlags.heavy) });
       u = kdPvUnit(z);
-      h += kdT(x + kdTw(v, ivs), iy + (big ? 16 : 9),
-               Math.round(ivs * (u === "°" ? 0.34 : 0.42)), u,
+      usz = Math.round(ivs * (u === "°" ? 0.34 : 0.42));
+      h += kdT(x + kdTw(v, ivs), iy + (big ? 16 : 9), usz, u,
                { ink:"#444444", bold:unitB });
+      h += kdPvBar(x + kdTw(v, ivs) + kdTw(u, usz), iy, ivs, kdPvBarOf(z));
+      kdPvPlateEnd();
     }
   }
 
@@ -1251,7 +1331,8 @@ function kdRenderPreview() {
     var fy = L.rule3Y;
     var olT = ["21:00","00:00","03:00","06:00","09:00"], olV = ["6°","4°","3°","5°","9°"];
     if (!L.wall) h += kdRl(18, fy + 0, RW, 1);
-    h += kdT(L.labFcX, L.labFcY, L.wall ? L.labSz : 14, "FORECAST", { ink:capInk, bold:capB });
+    // The wall page has no heading: the condition word stands in its place.
+    if (!L.wall) h += kdT(L.labFcX, L.labFcY, 14, "FORECAST", { ink:capInk, bold:capB });
     var isz = L.wall ? KDF.WALL_FC_ICON : 52;
     h += kdBox(L.fcIconX, L.fcIconY, isz, isz, "kd-pl");
     var fsz = L.fcTextW ? Math.min(L.fcTextSz, kdQ(L.fcTextW * 1000, kdAdvanceMille("Showers")))
@@ -1265,7 +1346,13 @@ function kdRenderPreview() {
                                    kdQ((KDF.WALL_X1 - L.fcTempX) * 1000, kdPvFigAdvance("14°/3°"))));
     }
     h += kdT(L.fcTempX, L.fcTempY, tsz, "14°/3°", { bold:true });
-    h += kdT(L.fcWindX, L.fcWindY, L.fcWindSz, "wind 23 km/h · 8 min", { ink:"#444444" });
+    if (L.wall) {
+      ["wind", "23 km/h", "8 min"].forEach(function (t, k) {
+        h += kdT(L.fcWindX, L.fcWindY + k * kdQ(L.fcWindSz * 4, 3), L.fcWindSz, t, { ink:"#444444" });
+      });
+    } else {
+      h += kdT(L.fcWindX, L.fcWindY, L.fcWindSz, "wind 23 km/h · 8 min", { ink:"#444444" });
+    }
     for (i = 0; i < L.olN; i++) {
       var ox = L.olX[i];
       h += kdBox(ox, fy + 8, 88, 92, "kd-pl");
@@ -1522,6 +1609,10 @@ function kdSlotEditor(key) {
       kdFlagBox(key, kdFlags.age,   kdI18n("flagAge")) +
       (z.metric === "pressure"
         ? kdFlagBox(key, kdFlags.trend, kdI18n("flagTrend")) : "") +
+      kdFlagBox(key, kdFlags.heavy, kdI18n("flagHeavy")) +
+      kdFlagBox(key, kdFlags.inv,   kdI18n("flagInv")) +
+      (kdPvBarScore(z.metric, 50) >= 0 && key !== "hero" && key !== "big"
+        ? kdFlagBox(key, kdFlags.bar, kdI18n("flagBar")) : "") +
     "</div></div>";
 }
 
@@ -2078,7 +2169,8 @@ function kindleRefresh() {
       if (s) {
         kdZones = s.zones || {};
         kdOrder = s.order || [];
-        kdFlags = { bold:s.flag_bold, unit:s.flag_unit, age:s.flag_age, trend:s.flag_trend };
+        kdFlags = { bold:s.flag_bold, unit:s.flag_unit, age:s.flag_age, trend:s.flag_trend,
+                    heavy:s.flag_heavy || 0, inv:s.flag_inv || 0, bar:s.flag_bar || 0 };
         kdInks  = s.inks || [];
         kdAutoDec = s.auto_decimals;
         kdGroups  = { out:s.group_out_set || "", in:s.group_in_set || "" };

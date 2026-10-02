@@ -363,8 +363,13 @@ eleven, always in the same spot at the same size:
 ```
 
 Each place names a sensor, a metric, an optional caption, how many decimals,
-four switches — bold, show the unit, show the age when stale, show the pressure
-tendency — and **how dark it is drawn**: black, dark, mid or light grey. Four
+seven switches — bold, show the unit, show the age when stale, show the pressure
+tendency, **extra bold** (the bold face drawn twice a hair apart on the panel,
+weight 900 in the browser), **inverted colours** (white on a black plate the
+size of the place) and, for a grid or indoor place whose metric has a scale,
+**a bar** beside the value that fills as the reading gets better (humidity best
+at 40–60 %, the AQI, CO₂, TVOC and dust best low; `kdBarScore()`) — and **how
+dark it is drawn**: black, dark, mid or light grey. Four
 levels rather than a colour picker, because the panel has sixteen real grey
 levels and the ones worth having are the ones far enough apart to render solid,
 which is what the page's palette already is. Set under Settings → E-ink dashboard; stored in
@@ -786,7 +791,7 @@ an older config holds) or 1 for a wall.
 |---|---|
 | top | the outdoor headline and the value beside it across the whole page, up to 160 and 96 px, and the line under them |
 | middle | the grid on the left, 352 px, laid out by how many readings it has (below); the indoor readings one under the other on the right, the first with no caption, the others at seven tenths of it |
-| band | the clock (124 px), and beside it the forecast: an 80 px icon with the condition beside it (up to 22 px, smaller for a long word), the day's high and low under them (up to 58 px, by what they print), wind and age at the foot. Either alone has the band to itself |
+| band | the clock (124 px), and beside it the forecast: the condition word in place of a heading (up to 24 px, smaller for a long word), a 100 px icon under it with the wind and the age beside it in three lines, and the day's high and low under the icon (up to 54 px, by what they print). Either alone has the band to itself |
 | footer | as on the desk page |
 
 **The grid is laid out by how many readings it has**, not by a search for
@@ -799,9 +804,16 @@ leaves for the widest.
 **A grid reading's unit goes on its caption's line**, "PRESSURE / hPa", and
 the value is its figures alone, which is what lets them be that large: the
 collector takes the unit off the value before the layout sizes the grid
-(`kdWallUnits()`) and sends it as `Z_<zone>_CAPUNIT`. ° and % stay on the
-value, where they read as part of it. The slash beside the headline is black,
-as the captions are.
+(`kdWallUnits()`) and sends it as `Z_<zone>_CAPUNIT`; a tendency arrow goes
+after it. ° and % stay on the value, where they read as part of it. The
+captions are 22 px. The slash beside the headline is black, as the captions
+are, and 28 px after the headline's degree.
+
+**The chart's switch draws the outdoor line behind the headline** on this
+page, which has no chart: the last 24 hours' mean, light grey and 5 px thick,
+across the headline's row. The panel fetches it as
+`/kindle/graph.bmp?line=1&w=…&h=…` when the payload says `HERO_LINE=1`, and
+draws it before the figures.
 
 The headline's row is as tall as the largest headline, whatever this one
 came out at, and the headline stands on its foot, so a reading that gains a

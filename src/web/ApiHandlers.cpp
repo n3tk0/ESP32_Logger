@@ -946,6 +946,9 @@ static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
     doc["flag_unit"]  = KSLOTF_UNIT;
     doc["flag_age"]   = KSLOTF_AGE;
     doc["flag_trend"] = KSLOTF_TREND;
+    doc["flag_heavy"] = KSLOTF_HEAVY;
+    doc["flag_inv"]   = KSLOTF_INV;
+    doc["flag_bar"]   = KSLOTF_BAR;
     doc["auto_decimals"] = KSLOT_DECIMALS_AUTO;
 
     sendJsonResponse(req, doc);

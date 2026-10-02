@@ -980,7 +980,15 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
         const long v = arg->toInt();
         if (v > 0 && v < 4000) askH = (uint16_t)v;
     }
-    const uint16_t H = ChartBmp::clampH(askH, skin.fbinkResW);
+    uint16_t H = ChartBmp::clampH(askH, skin.fbinkResW);
+    // The wall page's line behind the headline: as large as the headline's
+    // row, which is nothing like the chart's shape — see ChartBmpCtx::lineOnly.
+    const bool line = queryArg(req, "line") != nullptr;
+    uint16_t lineW = W;
+    if (line) {
+        lineW = (uint16_t)(askW < 64 ? 64 : (askW > 1000 ? 1000 : askW)) & ~7u;
+        H = (uint16_t)(askH < 16 ? 16 : (askH > 600 ? 600 : askH));
+    }
 
     // A shared_ptr, AND THAT IS THE FIX, not a tidier spelling of the same
     // thing. The previous version held raw pointers and deleted them only on
@@ -1000,7 +1008,8 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     // The same two hours in five minutes the payload's axis labels describe.
     if (kdChartWantsFine(st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn))
         kdChartUseFine(now, st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn);
-    st->ctx.init(W, H);
+    st->ctx.lineOnly = line;
+    st->ctx.init(line ? lineW : W, H);
     st->begin();
 
     // A LENGTHED RESPONSE, NOT A CHUNKED ONE. The size is known before the
@@ -1260,6 +1269,13 @@ static void kdSubLine(char* buf, size_t n, const KindleConfig& skin,
 // ---------------------------------------------------------------------------
 // The layout, for what is on the page
 // ---------------------------------------------------------------------------
+/// The bar beside a place, 0..100, or -1 for none: switched on, a metric with
+/// a scale, and a reading.
+static int kdPlaceBar(const KindleSlot& sl, const KdResolved& r) {
+    if (!(sl.flags & KSLOTF_BAR) || !r.ok) return -1;
+    return kdBarScore(sl.metric, strtof(r.text, nullptr));
+}
+
 /// The widest one place can print, for the layout to size it by — its reading
 /// widened to the most digits its metric reaches, with its unit, and with the
 /// tendency arrow if it is a place that draws one. The arrow counts whether or
@@ -1268,12 +1284,17 @@ static void kdSubLine(char* buf, size_t n, const KindleConfig& skin,
 ///
 /// `firstIn`: the indoor row's first place, which an indoor temperature sizes
 /// without the reserved minus — see kdFlowFirstInAdvance().
+///
+/// `capArrow`: the wall page's grid, whose arrow goes on the caption's line
+/// with the unit (kdWallUnits()), and so takes nothing from the figures.
 static uint16_t kdPlaceAdvance(const KindleConfig& skin, const KindleSlot& sl,
-                               const KdResolved& r, bool firstIn = false) {
-    const bool arrow = (sl.flags & KSLOTF_TREND) && (skin.showFlags & KSHOW_TENDENCY) &&
-                       strcmp(sl.metric, "pressure") == 0;
-    return (uint16_t)(firstIn ? kdFlowFirstInAdvance(sl.metric, r.text, r.unit, arrow)
-                              : kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow));
+                               const KdResolved& r, bool firstIn = false,
+                               bool capArrow = false) {
+    const bool arrow = !capArrow && (sl.flags & KSLOTF_TREND) &&
+                       (skin.showFlags & KSHOW_TENDENCY) && strcmp(sl.metric, "pressure") == 0;
+    return (uint16_t)((firstIn ? kdFlowFirstInAdvance(sl.metric, r.text, r.unit, arrow)
+                               : kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow))
+                      + (kdPlaceBar(sl, r) >= 0 ? KDF_BAR_ADV : 0));
 }
 
 /// The value beside the headline as it prints, with its unit and the arrow
@@ -1328,7 +1349,7 @@ static KdFlow kdFlowFor(const KindleConfig& skin, const KdResolved res[KZ_COUNT]
     const int n = (skin.showFlags & KSHOW_GRID) ? kdGridUsed(zones, visible, used) : 0;
     in.nGrid = (uint8_t)n;
     for (int i = 0; i < n; i++)
-        in.gridAdv[i] = kdPlaceAdvance(skin, zones.z[used[i]], res[used[i]]);
+        in.gridAdv[i] = kdPlaceAdvance(skin, zones.z[used[i]], res[used[i]], false, in.wall);
 
     uint8_t inUsed[KZ_INDOOR_COUNT];
     const int m = (skin.showFlags & KSHOW_INSIDE) ? kdIndoorUsed(zones, visible, inUsed) : 0;
@@ -1352,6 +1373,9 @@ struct KdRender {
     /// The wall page's grid units, moved off the value onto its caption —
     /// see kdWallUnits(). Empty for a place whose unit stayed.
     char       capUnit[KZ_GRID_COUNT][sizeof(KdResolved::unit)] = {};
+    /// The wall page's outdoor line behind the headline: the chart's switch,
+    /// on a page that has no chart (kdWallSkin()).
+    bool       heroLine = false;
 };
 
 /// THE UNIT ON THE CAPTION'S LINE on the wall page's grid, "НАЛЯГ / hPa", so
@@ -1494,6 +1518,13 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         // Every value bold on the wall page, which is read from across a room.
         s->printf("Z_%s_BOLD=%d\n", up,
                   ((zones.z[i].flags & KSLOTF_BOLD) || rd.flow.wall) ? 1 : 0);
+        // Extra bold, white on black, and the bar beside the value: only when
+        // set, as the script forgets all three before each payload.
+        if (zones.z[i].flags & KSLOTF_HEAVY) s->printf("Z_%s_HEAVY=1\n", up);
+        if (zones.z[i].flags & KSLOTF_INV)   s->printf("Z_%s_INV=1\n", up);
+        const int bar = kdZoneIsGrid((uint8_t)i) || kdZoneIsIndoor((uint8_t)i)
+                        ? kdPlaceBar(zones.z[i], res[i]) : -1;
+        if (bar >= 0) s->printf("Z_%s_BAR=%d\n", up, bar);
         // The colour NAME, not the level: the shell hands it straight to
         // FBInk's -C, and translating a number there would be a second copy of
         // a mapping that already lives in KindleSlots.h.
@@ -1583,6 +1614,7 @@ static void appendValue(String& p, const KdResolved& r, const KindleSlot& sl,
     p += F("<span class=\"");
     p += cls;
     if (sl.flags & KSLOTF_BOLD) p += F(" val-b");
+    if (sl.flags & KSLOTF_HEAVY) p += F(" val-x");
     // How dark, per place. Black is the default and emits no class, so a page
     // where nobody has touched this carries no extra markup at all.
     if (sl.ink == KINK_DARK)       p += F(" ink-d");
@@ -1617,25 +1649,52 @@ static void appendValue(String& p, const KdResolved& r, const KindleSlot& sl,
     p += F("</span>");
 }
 
+/// The bar beside a value (KSLOTF_BAR), `fill` 0..100 or -1 for none. In
+/// the value's class, so its em is the figures' size; the fill grows from
+/// the foot.
+static void appendBar(String& p, const char* valueClass, int fill) {
+    if (fill < 0) return;
+    p += F("<span class=\""); p += valueClass;
+    p += F(" kbar\"><i style=\"height:"); p += fill; p += F("%\"></i></span>");
+}
+
 /// A captioned cell: the label above, the value under it. The grid and the
 /// indoor row are the same shape at two sizes, so they are one function.
+///
+/// `wall`: the wall page's grid, whose unit (`capUnit`) and tendency arrow go
+/// on the caption's line — see kdWallUnits().
 static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
                        const char* valueClass, bool caption = true,
-                       const char* capUnit = "") {
+                       const char* capUnit = "", bool wall = false) {
+    const bool capArrow = wall && r.arrow && *r.arrow;
+    const bool inv = sl.flags & KSLOTF_INV;
+    if (inv) p += F("<div class=\"inv\">");
     if (caption) {
         p += F("<div class=\"lab\">");
         appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
-        // The wall page's unit, after the caption and in its own case.
         if (capUnit[0]) {
             p += F(" <span class=\"lu\">/ ");
             appendEscaped(p, capUnit);
             p += F("</span>");
         }
+        if (capArrow) {
+            p += F(" <span class=\"lu\">");
+            p += r.arrow;
+            p += F("</span>");
+        }
         p += F("</div>");
     }
     p += F("<div class=\"cv\">");
-    appendValue(p, r, sl, valueClass);
+    if (capArrow) {
+        KdResolved v = r;
+        v.arrow = "";
+        appendValue(p, v, sl, valueClass);
+    } else {
+        appendValue(p, r, sl, valueClass);
+    }
+    appendBar(p, valueClass, kdPlaceBar(sl, r));
     p += F("</div>");
+    if (inv) p += F("</div>");
 }
 
 /// One of the grid's rows: the cells from `at` of the `n` places in `used`,
@@ -1651,7 +1710,7 @@ static int appendGridRow(String& p, const KdRender& rd, const uint8_t* used, int
         p += (int)(100 / cols);
         p += F("%\">");
         appendCell(p, rd.res[used[at]], zones.z[used[at]], "gv", true,
-                   rd.capUnit[used[at] - KZ_G1]);
+                   rd.capUnit[used[at] - KZ_G1], rd.flow.wall);
         p += F("</td>");
     }
     p += F("</tr></table>");
@@ -1863,12 +1922,15 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     const bool standalone = kdStandaloneFor(req);
     const uint8_t rot = kdRotFor(req, skin.rotation);
     const bool wall = kdWallFor(skin.pageStyle, rot, req->hasParam("wall"));
+    const bool heroLine = wall && (skin.showFlags & KSHOW_CHART);
     if (wall) kdWallSkin(skin);
     KdRender rd;
     kdRenderBegin(rd, skin, now, standalone, false, kdRotLandscape(rot),
                   req->hasParam("col"), wall);
 
     AsyncResponseStream* s = req->beginResponseStream("text/plain");
+    // The line behind the headline, fetched as /kindle/graph.bmp?line=1.
+    kdShellInt(s, "HERO_LINE", heroLine ? 1 : 0);
 
     // ── Outdoor ──
     fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
@@ -2565,6 +2627,34 @@ static void kdWallAt(String& p, const char* cls, int x, int y, int w = 0, int h 
     p += F("\">");
 }
 
+/// The outdoor mean of the last 24 hours behind the wall page's headline, light
+/// grey and thick, edge to edge of its row — the panel's graph.bmp?line=1.
+static void appendHeroLine(String& p, const KdFlow& f, uint32_t now) {
+    TrendRing::Hour h[TrendRing::HOURS];
+    if (!trendRing.series(outdoorSensorId(), "temperature", now, h)) return;
+    float lo = 1e9f, hi = -1e9f;
+    for (int i = 0; i < TrendRing::HOURS; i++) {
+        if (!h[i].count) continue;
+        const float m = h[i].sum / h[i].count;
+        if (m < lo) lo = m;
+        if (m > hi) hi = m;
+    }
+    if (lo > hi) return;
+    if (hi - lo < 1.0f) { lo -= 0.5f; hi += 0.5f; }
+    const int W = f.headW, H = f.subY - f.heroY;
+    kdWallAt(p, "", f.colLX, f.heroY, W, H);
+    p += F("<svg width=\"100%\" height=\"100%\" viewBox=\"0 0 ");
+    p += W; p += ' '; p += H;
+    p += F("\" preserveAspectRatio=\"none\"><polyline fill=\"none\" stroke=\"#c0c0c0\""
+           " stroke-width=\"5\" points=\"");
+    for (int i = 0; i < TrendRing::HOURS; i++) {
+        if (!h[i].count) continue;
+        p += i * (W - 1) / (TrendRing::HOURS - 1); p += ',';
+        p += 4 + (int)((hi - h[i].sum / h[i].count) * (H - 9) / (hi - lo)); p += ' ';
+    }
+    p += F("\"/></svg></div>");
+}
+
 /// A hairline of the wall page: across when `w`, down when `h`.
 static void kdWallRule(String& p, int x, int y, int w, int h) {
     kdWallAt(p, w ? "wr" : "wv", x, y, w, w ? 0 : h);
@@ -2572,27 +2662,25 @@ static void kdWallRule(String& p, int x, int y, int w, int h) {
 }
 
 #ifdef MODULE_FORECAST_ENABLED
-/// The forecast beside the clock: the icon and the condition word, the day's
-/// high and low under them, the wind and the age under that. The word is set
-/// as large as its column allows, up to the layout's size — "Променлива
-/// облачност" has to fit the width "Ясно" does.
+/// The forecast beside the clock: the condition word where a heading would
+/// be, as large as the column allows up to the layout's size — "Променлива
+/// облачност" has to fit the width "Ясно" does — the icon under it with the
+/// wind and the age beside it, one to a line, and the day's high and low
+/// under the icon.
 static void appendWallForecast(String& p, const KdFlow& f) {
     const ForecastModule::Data d = forecastModule.snapshot();
     if (!d.valid) return;
-    kdWallAt(p, "lab", f.labFcX, f.labFcY);
-    p += kdT("Forecast", "Прогноза");
-    p += F("</div>");
-    kdWallAt(p, "", f.fcIconX, f.fcIconY);
-    appendWeatherIcon(p, d.code, kdPx(KDF_WALL_FC_ICON));
-    p += F("</div>");
     const char* word = forecastSummary(d);
     const unsigned adv = kdAdvanceMille(word);
     int sz = f.fcTextSz;
     if (adv) sz = kdfMax(12, kdfMin(sz, (int)(f.fcTextW * 1000u / adv)));
-    kdWallAt(p, "wfc", f.fcTextX, f.fcIconY + (KDF_WALL_FC_ICON - sz) / 2, f.fcTextW);
+    kdWallAt(p, "wfc", f.fcTextX, f.fcTextY, f.fcTextW);
     p += F("<span style=\"font-size:"); p += kdPx(sz); p += F("px\">");
     p += word;
     p += F("</span></div>");
+    kdWallAt(p, "", f.fcIconX, f.fcIconY);
+    appendWeatherIcon(p, d.code, kdPx(KDF_WALL_FC_ICON));
+    p += F("</div>");
     if (isfinite(d.highC) && isfinite(d.lowC)) {
         kdWallAt(p, "wfc fc-t", f.fcTempX, f.fcTempY);
         p += (int)lroundf(d.highC);
@@ -2602,16 +2690,14 @@ static void appendWallForecast(String& p, const KdFlow& f) {
     }
     kdWallAt(p, "wfc wfw", f.fcWindX, f.fcWindY);
     if (isfinite(d.windKph)) {
-        p += kdT("wind ", "вятър ");
+        p += kdT("wind", "вятър");
+        p += F("<br>");
         p += (int)(d.windKph + 0.5f);
-        p += F(" km/h");
+        p += F(" km/h<br>");
     }
     char age[16];
     forecastAgeText(age, sizeof(age), d.fetchedAt, (uint32_t)time(nullptr));
-    if (age[0] != '\0') {
-        if (isfinite(d.windKph)) p += F(" &middot; ");
-        p += age;
-    }
+    p += age;
     p += F("</div>");
 }
 #endif
@@ -2631,14 +2717,23 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
     p += F("px\">");
 
     // ── The headline, across the page ──
-    kdWallAt(p, "lab", f.colLX, f.groupY, f.headW);
+    if (rd.heroLine) appendHeroLine(p, f, now);
+    // White on black when it asked to be: a plate under its whole row.
+    const bool hInv = zones.z[KZ_HERO].flags & KSLOTF_INV;
+    if (hInv) {
+        kdWallAt(p, "invp", f.colLX - 6, f.groupY - 6, f.headW + 12,
+                 f.headRuleY - 4 - (f.groupY - 6));
+        p += F("</div>");
+    }
+    kdWallAt(p, hInv ? "lab wi" : "lab", f.colLX, f.groupY, f.headW);
     appendEscaped(p, kdGroupOutLabel(zones));
     if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive())
         appendBatteryBadge(p);
     p += F("</div>");
     const bool big = (skin.showFlags & KSHOW_BIG) && zones.z[KZ_BIG].used() &&
                      res[KZ_BIG].ok;
-    kdWallAt(p, big ? "head" : "head ctr", f.colLX, f.heroY, f.headW);
+    kdWallAt(p, big ? (hInv ? "head wi" : "head") : (hInv ? "head ctr wi" : "head ctr"),
+             f.colLX, f.heroY, f.headW);
     appendValue(p, res[KZ_HERO], zones.z[KZ_HERO], "v1");
     if (big) {
         p += F("<span class=\"slash\">/</span>");
@@ -2646,7 +2741,8 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
     }
     p += F("</div>");
     if (rd.sub[0]) {
-        kdWallAt(p, big ? "sub" : "sub ctr", f.colLX, f.subY, f.headW);
+        kdWallAt(p, big ? (hInv ? "sub wi" : "sub") : (hInv ? "sub ctr wi" : "sub ctr"),
+                 f.colLX, f.subY, f.headW);
         appendEscaped(p, rd.sub);
         p += F("</div>");
     }
@@ -2676,13 +2772,22 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
             const int y = i == 0 ? f.inValY : (i == 1 ? f.inVal2Y : f.inVal3Y);
             const KdResolved& r = res[used[i]];
             const KindleSlot& sl = zones.z[used[i]];
+            const bool inv = sl.flags & KSLOTF_INV;
+            const int vsz = i == 0 ? f.inValSz1 : f.inValSz;
+            if (inv) {
+                const int top = i ? y - f.labSz - 10 : y - 6;
+                kdWallAt(p, "invp", f.inX - 6, top, f.inW, y + vsz + 6 - top);
+                p += F("</div>");
+            }
             if (i) {
-                kdWallAt(p, "lab", f.inX, y - f.labSz - 4, f.inW);
+                kdWallAt(p, inv ? "lab wi" : "lab", f.inX, y - f.labSz - 4, f.inW);
                 appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
                 p += F("</div>");
             }
-            kdWallAt(p, "cv", f.inX, y, f.inW);
-            appendValue(p, r, sl, i == 0 ? "iv iv-1" : "iv");
+            kdWallAt(p, inv ? "cv wi" : "cv", f.inX, y, f.inW);
+            const char* cls = i == 0 ? "iv iv-1" : "iv";
+            appendValue(p, r, sl, cls);
+            appendBar(p, cls, kdPlaceBar(sl, r));
             p += F("</div>");
         }
     }
@@ -2724,7 +2829,7 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
            ".wl .v1,.wl .v2,.wl .gv,.wl .iv{font-weight:700}"
            ".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}"
            ".wa.wr{height:0;overflow:visible}.wa.wv{width:0;overflow:visible}"
-           ".foot{margin-top:0}.wl .fc-t{font-weight:700;margin:0}.wfw{color:#444}"
+           ".foot{margin-top:0}.wl .fc-t{font-weight:700;margin:0}.wl .wfw{color:#444;line-height:1.33}"
            ".wl{position:relative;width:");
     p += kdPx(564);
     p += F("px}.wl .grid .lab{margin-bottom:"); p += kdPx(4);
@@ -2806,9 +2911,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // stylesheet's sizes and the markup's rows have to come from one answer.
     const uint8_t rot = kdRotFor(req, kdPageRot(skin));
     const bool wall = kdWallFor(skin.webStyle, rot, true);
+    const bool heroLine = wall && (skin.showFlags & KSHOW_CHART);
     if (wall) kdWallSkin(skin);
     KdRender rd;
     kdRenderBegin(rd, skin, now, kdStandalone(), true, kdRotLandscape(rot), true, wall);
+    rd.heroLine = heroLine;
     rd.chartFine = chartFine;
 
     String p;
@@ -2991,6 +3098,17 @@ static void handleKindle(AsyncWebServerRequest* req) {
     KD_S(".iv-1{font-size:")                  KD_N(52)
     KD_S("px}")
     KD_S(".val-b{font-weight:700}")
+    // Extra bold: the heaviest the face has, thickened by a shadow either side
+    // for a face whose bold is its heaviest.
+    KD_S(".val-x{font-weight:900;text-shadow:.025em 0 0 currentColor,-.025em 0 0 currentColor}")
+    // The bar beside a value, in its size: an outline as tall as the figures,
+    // filled from the foot. White on black inside a place set that way.
+    KD_S(".kbar{display:inline-block;position:relative;width:.2em;height:.72em;"
+         "border:.04em solid #000;margin-left:.16em}"
+         ".kbar i{position:absolute;left:0;right:0;bottom:0;background:#000}"
+         ".inv{background:#000;color:#fff;padding:0 4px}"
+         ".inv *,.wi,.wi *{color:#fff!important;border-color:#fff!important}"
+         ".inv .kbar i,.wi .kbar i{background:#fff}.invp{background:#000}")
 
     // How dark a value is drawn, per place. Black is the default and carries no
     // class at all, so a page nobody has touched emits none of these.

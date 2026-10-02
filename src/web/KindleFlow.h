@@ -164,6 +164,31 @@ static inline unsigned kdFigAdvance(const char* text) {
     return kdAdvanceMille(text) + figs * (KDF_FIG_SIZE - 500u);
 }
 
+/// The bar a place can carry beside its value (KSLOTF_BAR): the gap before
+/// it and its width, in thousandths of the value's type size. Counted into
+/// the place's width, so a cell with a bar sets its figures to fit both.
+static const unsigned KDF_BAR_ADV = 440;
+
+/// How good a reading is, 0 (bad) to 100 (good), for the bar beside it; -1
+/// for a metric with no such scale. Humidity is best between 40 and 60 %, and
+/// the rest are best low: an air-quality index of 0..500, CO2 from 400 ppm,
+/// VOCs to 2200 ppb, fine dust to 75 µg/m³ and coarse to 150.
+static inline int kdBarScore(const char* metric, float v) {
+    if (!metric || v != v) return -1;
+    float s;
+    if (!strcmp(metric, "humidity") || !strcmp(metric, "humidity_amb"))
+        s = v < 40.0f ? (v - 10.0f) * 100.0f / 30.0f
+          : v > 60.0f ? (90.0f - v) * 100.0f / 30.0f : 100.0f;
+    else if (!strcmp(metric, "aqi"))                                 s = 100.0f - v / 5.0f;
+    else if (!strcmp(metric, "co2") || !strcmp(metric, "eco2"))      s = (2000.0f - v) / 16.0f;
+    else if (!strcmp(metric, "tvoc"))                                s = 100.0f - v / 22.0f;
+    else if (!strcmp(metric, "pm1") || !strcmp(metric, "pm25"))      s = 100.0f - v * 4.0f / 3.0f;
+    else if (!strcmp(metric, "pm4") || !strcmp(metric, "pm10"))      s = 100.0f - v * 2.0f / 3.0f;
+    else if (!strcmp(metric, "battery_percent"))                     s = v;
+    else return -1;
+    return s < 0.0f ? 0 : (s > 100.0f ? 100 : (int)(s + 0.5f));
+}
+
 /// How wide a value comes out with its unit and arrow, in thousandths of the
 /// value's type size — kdFlowWorstAdvance() without the widening, for the
 /// headline, which is sized to what it prints (see kdFlowHeadFit()).
@@ -887,16 +912,18 @@ static const int KDF_WALL_W       = 564;   ///< margin to margin
 static const int KDF_WALL_COL     = 352;   ///< the left column: the grid, the clock
 static const int KDF_WALL_SEP     = 376;   ///< the hairline between the columns
 static const int KDF_WALL_RX      = 394;   ///< the right column
-static const int KDF_WALL_LAB     = 18;    ///< the captions and the headings
+static const int KDF_WALL_LAB     = 22;    ///< the captions and the headings
 static const int KDF_WALL_HERO    = 160;
 static const int KDF_WALL_BIG     = 96;
 static const int KDF_WALL_SUB     = 22;
 static const int KDF_WALL_BAND    = 200;   ///< the clock and the forecast, rule to footer
 static const int KDF_WALL_CLOCK   = 1300;  ///< the clock beside the forecast: 96 -> 124
 static const int KDF_WALL_CLOCK_1 = 1500;  ///< ...and alone in the band: 96 -> 144
-static const int KDF_WALL_FC_ICON = 80;    ///< the condition's icon (FC_WALL_SZ)
-static const int KDF_WALL_FC_TEXT = 22;    ///< the summary beside it, at most
+static const int KDF_WALL_FC_ICON = 100;   ///< the condition's icon (FC_WALL_SZ)
+static const int KDF_WALL_FC_TEXT = 24;    ///< the summary, in the heading's place, at most
 static const int KDF_WALL_FC_TEMP = 58;    ///< the day's high and low, at most
+static const int KDF_WALL_FC_WIND = 18;    ///< the wind and the age, three lines beside the icon
+static const int KDF_WALL_HEAD_GAP = 28;   ///< the headline's degree to the slash
 static const int KDF_IN_V_GAP     = 10;    ///< one indoor reading's foot to the next one's caption
 
 /// The day's high and low as the band prints them, "-00°/-00°", in mille.
@@ -941,9 +968,9 @@ static inline void kdFlowIndoorV(const KdFlowIn& in, int top, int bot, KdFlow& f
 }
 
 /// The most the wall page's high and low can be: KDF_WALL_FC_TEMP, or what
-/// fits between the icon and the wind.
+/// fits between the icon and the foot of the band.
 static inline int kdWallFcTempMax(const KdFlow& f) {
-    return kdfMin(KDF_WALL_FC_TEMP, f.fcWindY - 4 - f.fcTempY);
+    return kdfMin(KDF_WALL_FC_TEMP, f.rule3Y + KDF_WALL_BAND - 4 - f.fcTempY);
 }
 
 static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
@@ -963,7 +990,9 @@ static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
     f.headW   = (int16_t)KDF_WALL_W;
     f.heroSz  = (uint8_t)KDF_WALL_HERO;
     f.bigSz   = (uint8_t)KDF_WALL_BIG;
-    f.headGap = 12;
+    // Room between the headline's degree and the slash: at 160 px the
+    // desk page's 12 set them touching, and "12.4°/67%" read as one figure.
+    f.headGap = (uint8_t)KDF_WALL_HEAD_GAP;
     f.slashW  = 30;
     f.subSz   = (uint8_t)KDF_WALL_SUB;
     kdFlowHeadFit(in, f);
@@ -1023,24 +1052,24 @@ static inline void kdFlowWall(const KdFlowIn& in, KdFlow& f) {
     f.sep2Y = (int16_t)(f.rule3Y + 12);
     f.sep2H = (int16_t)(beside ? KDF_WALL_BAND - 24 : 0);
 
-    // ── The forecast: a large icon with the summary beside it, the day's high
-    // and low under them as large as the band lets them be, the wind at the
-    // foot. The word gives way to the temperature: the icon says the weather
-    // from across a room, and the word does not. ──
+    // ── The forecast: the summary where a heading would be — it says what
+    // the band is better than "Forecast" does — a large icon under it with
+    // the wind and the age beside it, and the day's high and low under the
+    // icon as large as the band lets them be. ──
     const int fx = in.clock ? KDF_WALL_RX : X0;
     const int fw = X1 - fx;
     const int I = KDF_WALL_FC_ICON;
     f.labFcX  = (int16_t)fx;
     f.labFcY  = (int16_t)(f.rule3Y + 10);
-    f.fcIconX = (int16_t)fx;
-    f.fcIconY = (int16_t)(f.rule3Y + 32);
-    f.fcTextX = (int16_t)(fx + I + 8);
-    f.fcTextW = (int16_t)(fw - I - 8);
+    f.fcTextX = (int16_t)fx;
+    f.fcTextY = f.labFcY;
+    f.fcTextW = (int16_t)fw;
     f.fcTextSz = (uint8_t)KDF_WALL_FC_TEXT;
-    f.fcTextY = (int16_t)(f.fcIconY + (I - KDF_WALL_FC_TEXT) / 2);
-    f.fcWindSz = 17;
-    f.fcWindX = (int16_t)fx;
-    f.fcWindY = (int16_t)(f.rule3Y + KDF_WALL_BAND - 4 - f.fcWindSz);
+    f.fcIconX = (int16_t)fx;
+    f.fcIconY = (int16_t)(f.rule3Y + 10 + KDF_WALL_FC_TEXT + 6);
+    f.fcWindSz = (uint8_t)KDF_WALL_FC_WIND;
+    f.fcWindX = (int16_t)(fx + I + 8);
+    f.fcWindY = (int16_t)(f.fcIconY + (I - 3 * KDF_WALL_FC_WIND - 2 * 6) / 2);
     f.fcTempX = (int16_t)fx;
     f.fcTempY = (int16_t)(f.fcIconY + I + 4);
     // For the widest it can print, "-10°/-20°"; the page sets it larger by

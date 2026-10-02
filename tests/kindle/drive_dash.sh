@@ -1384,6 +1384,53 @@ check "$?" "the wall page with four outdoor places: 2 x 2 on the left, the indoo
   exit 0 )
 check "$?" "the wall page sets a unit by its caption and the slash in black"
 
+# A PLACE'S OWN STYLE: white on a black plate (Z_<PLACE>_INV), extra bold
+# (_HEAVY, the value drawn twice), the bar beside it (_BAR, an outline and a
+# fill from the foot) — and the wall page's forecast with no heading, its
+# wind in three lines, and the outdoor line drawn before the headline.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  first=$(echo $GRID_ZONES | cut -d' ' -f1)
+  ins=$(echo $IN_ZONES | cut -d' ' -f2)
+  [ -n "$first" ] && [ -n "$ins" ] || exit 1
+  eval "Z_${first}_INV=1; Z_${first}_HEAVY=1"
+  eval "Z_${ins}_BAR=50"
+  eval "gval=\$Z_${first}_VALUE; ival=\$Z_${ins}_VALUE"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  # The plate, then the caption and the value knocked out of it.
+  grep -q -e "-B${T}BLACK${T}-k" "$FBINK_LOG" || { echo "no black plate" >&2; exit 2; }
+  n=$(grep -e "--${T}${gval}${T}" "$FBINK_LOG" | grep -c -e "${T}-h${T}")
+  [ "$n" -eq 2 ] || { echo "inverted heavy value drawn $n times" >&2; exit 3; }
+  # Only that place: the next one is drawn as ever.
+  n=$(grep -e "--${T}${ival}${T}" "$FBINK_LOG" | grep -c -e "${T}-h${T}")
+  [ "$n" -eq 0 ] || { echo "the inverse leaked: $n" >&2; exit 4; }
+  # The bar: three rectangles after the value, the last half as tall.
+  n=$(grep -c -e "-k${T}" "$FBINK_LOG")
+  [ "$n" -ge 4 ] || { echo "rectangles: $n" >&2; exit 5; }
+  # The forecast: no heading on the wall page, three lines of wind.
+  FC_SUMMARY="Rain"; FC_ICON=61; FC_HIGH=19; FC_LOW=5; FC_WIND=4; FC_AGE="1 min"
+  LBL_WIND="wind"; LBL_FORECAST="FORECAST"
+  fc_wanted() { return 0; }
+  reset_log
+  draw_forecast_body >/dev/null 2>&1
+  grep -q -e "--${T}FORECAST${T}" "$FBINK_LOG" && { echo "heading drawn" >&2; exit 6; }
+  for w in "wind" "4 km/h" "1 min" "Rain" "19°/5°"; do
+    grep -q -e "--${T}${w}${T}" "$FBINK_LOG" || { echo "no '$w'" >&2; exit 7; }
+  done
+  grep -q "fc_61_${FC_WALL_SZ}.bmp" "$FBINK_LOG" || { echo "not the wall's icon" >&2; exit 8; }
+  # The outdoor line, drawn first, when the collector asks for it.
+  HERO_LINE=1; printf 'BM' > "$TMP/heroline.bmp"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  head -1 "$FBINK_LOG" | grep -q "heroline.bmp" || { echo "line not first" >&2; exit 9; }
+  rm -f "$TMP/heroline.bmp"
+  exit 0 )
+check "$?" "a place's own style: inverted, extra bold, the bar; the wall forecast and line"
+
 # AND IT REPAINTS BY ZONES, AS THE DESK PAGE DOES: the readings above the band,
 # the clock its own rectangle in the band every minute, the forecast beside it
 # — each refreshed once and none of them flashing; the whole screen only on

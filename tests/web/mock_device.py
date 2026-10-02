@@ -262,6 +262,7 @@ KINDLE_SLOTS = {
     "group_out": "БАЛКОН", "group_out_set": "БАЛКОН",
     "group_in": "ВЪТРЕ",   "group_in_set": "",
     "flag_bold": 1, "flag_unit": 2, "flag_age": 4, "flag_trend": 8,
+    "flag_heavy": 16, "flag_inv": 32, "flag_bar": 64,
     "auto_decimals": 255,
 }
 

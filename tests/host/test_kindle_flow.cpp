@@ -793,15 +793,18 @@ static void checkWallStacks(const KdFlow& f) {
     }
     if (f.forecast) {
         CHECK(f.fcWindY + f.fcWindSz <= f.footY);
-        // The large icon under the heading, the word beside it, the high and
-        // low under the icon at no more than the band leaves above the wind.
-        CHECK(f.labFcY + f.labSz <= f.fcIconY);
-        CHECK(f.fcTextX >= f.fcIconX + KDF_WALL_FC_ICON);
+        // The word in the heading's place, the large icon under it with the
+        // wind's three lines beside it, the high and low under the icon at no
+        // more than the band leaves.
+        CHECK(f.fcTextY + f.fcTextSz <= f.fcIconY);
         CHECK(f.fcTextX + f.fcTextW <= 582);
+        CHECK(f.fcWindX >= f.fcIconX + KDF_WALL_FC_ICON);
+        CHECK(f.fcWindY >= f.fcIconY);
+        CHECK(f.fcWindY + 3 * f.fcWindSz + 2 * 6 <= f.fcIconY + KDF_WALL_FC_ICON);
         CHECK(f.fcTempY >= f.fcIconY + KDF_WALL_FC_ICON);
         CHECK(f.fcTempSz <= kdWallFcTempMax(f));
         CHECK(kdWallFcTempMax(f) >= 50);
-        CHECK(f.fcTempY + kdWallFcTempMax(f) <= f.fcWindY);
+        CHECK(f.fcTempY + kdWallFcTempMax(f) <= f.footY);
         CHECK(f.fcIconX >= (f.sep2H ? f.sep2X : 18));
     }
     if (f.clock || f.forecast) CHECK(f.rule3Y < f.footY);
@@ -812,7 +815,7 @@ static void test_wall_page() {
     const KdFlow desk = kdFlowCompute(defaultPage());
     const KdFlow f = kdFlowCompute(wallPage());
     checkWallStacks(f);
-    CHECK(f.heroSz >= 140);
+    CHECK(f.heroSz >= 135);   // "-38.8° / 37%", the widest it reads
     CHECK_EQ(f.bigSz, KDF_WALL_BIG);
     CHECK(f.gridValSz > desk.gridValSz);
     CHECK(f.inValSz > desk.inValSz);
