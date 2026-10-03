@@ -363,12 +363,11 @@ eleven, always in the same spot at the same size:
 ```
 
 Each place names a sensor, a metric, an optional caption, how many decimals,
-seven switches — bold, show the unit, show the age when stale, show the pressure
+switches — bold, show the unit, show the age when stale, show the pressure
 tendency, **extra bold** (the bold face drawn twice a hair apart on the panel,
-weight 900 in the browser), **inverted colours** (white on a black plate the
-size of the place) and, for a grid or indoor place whose metric has a scale,
-**a bar** beside the value that fills as the reading gets better (humidity best
-at 40–60 %, the AQI, the BME680's IAQ, CO₂, TVOC and dust best low; `kdBarScore()`) — and **how
+weight 900 in the browser; on a black plate the panel draws it once, since a
+second white pass only smears into the black), **inverted colours** (white on
+a black plate the size of the place) and the 24 h line below — and **how
 dark it is drawn**: black, dark, mid or light grey. Four
 levels rather than a colour picker, because the panel has sixteen real grey
 levels and the ones worth having are the ones far enough apart to render solid,
@@ -819,6 +818,12 @@ across the headline's row. The panel fetches it as
 draws it before the figures; the browser page shows the same image,
 stretched over the row.
 
+**Every line is drawn after its place's plate.** An inverted place asks for
+its line with `&inv=1`, which comes back mid grey on black rather than light
+grey on white, so the black plate no longer hides it. The panel keeps each
+image as `line_<PLACE>_<w>x<h>_<inv>.bmp`, so a place that changes size or
+colour fetches a new one rather than drawing the old one.
+
 **A grid place's own 24 h line** works the same way, for any reading: tick
 *24 h line on the wall* on the place (`KSLOTF_LINE`). The payload says
 `Z_<PLACE>_LINE=1`; the panel fetches `/kindle/graph.bmp?line=1&z=<place>&w=…&h=…`
@@ -834,6 +839,27 @@ at three metres, and the room they took is the room the readings want. The
 captions and the line under the headline are black, every value is bold,
 the value beside the headline is black rather than #444, and the rules are
 the heaviest black ones unless they have been set.
+
+**The band under the headline** carries the outdoor 24 h low-to-high on a
+strip of its own that parts the headline from everything under it:
+`sub_band` 0..4 (none, light, mid and dark grey, black) and `sub_ink` 0..5
+(auto, then black, dark, mid and light grey, white; auto is white on dark grey
+and black, black on the others). `sub_band` 0 is the page as it was: no
+strip, the line under the headline. Any other value draws the strip in place
+of that line, the range centred on it. They live in `KindleConfig::subBand`
+and `subInk`; the panel gets `SUB_BAND` and `SUB_INK` as FBInk colour names,
+and only on the wall page.
+
+**The readings sit in the middle of their cells**: the grid's figures and
+captions, the indoor heading, captions and values, and the forecast's
+condition word. The panel centres by the widths the collector sends
+(`Z_<zone>_VADVW`, `_UADVW` and `_LADVW`, `Z_GROUP_IN_ADVW`, `FC_SUMMARY_ADVW`).
+
+**The footer shows the WiFi signal**, on the panel only: five bars filled by
+strength (the link level in `/proc/net/wireless`, as dBm or as percent; −55
+dBm and better is five, −86 and worse is none) and the network's name, cut to
+16 characters, left of the status. The name comes from the Kindle's own
+`com.lab126.wifid`, else `wpa_cli`; the collector is not asked.
 
 Upright only: turned to 90° or 270°, the page is the desk one on its side.
 The FBInk script asks for it with `?wall=1`, and only a script that does gets

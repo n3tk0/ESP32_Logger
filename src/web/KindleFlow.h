@@ -164,37 +164,6 @@ static inline unsigned kdFigAdvance(const char* text) {
     return kdAdvanceMille(text) + figs * (KDF_FIG_SIZE - 500u);
 }
 
-/// The bar a place can carry beside its value (KSLOTF_BAR): the gap before
-/// it and its width, in thousandths of the value's type size. Counted into
-/// the place's width, so a cell with a bar sets its figures to fit both.
-static const unsigned KDF_BAR_ADV = 440;
-
-/// How good a reading is, 0 (bad) to 100 (good), for the bar beside it; -1
-/// for a metric with no such scale. Humidity is best between 40 and 60 %, and
-/// the rest are best low: an air-quality index of 0..500, CO2 from 400 ppm,
-/// VOCs to 2200 ppb, fine dust to 75 µg/m³ and coarse to 150. Whole numbers
-/// and a table: the C3 has no FPU, and this is all it needs.
-static inline int kdBarScore(const char* metric, long v) {
-    struct Scale { const char* m; int16_t good, bad; };
-    static const Scale kScales[] = {
-        { "humidity", 40, 10 }, { "humidity_amb", 40, 10 },
-        { "aqi", 0, 500 }, { "co2", 400, 2000 }, { "eco2", 400, 2000 },
-        { "tvoc", 0, 2200 }, { "pm1", 0, 75 }, { "pm25", 0, 75 },
-        { "pm4", 0, 150 }, { "pm10", 0, 150 }, { "battery_percent", 100, 0 },
-        { "iaq", 0, 500 },   // the BME680's: 0..500, lower is cleaner, as AQI
-    };
-    if (!metric) return -1;
-    for (const Scale& sc : kScales) {
-        if (strcmp(metric, sc.m) != 0) continue;
-        // Humidity has a band, and is as bad 30 points above it as below.
-        if (sc.good == 40 && v > 60) v = 100 - v;
-        else if (sc.good == 40 && v > 40) v = 40;
-        long s = (sc.bad - v) * 100 / (sc.bad - sc.good);
-        return s < 0 ? 0 : (s > 100 ? 100 : (int)s);
-    }
-    return -1;
-}
-
 /// How wide a value comes out with its unit and arrow, in thousandths of the
 /// value's type size — kdFlowWorstAdvance() without the widening, for the
 /// headline, which is sized to what it prints (see kdFlowHeadFit()).

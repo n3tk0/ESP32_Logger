@@ -163,6 +163,8 @@ struct ChartBmpCtx {
     /// the outdoor mean alone, light grey and thick, edge to edge, with no
     /// grid, band or indoor line — the headline's figures are drawn over it.
     bool lineOnly = false;
+    /// ...and on black, for a place set white on black: a mid grey line.
+    bool lineInv = false;
     float yScale;  // (B - T) / span
 
     // Precomputed X positions for each hour
@@ -242,8 +244,8 @@ struct ChartBmpCtx {
     // `bmpY` is the BMP row (bottom-up: bmpY = H-1-y).
     void renderRow(uint8_t* row, int y) const {
         // Fill with white (palette index 15)
-        memset(row, 0xFF, rowBytes);
-        if (lineOnly) { renderLine(row, y, 2, cssGrey(0xC0)); return; }
+        memset(row, lineInv ? 0x00 : 0xFF, rowBytes);
+        if (lineOnly) { renderLine(row, y, 2, cssGrey(lineInv ? 0x77 : 0xC0)); return; }
 
         // ── Vertical grid lines (every 3h + "now") ──
         if (y >= T && y <= B) {

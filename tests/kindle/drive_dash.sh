@@ -1399,8 +1399,8 @@ check "$?" "the wall page with four outdoor places: 2 x 2 on the left, the indoo
 check "$?" "the wall page sets a unit by its caption and the slash in black"
 
 # A PLACE'S OWN STYLE: white on a black plate (Z_<PLACE>_INV), extra bold
-# (_HEAVY, the value drawn twice), the bar beside it (_BAR, an outline and a
-# fill from the foot) — and the wall page's forecast with no heading, its
+# (_HEAVY: the value drawn twice, but once on a plate, where the second pass
+# would rub out the first) — and the wall page's forecast with no heading, its
 # wind in three lines, and the outdoor line drawn before the headline.
 ( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
   load_kv "$DASH_TMP/data.txt" PAYLOAD
@@ -1411,20 +1411,20 @@ check "$?" "the wall page sets a unit by its caption and the slash in black"
   ins=$(echo $IN_ZONES | cut -d' ' -f2)
   [ -n "$first" ] && [ -n "$ins" ] || exit 1
   eval "Z_${first}_INV=1; Z_${first}_HEAVY=1"
-  eval "Z_${ins}_BAR=50"
+  eval "Z_${ins}_HEAVY=1"
   eval "gval=\$Z_${first}_VALUE; ival=\$Z_${ins}_VALUE"
   reset_log
   draw_zones >/dev/null 2>&1
   # The plate, then the caption and the value knocked out of it.
   grep -q -e "-B${T}BLACK${T}-k" "$FBINK_LOG" || { echo "no black plate" >&2; exit 2; }
   n=$(grep -e "--${T}${gval}${T}" "$FBINK_LOG" | grep -c -e "${T}-h${T}")
-  [ "$n" -eq 2 ] || { echo "inverted heavy value drawn $n times" >&2; exit 3; }
-  # Only that place: the next one is drawn as ever.
+  [ "$n" -eq 1 ] || { echo "inverted heavy value drawn $n times" >&2; exit 3; }
+  # Only that place: the next one is drawn as ever, and off a plate extra
+  # bold is the value twice.
   n=$(grep -e "--${T}${ival}${T}" "$FBINK_LOG" | grep -c -e "${T}-h${T}")
   [ "$n" -eq 0 ] || { echo "the inverse leaked: $n" >&2; exit 4; }
-  # The bar: three rectangles after the value, the last half as tall.
-  n=$(grep -c -e "-k${T}" "$FBINK_LOG")
-  [ "$n" -ge 4 ] || { echo "rectangles: $n" >&2; exit 5; }
+  n=$(grep -c -e "--${T}${ival}${T}" "$FBINK_LOG")
+  [ "$n" -eq 2 ] || { echo "heavy value drawn $n times" >&2; exit 5; }
   # The forecast: no heading on the wall page, three lines of wind.
   FC_SUMMARY="Rain"; FC_ICON=61; FC_HIGH=19; FC_LOW=5; FC_WIND=4; FC_AGE="1 min"
   LBL_WIND="wind"; LBL_FORECAST="FORECAST"
@@ -1437,13 +1437,14 @@ check "$?" "the wall page sets a unit by its caption and the slash in black"
   done
   grep -q "fc_61_${FC_WALL_SZ}.bmp" "$FBINK_LOG" || { echo "not the wall's icon" >&2; exit 8; }
   # The outdoor line, drawn first, when the collector asks for it.
-  HERO_LINE=1; printf 'BM' > "$TMP/heroline.bmp"
+  HERO_LINE=1
+  hl="$TMP/line_HERO_${HEAD_W}x$(( SUB_Y - HERO_Y ))_0.bmp"; printf 'BM' > "$hl"
   reset_log
   draw_zones >/dev/null 2>&1
-  head -1 "$FBINK_LOG" | grep -q "heroline.bmp" || { echo "line not first" >&2; exit 9; }
-  rm -f "$TMP/heroline.bmp"
+  head -1 "$FBINK_LOG" | grep -q "line_HERO_" || { echo "line not first" >&2; exit 9; }
+  rm -f "$hl"
   exit 0 )
-check "$?" "a place's own style: inverted, extra bold, the bar; the wall forecast and line"
+check "$?" "a place's own style: inverted, extra bold; the wall forecast and line"
 
 # THE WALL PAGE'S HAIRLINES BETWEEN THE OUTDOOR PLACES: down 8 px left of the
 # second cell of a row, across in the air above every row but the first —
@@ -1478,7 +1479,9 @@ check "$?" "the wall page draws hairlines between its outdoor places, the desk p
 
 # A WALL GRID PLACE'S OWN 24 h LINE (Z_<PLACE>_LINE): fetched for that place
 # alone, a cell wide less the gutter and as tall as its figures, and drawn
-# before the figures. A place that did not ask fetches nothing.
+# before the figures. A place that did not ask fetches nothing. A place set
+# white on black asks for the line on black (&inv=1), and it is drawn ON its
+# plate, not under it where the plate would hide it.
 ( : > "$WORK/wget.log"; WGET_LOG="$WORK/wget.log"; export WGET_LOG
   flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
   load_kv "$DASH_TMP/data.txt" PAYLOAD
@@ -1490,28 +1493,130 @@ check "$?" "the wall page draws hairlines between its outdoor places, the desk p
   set -- $LY_GRID_ROWS
   [ -n "$second" ] && [ "$1" = "2" ] || { echo "rows '$LY_GRID_ROWS'" >&2; exit 1; }
   eval "Z_${first}_LINE=1"
-  rm -f "$TMP"/zline_*.bmp
-  fetch_zonelines >/dev/null 2>&1
-  lz=$(echo "$first" | tr 'A-Z' 'a-z')
-  grep -q "/kindle/graph.bmp?line=1&z=${lz}&w=$(( COL_L_W / 2 - 14 ))&h=${GRID_VAL_SZ}\$" \
+  rm -f "$TMP"/line_*.bmp
+  fetch_lines >/dev/null 2>&1
+  lz=$(echo "$first" | tr 'A-Z' 'a-z'); lw=$(( COL_L_W / 2 - 14 ))
+  grep -q "/kindle/graph.bmp?line=1&z=${lz}&w=${lw}&h=${GRID_VAL_SZ}\$" \
       "$WORK/wget.log" || { cat "$WORK/wget.log" >&2; exit 2; }
   [ "$(grep -c 'line=1&z=' "$WORK/wget.log")" = "1" ] || exit 3
-  [ -s "$TMP/zline_${first}.bmp" ] || exit 4
+  lf="$TMP/line_${first}_${lw}x${GRID_VAL_SZ}_0.bmp"
+  [ -s "$lf" ] || { ls "$TMP" >&2; exit 4; }
   eval "gval=\$Z_${first}_VALUE"
   reset_log
   draw_zones >/dev/null 2>&1
-  li=$(grep -n "zline_${first}.bmp" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  li=$(grep -n "line_${first}_" "$FBINK_LOG" | head -1 | cut -d: -f1)
   vi=$(grep -n -e "--${T}${gval}${T}" "$FBINK_LOG" | head -1 | cut -d: -f1)
   [ -n "$li" ] && [ -n "$vi" ] && [ "$li" -lt "$vi" ] || { echo "line $li value $vi" >&2; exit 5; }
-  grep "zline_${first}.bmp" "$FBINK_LOG" | grep -q "x=${COL_L_X},y=$(( GRID_Y + GRID_LAB_SZ + 4 ))" || exit 6
+  grep "line_${first}_" "$FBINK_LOG" | grep -q "x=${COL_L_X},y=$(( GRID_Y + GRID_LAB_SZ + 4 ))" || exit 6
   # Switched off, it is not drawn even with the file still there.
   eval "Z_${first}_LINE="
   reset_log
   draw_zones >/dev/null 2>&1
-  grep -q "zline_" "$FBINK_LOG" && exit 7
-  rm -f "$TMP"/zline_*.bmp
+  grep -q "line_${first}_" "$FBINK_LOG" && exit 7
+  # White on black: fetched on black, under its own name, drawn after the plate.
+  eval "Z_${first}_LINE=1; Z_${first}_INV=1"
+  : > "$WORK/wget.log"
+  fetch_lines >/dev/null 2>&1
+  grep -q "z=${lz}&w=${lw}&h=${GRID_VAL_SZ}&inv=1\$" "$WORK/wget.log" || exit 8
+  [ -s "$TMP/line_${first}_${lw}x${GRID_VAL_SZ}_1.bmp" ] && [ ! -e "$lf" ] || exit 9
+  reset_log
+  draw_zones >/dev/null 2>&1
+  pi=$(grep -n -e "-B${T}BLACK${T}-k" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  li=$(grep -n "line_${first}_" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  [ -n "$pi" ] && [ -n "$li" ] && [ "$pi" -lt "$li" ] || { echo "plate $pi line $li" >&2; exit 10; }
+  rm -f "$TMP"/line_*.bmp
   exit 0 )
-check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind it"
+check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind it, on its plate"
+
+# THE BAND UNDER THE HEADLINE (SUB_BAND, SUB_INK): across the page in its
+# shade, the 24 h range centred on it, and no rule under the row. White on
+# black is the knocked-out pair; any other is drawn on a ground of the band's
+# own pen. A pen the script does not know is no band at all.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  Z_SUB="-2 to 15° · 3 min"; Z_SUB_ADVW=6000
+  SUB_BAND=BLACK; SUB_INK=WHITE
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -q -e "-B${T}BLACK${T}-k${T}top=$(( SUB_Y - 6 )),left=${COL_L_X},width=${HEAD_W},height=$(( SUB_SZ + 12 ))" \
+      "$FBINK_LOG" || { echo "no band" >&2; exit 1; }
+  sx=$(( COL_L_X + (HEAD_W - SUB_SZ * 6) / 2 ))
+  grep -e "--${T}${Z_SUB}${T}" "$FBINK_LOG" | grep -q -e "${T}-h${T}.*left=${sx}," || \
+      { grep -e "${Z_SUB}" "$FBINK_LOG" >&2; exit 2; }
+  grep -q -e "top=${HEAD_RULE_Y},left=${COL_L_X},width=${HEAD_W}," "$FBINK_LOG" && exit 3
+  SUB_BAND=GRAY7; SUB_INK=BLACK
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -e "--${T}${Z_SUB}${T}" "$FBINK_LOG" | grep -q -e "-C${T}BLACK${T}-B${T}GRAY7${T}" || exit 4
+  SUB_BAND="red"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -q -e "top=$(( SUB_Y - 6 )),left=${COL_L_X},width=${HEAD_W}," "$FBINK_LOG" && exit 5
+  grep -q -e "top=${HEAD_RULE_Y},left=${COL_L_X}," "$FBINK_LOG" || { echo "no rule" >&2; exit 6; }
+  exit 0 )
+check "$?" "the wall page's band under the headline, in its shades, instead of the rule"
+
+# CENTRED ON THE WALL PAGE: a grid cell's caption and value in the cell, the
+# indoor heading, captions and values in their column.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  first=$(echo $GRID_ZONES | cut -d' ' -f1)
+  eval "Z_${first}_LADVW=2000; Z_${first}_ARROW=; lab=\$Z_${first}_LABEL"
+  set -- $LY_GRID_ROWS; gcw=$(( COL_L_W / $1 ))
+  Z_GROUP_IN_ADVW=3000
+  reset_log
+  draw_zones >/dev/null 2>&1
+  lw=$(( GRID_LAB_SZ * 2000 * 115 / 100000 ))
+  lx=$(( COL_L_X + (gcw - lw) / 2 ))
+  grep -e "--${T}${lab}" "$FBINK_LOG" | grep -q "left=${lx}," || \
+      { grep -e "${lab}" "$FBINK_LOG" >&2; echo "want $lx" >&2; exit 1; }
+  hx=$(( COL_R_X + (COL_R_W - GROUP_LAB_SZ * 3) / 2 ))
+  grep -e "--${T}${Z_GROUP_IN}${T}" "$FBINK_LOG" | grep -q "left=${hx}," || exit 2
+  # The indoor values: none at the column's left edge any more.
+  for z in $IN_ZONES; do
+    eval "v=\$Z_${z}_VALUE"
+    grep -e "--${T}${v}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," && { echo "$z at the edge" >&2; exit 3; }
+  done
+  exit 0 )
+check "$?" "the wall page centres its grid cells and its indoor column"
+
+# THE READER'S OWN WIFI on the wall page's footer: five bars, as full as the
+# signal /proc/net/wireless gives, and wifid's name for the network. Not on
+# the desk page.
+( printf 'Inter-| sta-|   Quality        |   Discarded packets\n face | tus | link level noise |  nwid  crypt\n  wlan0: 0000   45.  -65.  -256        0      0\n' > "$WORK/wireless"
+  WIFI_PROC="$WORK/wireless"; printf 'HomeNet\n' > "$WIFI_STATE"
+  WALL=1; STAT_X=396; STAT_Y=770; STAT_SZ=12
+  reset_log
+  draw_wifi >/dev/null 2>&1
+  [ "$(grep -c -e "-B${T}BLACK${T}-k" "$FBINK_LOG")" = "3" ] || { cat "$FBINK_LOG" >&2; exit 1; }
+  [ "$(grep -c -e "-B${T}GRAYC${T}-k" "$FBINK_LOG")" = "2" ] || exit 2
+  grep -q -e "--${T}HomeNet${T}" "$FBINK_LOG" || exit 3
+  grep -q -e "left=$(( 396 - WIFI_W ))," "$FBINK_LOG" || exit 4
+  # dBm + 256 and a percentage, as other drivers give it.
+  sed -i 's/-65\./201./' "$WORK/wireless"; wifi_read; [ "$WIFI_BARS" = "5" ] || exit 5
+  sed -i 's/201\./30./' "$WORK/wireless"; wifi_read; [ "$WIFI_BARS" = "2" ] || exit 6
+  WALL=0
+  reset_log
+  draw_wifi >/dev/null 2>&1
+  [ -s "$FBINK_LOG" ] && exit 7
+  rm -f "$WIFI_STATE"
+  exit 0 )
+check "$?" "the wall page's footer has the reader's WiFi: five bars and the network's name"
+
+# PLACE NAMES GO INTO eval, so a list with anything but A-Z, 0-9 and _ in it
+# is dropped rather than run.
+( GRID_ZONES='G1 G2'; IN_ZONES='IN1'; zones_check
+  [ "$GRID_ZONES" = "G1 G2" ] && [ "$IN_ZONES" = "IN1" ] || exit 1
+  GRID_ZONES='G1 A;touch_x'; IN_ZONES='IN1'; zones_check
+  [ -z "$GRID_ZONES" ] && [ -z "$IN_ZONES" ] || exit 2
+  exit 0 )
+check "$?" "place names that are not names are dropped before they reach eval"
 
 # AND IT REPAINTS BY ZONES, AS THE DESK PAGE DOES: the readings above the band,
 # the clock its own rectangle in the band every minute, the forecast beside it
