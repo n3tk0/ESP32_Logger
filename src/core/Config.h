@@ -517,7 +517,13 @@ struct KindleConfig {
     // holds there.
     uint8_t  pageStyle;
     uint8_t  webStyle;
-    uint8_t  reserved[12];
+    // The wall page's band under the headline, behind its 24 h range:
+    // subBand 0 = none (white, the rule under the row as before), 1..4 =
+    // light, mid, dark, black; subInk 0 = whichever reads on the band, 1..5 =
+    // black, dark, mid, light, white. Formerly reserved[0] and [1].
+    uint8_t  subBand;
+    uint8_t  subInk;
+    uint8_t  reserved[10];
 };
 
 struct DeviceConfig {

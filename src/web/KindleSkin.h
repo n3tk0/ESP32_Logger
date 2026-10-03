@@ -597,6 +597,8 @@ inline void kdSkinClamp(KindleConfig& k) {
     if (k.layoutMode > KLAYOUT_STANDALONE) k.layoutMode = KLAYOUT_AUTO;
     if (k.pageStyle > KPAGE_WALL)       k.pageStyle = KPAGE_DESK;
     if (k.webStyle > KPAGE_WALL)        k.webStyle = KPAGE_DESK;
+    if (k.subBand > 4)                  k.subBand = 0;
+    if (k.subInk > 5)                   k.subInk = 0;
     // Upright is both what an older config holds and the one answer that is
     // always drawable, so a byte nobody recognises lands there.
     if (k.rotation > KROT_270)          k.rotation = KROT_0;

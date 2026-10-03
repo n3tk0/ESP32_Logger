@@ -156,7 +156,8 @@ constexpr uint8_t KSLOTF_AGE      = 0x04;  ///< append "· 4m" when it is stale
 constexpr uint8_t KSLOTF_TREND    = 0x08;  ///< append the 3 h tendency arrow
 constexpr uint8_t KSLOTF_HEAVY    = 0x10;  ///< extra bold: the bold face, thickened
 constexpr uint8_t KSLOTF_INV      = 0x20;  ///< white on a black plate
-constexpr uint8_t KSLOTF_BAR      = 0x40;  ///< a bar beside it, fuller the better it is
+// 0x40 was a bar beside the value, removed 2026-10-03: a saved place may
+// still carry it, and nothing reads it.
 constexpr uint8_t KSLOTF_LINE     = 0x80;  ///< keep its 24 h history; the wall draws it
 constexpr uint8_t KSLOTF_ALL      = 0xFF;
 
@@ -183,32 +184,35 @@ enum KindleInk : uint8_t {
     KINK_COUNT
 };
 
-/// The CSS colour for a level. Also the order the settings form lists them in.
-static inline const char* kdInkCss(uint8_t ink) {
-    switch (ink) {
-        case KINK_DARK:  return "#444";
-        case KINK_MID:   return "#777";
-        case KINK_LIGHT: return "#aaa";
-        default:         return "#000";
-    }
-}
+/// The CSS colour and FBInk's name for a level, and a fifth for white, which
+/// only the wall page's band (kdSubBandShade()) uses. The levels are also the
+/// order the settings form lists them in.
+///
+/// .ink-l IS #aaa, AND FBINK'S NAME FOR IT IS GRAYA. This said GRAY10, which
+/// is not a colour FBInk has: its scale runs GRAY1..GRAY9 and then
+/// GRAYA..GRAYE, so `-C GRAY10` was rejected, the whole draw call failed, and
+/// a place set to "light" was simply not on the panel — silently, because the
+/// reader sends fbink's stderr to /dev/null. The browser page showed the value
+/// in pale grey and the Kindle showed nothing at all, which reads as a dead
+/// sensor.
+static const char* const KD_SHADES[5][2] = {
+    { "#000", "BLACK" }, { "#444", "GRAY4" }, { "#777", "GRAY7" },
+    { "#aaa", "GRAYA" }, { "#fff", "WHITE" },
+};
+static inline const char* kdShadeCss(uint8_t s)   { return KD_SHADES[s < 5 ? s : 0][0]; }
+static inline const char* kdShadeFbink(uint8_t s) { return KD_SHADES[s < 5 ? s : 0][1]; }
+/// A place's ink: one of the four levels, never white.
+static inline const char* kdInkCss(uint8_t ink)   { return kdShadeCss(ink < KINK_COUNT ? ink : 0); }
+static inline const char* kdInkFbink(uint8_t ink) { return kdShadeFbink(ink < KINK_COUNT ? ink : 0); }
 
-/// What FBInk calls the same level. The shell renderer takes a colour NAME, and
-/// these four are the ones the rest of update_dash.sh already uses.
-static inline const char* kdInkFbink(uint8_t ink) {
-    switch (ink) {
-        case KINK_DARK:  return "GRAY4";     // .ink-d #444
-        case KINK_MID:   return "GRAY7";     // .ink-m #777
-        // .ink-l IS #aaa, AND FBINK'S NAME FOR IT IS GRAYA. This said GRAY10,
-        // which is not a colour FBInk has: its scale runs GRAY1..GRAY9 and
-        // then GRAYA..GRAYE, so `-C GRAY10` was rejected, the whole draw call
-        // failed, and a place set to "light" was simply not on the panel —
-        // silently, because the reader sends fbink's stderr to /dev/null. The
-        // browser page showed the value in pale grey and the Kindle showed
-        // nothing at all, which reads as a dead sensor.
-        case KINK_LIGHT: return "GRAYA";
-        default:         return "BLACK";
-    }
+/// The wall page's band under the headline (KindleConfig::subBand: 0 none,
+/// 1..4 light..black) and the 24 h range on it (subInk: 0 whichever reads on
+/// the band, 1..5 black..white), each as a shade of KD_SHADES.
+static inline uint8_t kdSubBandShade(uint8_t band) {
+    return band ? (uint8_t)(4 - band) : 4;
+}
+static inline uint8_t kdSubInkShade(uint8_t band, uint8_t ink) {
+    return ink ? (uint8_t)(ink - 1) : (band >= 3 ? 4 : KINK_BLACK);
 }
 
 // ---------------------------------------------------------------------------

@@ -998,6 +998,7 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     if (!zs && kdChartWantsFine(st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn))
         kdChartUseFine(now, st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn);
     st->ctx.lineOnly = line;
+    st->ctx.lineInv  = line && queryArg(req, "inv");
     st->ctx.init(W, H);
     st->begin();
 
@@ -1271,13 +1272,6 @@ static void kdSubLine(char* buf, size_t n, const KindleConfig& skin,
 // ---------------------------------------------------------------------------
 // The layout, for what is on the page
 // ---------------------------------------------------------------------------
-/// The bar beside a place, 0..100, or -1 for none: switched on, a metric with
-/// a scale, and a reading.
-static int kdPlaceBar(const KindleSlot& sl, const KdResolved& r) {
-    if (!(sl.flags & KSLOTF_BAR) || !r.ok) return -1;
-    return kdBarScore(sl.metric, atol(r.text));
-}
-
 /// The widest one place can print, for the layout to size it by — its reading
 /// widened to the most digits its metric reaches, with its unit, and with the
 /// tendency arrow if it is a place that draws one. The arrow counts whether or
@@ -1294,9 +1288,8 @@ static uint16_t kdPlaceAdvance(const KindleConfig& skin, const KindleSlot& sl,
                                bool capArrow = false) {
     const bool arrow = !capArrow && (sl.flags & KSLOTF_TREND) &&
                        (skin.showFlags & KSHOW_TENDENCY) && strcmp(sl.metric, "pressure") == 0;
-    return (uint16_t)((firstIn ? kdFlowFirstInAdvance(sl.metric, r.text, r.unit, arrow)
-                               : kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow))
-                      + (kdPlaceBar(sl, r) >= 0 ? KDF_BAR_ADV : 0));
+    return firstIn ? kdFlowFirstInAdvance(sl.metric, r.text, r.unit, arrow)
+                   : kdFlowWorstAdvance(sl.metric, r.text, r.unit, arrow);
 }
 
 /// The value beside the headline as it prints, with its unit and the arrow
@@ -1494,6 +1487,11 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
     // the panel has no CSS. See kdShellVarUpper().
     kdShellVarUpper(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
     kdShellVarUpper(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
+    {   // as printed, for the wall page, which centres it over its column
+        char lup[48];
+        kdUpperUtf8(lup, sizeof(lup), kdGroupInLabel(zones));
+        kdShellUint(s, "Z_GROUP_IN_ADVW", kdAdvanceMille(lup));
+    }
 
     kdShellVar(s, "Z_SUB", rd.sub);
     // Its width, for centring it under a headline with nothing beside it.
@@ -1522,14 +1520,11 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         // Every value bold on the wall page, which is read from across a room.
         s->printf("Z_%s_BOLD=%d\n", up,
                   ((zones.z[i].flags & KSLOTF_BOLD) || rd.flow.wall) ? 1 : 0);
-        // Extra bold, white on black, and the bar beside the value: only when
-        // set, as the script forgets all three before each payload.
+        // Extra bold, white on black, and the place's own 24 h line: only
+        // when set, as the script forgets all three before each payload.
         if (zones.z[i].flags & KSLOTF_HEAVY) s->printf("Z_%s_HEAVY=1\n", up);
         if (zones.z[i].flags & KSLOTF_INV)   s->printf("Z_%s_INV=1\n", up);
         if (zones.z[i].flags & KSLOTF_LINE)  s->printf("Z_%s_LINE=1\n", up);
-        const int bar = kdZoneIsGrid((uint8_t)i) || kdZoneIsIndoor((uint8_t)i)
-                        ? kdPlaceBar(zones.z[i], res[i]) : -1;
-        if (bar >= 0) s->printf("Z_%s_BAR=%d\n", up, bar);
         // The colour NAME, not the level: the shell hands it straight to
         // FBInk's -C, and translating a number there would be a second copy of
         // a mapping that already lives in KindleSlots.h.
@@ -1643,15 +1638,6 @@ static void appendValue(String& p, const KdResolved& r, const KindleSlot& sl,
     p += F("</span>");
 }
 
-/// The bar beside a value (KSLOTF_BAR), `fill` 0..100 or -1 for none. In
-/// the value's class, so its em is the figures' size; the fill grows from
-/// the foot.
-static void appendBar(String& p, const char* valueClass, int fill) {
-    if (fill < 0) return;
-    p += F("<span class=\""); p += valueClass;
-    p += F(" kbar\"><i style=\"height:"); p += fill; p += F("%\"></i></span>");
-}
-
 /// A captioned cell: the label above, the value under it. The grid and the
 /// indoor row are the same shape at two sizes, so they are one function.
 ///
@@ -1679,10 +1665,11 @@ static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
     // The place's own 24 h line behind its value (KSLOTF_LINE, wall grid).
     if (lineZone && (sl.flags & KSLOTF_LINE)) {
         p += F("<img class=\"cl\" src=\"/kindle/graph.bmp?line=1&amp;w=200&amp;h=64&amp;z=");
-        p += lineZone; p += F("\" alt=\"\">");
+        p += lineZone;
+        if (inv) p += F("&amp;inv=1");
+        p += F("\" alt=\"\">");
     }
     appendValue(p, r, sl, valueClass, !capArrow);
-    appendBar(p, valueClass, kdPlaceBar(sl, r));
     p += F("</div>");
     if (inv) p += F("</div>");
 }
@@ -1922,6 +1909,10 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     AsyncResponseStream* s = req->beginResponseStream("text/plain");
     // The line behind the headline, fetched as /kindle/graph.bmp?line=1.
     kdShellInt(s, "HERO_LINE", heroLine ? 1 : 0);
+    // The band behind the headline's 24 h range, when the wall page has one.
+    if (wall && skin.subBand)
+        s->printf("SUB_BAND=%s\nSUB_INK=%s\n", kdShadeFbink(kdSubBandShade(skin.subBand)),
+                  kdShadeFbink(kdSubInkShade(skin.subBand, skin.subInk)));
 
     // ── Outdoor ──
     fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
@@ -2621,13 +2612,15 @@ static void kdWallAt(String& p, const char* cls, int x, int y, int w = 0, int h 
 /// The outdoor mean of the last 24 hours behind the wall page's headline, light
 /// grey and thick, edge to edge of its row: the panel's own graph.bmp?line=1,
 /// which the browser stretches over the row as an image.
-static void appendHeroLine(String& p, const KdFlow& f) {
-    const int H = f.subY - f.heroY;
+static void appendHeroLine(String& p, const KdFlow& f, bool inv, bool band) {
+    // Short of a band by the white between it and the headline's plate.
+    const int H = f.subY - f.heroY - (band ? 8 : 0);
     kdWallAt(p, "", f.colLX, f.heroY, f.headW, H);
     p += F("<img src=\"/kindle/graph.bmp?line=1&amp;w=");
     p += f.headW;
     p += F("&amp;h=");
     p += H;
+    if (inv) p += F("&amp;inv=1");
     p += F("\" width=\"100%\" height=\"100%\" alt=\"\"></div>");
 }
 
@@ -2658,7 +2651,7 @@ static void appendWallForecast(String& p, const KdFlow& f) {
     const unsigned adv = kdAdvanceMille(word);
     int sz = f.fcTextSz;
     if (adv) sz = kdfMax(12, kdfMin(sz, (int)(f.fcTextW * 1000u / adv)));
-    kdWallAt(p, "wfc wfs", f.fcTextX, f.fcTextY, f.fcTextW);
+    kdWallAt(p, "wfc wfs ctr", f.fcTextX, f.fcTextY, f.fcTextW);
     p += F("<span style=\"font-size:"); p += kdPx(sz); p += F("px\">");
     p += word;
     p += F("</span></div>");
@@ -2701,13 +2694,16 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
     p += F("px\">");
 
     // ── The headline, across the page ──
-    if (rd.heroLine) appendHeroLine(p, f);
-    // White on black when it asked to be: a plate under its whole row.
+    // White on black when it asked to be: a plate under its whole row — down
+    // to the band under it, when there is one, with white between the two.
     const bool hInv = zones.z[KZ_HERO].flags & KSLOTF_INV;
+    const bool band = skin.subBand && rd.sub[0];
     if (hInv) {
         kdWallPlate(p, f.colLX - 6, f.groupY - 6, f.headW + 12,
-                    f.headRuleY - 4 - (f.groupY - 6));
+                    (band ? f.subY - 8 : f.headRuleY - 4) - (f.groupY - 6));
     }
+    // The outdoor line behind the figures, on the plate.
+    if (rd.heroLine) appendHeroLine(p, f, hInv, band);
     kdWallAt(p, "lab", f.colLX, f.groupY, f.headW);
     appendEscaped(p, kdGroupOutLabel(zones));
     if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive())
@@ -2722,13 +2718,18 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
         appendValue(p, res[KZ_BIG], zones.z[KZ_BIG], "v2");
     }
     p += F("</div>");
+    if (hInv && band) p += F("</div>");
+    // The 24 h range: on a band across the page in its own shades, centred,
+    // which is the line between the headline and the rest — or under the
+    // headline as on the desk page, with the rule.
+    if (band) kdWallAt(p, "sub ctr wb", 18, f.subY - 6, 564, f.subSz + 12);
+    else if (rd.sub[0]) kdWallAt(p, big ? "sub" : "sub ctr", f.colLX, f.subY, f.headW);
     if (rd.sub[0]) {
-        kdWallAt(p, big ? "sub" : "sub ctr", f.colLX, f.subY, f.headW);
         appendEscaped(p, rd.sub);
         p += F("</div>");
     }
-    if (hInv) p += F("</div>");
-    kdWallRule(p, 18, f.headRuleY, 564, 0);
+    if (hInv && !band) p += F("</div>");
+    if (!band) kdWallRule(p, 18, f.headRuleY, 564, 0);
 
     // ── The grid, on the left ──
     if (f.gridNRows) {
@@ -2755,7 +2756,7 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
     if (f.inValSz1) {
         uint8_t used[KZ_INDOOR_COUNT];
         const int n = kdIndoorUsed(zones, visible, used);
-        kdWallAt(p, "lab", f.inX, f.inLabY, f.inW);
+        kdWallAt(p, "lab ctr", f.inX, f.inLabY, f.inW);
         appendEscaped(p, kdGroupInLabel(zones));
         p += F("</div>");
         for (int i = 0; i < n && i < 3; i++) {
@@ -2769,14 +2770,13 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
                 kdWallPlate(p, f.inX - 6, top, f.inW, y + vsz + 6 - top);
             }
             if (i) {
-                kdWallAt(p, "lab", f.inX, y - f.labSz - 4, f.inW);
+                kdWallAt(p, "lab ctr", f.inX, y - f.labSz - 4, f.inW);
                 appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
                 p += F("</div>");
             }
-            kdWallAt(p, "cv", f.inX, y, f.inW);
+            kdWallAt(p, "cv ctr", f.inX, y, f.inW);
             const char* cls = i == 0 ? "iv iv-1" : "iv";
             appendValue(p, r, sl, cls);
-            appendBar(p, cls, kdPlaceBar(sl, r));
             p += F("</div>");
             if (inv) p += F("</div>");
         }
@@ -2815,7 +2815,7 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
     p += F(".wa{position:absolute;white-space:nowrap;overflow:hidden}"
            ".wl .lab,.wl .head,.wl .sub,.wl .cv,.wfc{line-height:1;margin:0}"
            ".wl .lab,.wl .sub,.wl .slash{color:#000}.lu{text-transform:none}"
-           ".wl .grid{margin-top:0}.wl .grid td{height:auto;vertical-align:top}"
+           ".wl .grid{margin-top:0}.wl .grid td{height:auto;vertical-align:top;text-align:center}"
            ".wl .v1,.wl .v2,.wl .gv,.wl .iv{font-weight:700}"
            ".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}"
            ".wa.wr{height:0;overflow:visible}.wa.wv{width:0;overflow:visible}"
@@ -2828,6 +2828,8 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
     p += st; p += ' '; p += ink;
     p += F("}.wv{border-left:"); p += w; p += F("px ");
     p += st; p += ' '; p += ink;
+    p += F("}.wl .wb{padding-top:.35em;background:"); p += kdShadeCss(kdSubBandShade(skin.subBand));
+    p += F(";color:"); p += kdShadeCss(kdSubInkShade(skin.subBand, skin.subInk));
     p += F("}.wl .fc-t{font-size:"); p += kdPx(f.fcTempSz);
     p += F("px}.wfw{font-size:"); p += kdPx(f.fcWindSz); p += F("px}");
 }
@@ -3092,12 +3094,8 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // Extra bold: the heaviest the face has, thickened by a shadow either side
     // for a face whose bold is its heaviest.
     KD_S(".val-x{font-weight:900;text-shadow:1px 0,-1px 0}")
-    // The bar beside a value, in its size: an outline as tall as the figures,
-    // filled from the foot. White on black inside a place set that way.
-    KD_S(".kbar{display:inline-block;position:relative;width:.2em;height:.72em;"
-         "border:.04em solid;margin-left:.16em}"
-         ".kbar i{position:absolute;bottom:0;width:100%;background:currentColor}"
-         ".inv,.invp{background:#000}.inv *,.wi *{color:#fff!important}")
+    // White on black, for a place set that way.
+    KD_S(".inv,.invp{background:#000}.inv *,.wi *{color:#fff!important}")
 
     // How dark a value is drawn, per place. Black is the default and carries no
     // class at all, so a page nobody has touched emits none of these.
@@ -3432,10 +3430,10 @@ static void handleKindle(AsyncWebServerRequest* req) {
 // FOUR SERIES, AND THE READER CHOOSES THEM. The ring holds TrendRing::MAX_SERIES
 // and each costs RAM all day, so a place's "24 h line" (KSLOTF_LINE) picks
 // one rather than adding to them. In this order, while there is room: the
-// outdoor temperature (the chart, the wall's headline line), then in place
-// order the places that asked for a line or a pressure tendency arrow, then
-// what was always kept — the indoor temperature for the chart, the outdoor
-// pressure and humidity.
+// outdoor temperature (the chart, the wall's headline line), the headline's
+// own reading (its 24 h low-to-high), then in place order the places that
+// asked for a line or a pressure tendency arrow, then what was always kept —
+// the indoor temperature for the chart, the outdoor pressure and humidity.
 struct KdWant { const char* id[TrendRing::MAX_SERIES]; const char* m[TrendRing::MAX_SERIES]; int n; };
 static void __attribute__((noinline)) kdWant(KdWant& w, const char* id, const char* m) {
     if (w.n >= TrendRing::MAX_SERIES || !*id) return;
@@ -3444,10 +3442,16 @@ static void __attribute__((noinline)) kdWant(KdWant& w, const char* id, const ch
     w.id[w.n] = id; w.m[w.n++] = m;
 }
 
+static bool s_slotsLoaded = false;   // at boot — see registerKindleDashboard()
+
 void kindleTrackTrends(bool load) {
-    if (load && configFs()) kdSlotsBegin(*configFs(), outdoorSensorId(), indoorSensorId());
+    if (load && configFs()) {
+        kdSlotsBegin(*configFs(), outdoorSensorId(), indoorSensorId());
+        s_slotsLoaded = true;
+    }
     KdWant w; w.n = 0;
     kdWant(w, outdoorSensorId(), "temperature");
+    if (kdSlots().z[KZ_HERO].used()) kdWant(w, kdSlots().z[KZ_HERO].sensorId, kdSlots().z[KZ_HERO].metric);
     for (const KindleSlot& sl : kdSlots().z)
         if (sl.used() && ((sl.flags & KSLOTF_LINE) ||
                           ((sl.flags & KSLOTF_TREND) && !strcmp(sl.metric, "pressure"))))
@@ -3709,7 +3713,11 @@ void registerKindleDashboard(AsyncWebServer& server) {
     // The two sensor ids seed the defaults, so a device that has never
     // configured a slot gets the page it had before slots existed — built from
     // whichever sensors it was already pointing at.
-    if (configFs()) kdSlotsBegin(*configFs(), outdoorSensorId(), indoorSensorId());
+    //
+    // Not again when setup() already did, before the pipeline started: by
+    // now StorageTask holds fsMutex at times, and a load that timed out on it
+    // would put the defaults over the places the boot read.
+    if (!s_slotsLoaded && configFs()) kdSlotsBegin(*configFs(), outdoorSensorId(), indoorSensorId());
 
     server.on("/kindle/probe", HTTP_GET, handleKindleProbe);
     server.on("/kindle/clear", HTTP_GET, handleKindleClear);
