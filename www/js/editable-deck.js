@@ -6,6 +6,7 @@
  *   • per-card span chips (3 / 4 / 6 / 8 / 12 of 12)
  *   • per-card height chips (auto / S / M / L / XL)
  *   • hide-to-tray + restore + add-from-library
+ *   • optional "group by" (opts.groupBy): a heading row over each group
  *   • live-mode masonry packing (no row-height gaps)
  *   • localStorage persistence per page
  *
@@ -26,10 +27,12 @@
   // A registry's `title` is a module-level literal that its own file evaluates
   // once at load, so it hands us an i18n key rather than text — resolving it
   // there would freeze every card name in the language that loaded first.
-  // Resolve here, at render time.  I18n.t() echoes a key it has no entry for,
+  // Resolve here, at render time. A registry may instead give a function
+  // (title built from a sensor id + a translated label), called each render.  I18n.t() echoes a key it has no entry for,
   // so a registry that supplies plain text still comes back unchanged.
   function metaTitle(meta) {
     var s = (meta && meta.title) || "";
+    if (typeof s === "function") return s();
     if (!window.I18n || !s) return s;
     var out = I18n.t(s);
     return out === s ? s : out;
@@ -67,6 +70,15 @@
       }
     } catch (e) {}
     return defaults.map(function (d) { return { id:d.id, span:d.span }; });
+  }
+
+  function loadFlag(pageId, name) {
+    try { return localStorage.getItem(STORAGE_PREFIX + pageId + "." + name) === "1"; }
+    catch (e) { return false; }
+  }
+  function saveFlag(pageId, name, on) {
+    try { localStorage.setItem(STORAGE_PREFIX + pageId + "." + name, on ? "1" : "0"); }
+    catch (e) {}
   }
 
   function saveCards(pageId, cards) {
@@ -263,8 +275,13 @@
     var defaults  = opts.defaults;
     var toolbarSlot = opts.toolbar; // element to inject Customise/Done/Reset into
     var editingHooks = opts.onEdit || function () {}; // notified when editing toggles
+    // groupBy(cardId) -> { key, label, sub?, icon? } or null (ungrouped).
+    // When on, live mode gathers each group's cards behind one heading row,
+    // groups in the order their first card has; the saved order is untouched.
+    var groupBy = typeof opts.groupBy === "function" ? opts.groupBy : null;
 
     var cards = loadCards(pageId, defaults, registry);
+    var grouped = groupBy ? loadFlag(pageId, "group") : false;
     var editing = false;
     var resizeObserver = null;
 
@@ -352,6 +369,19 @@
             );
           }
         });
+        var grp = null;
+        if (groupBy) {
+          grp = document.createElement("button");
+          grp.type = "button";
+          grp.className = "btn" + (grouped ? " active" : "");
+          grp.setAttribute("aria-pressed", grouped ? "true" : "false");
+          grp.innerHTML = '<span data-icon="layers"></span> ' + esc(edT(opts.groupLabel || "editableDeck.group"));
+          grp.addEventListener("click", function () {
+            grouped = !grouped;
+            saveFlag(pageId, "group", grouped);
+            renderToolbar();
+          });
+        }
         var done = document.createElement("button");
         done.type = "button";
         done.className = "btn primary";
@@ -360,10 +390,32 @@
           editing = false; renderToolbar(); render(); editingHooks(false);
         });
         toolbarSlot.appendChild(badge);
+        if (grp) toolbarSlot.appendChild(grp);
         toolbarSlot.appendChild(reset);
         toolbarSlot.appendChild(done);
       }
       reIcons(toolbarSlot);
+    }
+
+    // Live-mode sequence: the visible cards, or with grouping on, each group's
+    // cards together behind a { head } entry (ungrouped cards get no heading).
+    function liveOrder() {
+      var vis = visibleCards().filter(function (c) { return registry[c.id]; });
+      if (!grouped || !groupBy) return vis;
+      var order = [], byKey = {};
+      vis.forEach(function (c) {
+        var g = groupBy(c.id);
+        var key = g ? "g:" + g.key : "u:" + c.id;
+        if (!byKey[key]) { byKey[key] = { g: g, cards: [] }; order.push(key); }
+        byKey[key].cards.push(c);
+      });
+      var out = [];
+      order.forEach(function (key) {
+        var b = byKey[key];
+        if (b.g) out.push({ head: b.g });
+        out.push.apply(out, b.cards);
+      });
+      return out;
     }
 
     function renderLive() {
@@ -371,9 +423,21 @@
       if (resizeObserver) { try { resizeObserver.disconnect(); } catch (e) {} resizeObserver = null; }
       container.classList.remove("editing");
       container.classList.add("deck", "live");
+      container.classList.toggle("grouped", !!(grouped && groupBy));
       container.innerHTML = "";
 
-      visibleCards().forEach(function (card) {
+      liveOrder().forEach(function (card) {
+        if (card.head) {
+          var head = document.createElement("div");
+          head.className = "deck-slot deck-group-head";
+          head.dataset.span = COLUMNS;
+          head.innerHTML =
+            '<span data-icon="' + esc(card.head.icon || "layers") + '"></span>' +
+            '<span class="deck-group-label">' + esc(card.head.label) + '</span>' +
+            (card.head.sub ? '<span class="deck-group-sub">' + esc(card.head.sub) + '</span>' : "");
+          container.appendChild(head);
+          return;
+        }
         var meta = registry[card.id]; if (!meta) return;
         var slot = document.createElement("div");
         slot.className = "deck-slot";
@@ -419,7 +483,7 @@
     function renderEditing() {
       if (resizeObserver) { try { resizeObserver.disconnect(); } catch (e) {} resizeObserver = null; }
       container.classList.add("deck", "editing");
-      container.classList.remove("live");
+      container.classList.remove("live", "grouped");
       container.innerHTML = "";
       container.style.height = ""; // let CSS grid drive the height
       container.style.position = "";

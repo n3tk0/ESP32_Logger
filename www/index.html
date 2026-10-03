@@ -68,6 +68,10 @@
         <span class="pill mono" id="headerTime">--:--</span>
       </div>
       <div class="topbar-actions">
+        <!-- Appearance: language, accent, density and theme sit in one joined
+             group; quick settings and alerts stand alone; restart is set apart
+             at the end so it is not the neighbour of a harmless toggle. -->
+        <span class="tb-group" role="group" data-i18n-aria-label="chrome.appearance" aria-label="Appearance">
         <!-- title/aria-label are kept in sync dynamically by I18n._syncToggleBtn()
              (needs the {next} language name interpolated, which the generic
              data-i18n-title attribute walk in I18n.apply() cannot do) rather
@@ -103,6 +107,13 @@
                 aria-label="Toggle compact density">
           <span data-icon="rows-3"></span>
         </button>
+        <button type="button" class="icon-btn" id="themeToggleBtn"
+                data-click="quickThemeToggle"
+                title="Toggle dark/light theme"
+                aria-label="Toggle dark/light theme">
+          <span data-icon="moon"></span>
+        </button>
+        </span>
         <button type="button" class="icon-btn" id="quickSettingsBtn"
                 data-click="quickSettingsOpen"
                 data-i18n-title="chrome.quickSettings"
@@ -111,17 +122,12 @@
                 aria-label="Open quick settings">
           <span data-icon="sliders-horizontal"></span>
         </button>
-        <button type="button" class="icon-btn" id="themeToggleBtn"
-                data-click="quickThemeToggle"
-                title="Toggle dark/light theme"
-                aria-label="Toggle dark/light theme">
-          <span data-icon="moon"></span>
-        </button>
         <button type="button" class="icon-btn" id="bellBtn" data-i18n-aria-label="chrome.notifications" aria-label="Notifications">
           <span data-icon="bell"></span>
           <span class="nbadge" id="topbar-alert-badge" style="display:none">0</span>
         </button>
-        <button type="button" class="icon-btn" id="topbarRestartBtn"
+        <span class="tb-sep" aria-hidden="true"></span>
+        <button type="button" class="icon-btn danger" id="topbarRestartBtn"
                 data-click="showPopup" data-args='["restartPopup"]'
                 data-i18n-aria-label="chrome.restartDevice"
                 data-i18n-title="chrome.restartDevice"

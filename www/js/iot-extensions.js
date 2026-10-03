@@ -368,6 +368,7 @@
           '<div class="page-sub" id="ov-sub">' + esc(ieT("iotExt.overviewSubLoading")) + '</div>' +
         '</div>' +
         '<div class="page-actions">' +
+          '<button class="btn" id="ovRefreshBtn" title="' + esc(ieT("iotExt.refreshReadingsHint")) + '"><span data-icon="refresh-cw"></span> ' + esc(ieT("iotExt.refreshReadings")) + '</button>' +
           '<div class="page-actions-deck" data-role="deck-toolbar"></div>' +
           '<button class="btn" id="ovAddSensorBtn"><span data-icon="plus"></span> ' + esc(ieT("iotExt.addSensor")) + '</button>' +
         '</div>' +
@@ -382,6 +383,18 @@
 
     var addBtn = document.getElementById("ovAddSensorBtn");
     if (addBtn) addBtn.addEventListener("click", function () { openWizard(); });
+    var refBtn = document.getElementById("ovRefreshBtn");
+    if (refBtn) refBtn.addEventListener("click", function () {
+      if (refBtn.disabled) return;
+      refBtn.disabled = true;
+      refBtn.classList.add("busy");
+      // Sparklines are drawn once per card; forget that so they refetch too.
+      [].forEach.call(document.querySelectorAll("#page-overview svg.metric-spark-bg"), function (svg) { svg.dataset.drawnFor = ""; });
+      populateOverview(true).then(function () {
+        refBtn.disabled = false;
+        refBtn.classList.remove("busy");
+      });
+    });
 
     _overviewDeck = window.EditableDeck.mount({
       pageId:   "overview",
@@ -389,6 +402,12 @@
       registry:  OVERVIEW_REGISTRY,
       defaults:  OVERVIEW_DEFAULTS,
       toolbar:   page.querySelector('[data-role="deck-toolbar"]'),
+      // "Group by sensor": one heading per sensor over its metric cards.
+      groupBy:   function (cardId) {
+        var src = _ovCardSensor[cardId];
+        return src ? { key: src.id, label: src.id, sub: src.name, icon: "cpu" } : null;
+      },
+      groupLabel: "iotExt.groupBySensor",
       onEdit:    function () { /* re-apply cached data after render */
         if (_overviewLastData)   _applyOverviewData(_overviewLastData);
         if (_overviewStatusData) ovFillWaterCached(_overviewStatusData);
@@ -425,11 +444,13 @@
   }
 
   /** Populate Overview with real /api/latest data. */
-  function populateOverview() {
+  // `force` (the Refresh button) skips getSensors()' short cache. Resolves
+  // once readings and the sensor list are both in, failed or not.
+  function populateOverview(force) {
     // Subtitle is updated below once getSensors() resolves — /api/status does
     // not include a sensorCount field so we cannot read it here up-front.
 
-    fetchWithTimeout("/api/latest", {}, 15000)
+    var pLatest = fetchWithTimeout("/api/latest", {}, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
@@ -442,7 +463,7 @@
     ovFillAlertFeed();
 
     // Fetch sensor list — populates pickers, dynamic cards, AND diagnostics
-    getSensors()
+    var pSensors = getSensors(force ? { maxAgeMs: 0 } : undefined)
       .then(function (data) {
         var sensors = (data && data.sensors) || [];
         _overviewSensorList = sensors;
@@ -461,6 +482,7 @@
           grid.appendChild(emptyState({ icon: "heart-pulse", title: ieT("iotExt.unableToLoad"), msg: ieT("iotExt.couldNotReachSensors") }));
         }
       });
+    return Promise.all([pLatest, pSensors]);
   }
 
   // ── Background sparkline drawer for Overview metric tiles ──────────────────
@@ -506,6 +528,11 @@
           }
         });
         if (ys.length < 2) return;
+        var meta = ovMetricMeta(metric);
+        var lo = min, hi = max;
+        // Counts and concentrations start at zero, so a small wobble is not
+        // drawn as a cliff (PM2.5 1.5 -> 1.2 filled the whole card).
+        if (meta.z && min > 0) min = 0;
         var range = max - min; if (range < 1e-9) range = 1;
         var stepX = 100 / (ys.length - 1), line = "", area = "M 0,36";
         for (var j = 0; j < ys.length; j++) {
@@ -518,6 +545,12 @@
         svg.innerHTML =
           '<path d="' + area + '" fill="currentColor" opacity="0.13"></path>' +
           '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>';
+        var card = svg.closest ? svg.closest(".ov-metric-card") : null;
+        var scale = card && card.querySelector(".ov-spark-scale");
+        if (scale) {
+          scale.textContent = "↓" + ovFmtValue(metric, lo) + "  ↑" + ovFmtValue(metric, hi) + " · " + ieT("iotExt.sparkWindow");
+          scale.title = ieT("iotExt.sparkScaleHint");
+        }
       })
       .catch(function () { svg.dataset.drawnFor = ""; });  // allow retry on failure
   }
@@ -778,23 +811,72 @@
 
   // ── Sensor picker & dynamic card helpers ────────────────────────────────────
 
-  function _metricIcon(metric) {
-    var m = (metric || "").toLowerCase();
-    if (m === "temperature" || m === "temp") return "thermometer";
-    if (m === "humidity" || m === "hum") return "droplet";
-    if (m === "pressure" || m === "pres") return "gauge";
-    if (m === "voltage" || m === "volt") return "zap";
-    if (m === "current" || m === "amp") return "zap";
-    if (m === "power" || m === "watt") return "zap";
-    if (m.indexOf("pm") !== -1 || m === "dust") return "wind";
-    if (m === "co2" || m === "eco2") return "cloud";
-    if (m === "tvoc" || m === "voc") return "wind";
-    if (m === "rain" || m === "rainfall") return "cloud-rain";
-    if (m === "wind" || m === "windspeed") return "wind";
-    if (m === "light" || m === "lux") return "sun";
-    if (m === "soil" || m === "moisture") return "droplets";
-    return "activity";
+  // How each metric is shown on an Overview card: icon, decimals, display
+  // unit (null keeps the one the sensor reports, prettified) and whether its
+  // sparkline starts at zero (counts / concentrations). The label is i18n key
+  // iotExt.m_<metric>; a metric with no key is shown as "Some metric".
+  // Decimals follow the Kindle table (src/web/KindleSlots.h), one more for PM.
+  var OV_METRIC = {
+    temperature:     { i: "thermometer", d: 1, u: "°C" },
+    humidity:        { i: "droplet",     d: 0, u: "%" },
+    humidity_amb:    { i: "droplet",     d: 0, u: "%" },
+    dew_point:       { i: "droplets",    d: 1, u: "°C" },
+    pressure:        { i: "gauge",       d: 0, u: "hPa" },
+    iaq:             { i: "heart-pulse", d: 0, u: "",    z: 1 },
+    aqi:             { i: "heart-pulse", d: 0, u: "",    z: 1 },
+    tvoc:            { i: "cloud-fog",   d: 0, u: "ppb", z: 1 },
+    tvoc_est:        { i: "cloud-fog",   d: 0, u: "ppb", z: 1 },
+    co2:             { i: "cloud-fog",   d: 0, u: "ppm", z: 1 },
+    eco2:            { i: "cloud-fog",   d: 0, u: "ppm", z: 1 },
+    pm1:             { i: "wind",        d: 1, u: "µg/m³", z: 1 },
+    pm25:            { i: "wind",        d: 1, u: "µg/m³", z: 1 },
+    pm4:             { i: "wind",        d: 1, u: "µg/m³", z: 1 },
+    pm10:            { i: "wind",        d: 1, u: "µg/m³", z: 1 },
+    lux:             { i: "sun",         d: 0, u: "lx",  z: 1 },
+    uv_index:        { i: "sun",         d: 1, u: "",    z: 1 },
+    rain_rate:       { i: "cloud-rain",  d: 1, u: "mm/h", z: 1 },
+    rain_total:      { i: "cloud-rain",  d: 1, u: "mm",  z: 1 },
+    wind_speed:      { i: "wind",        d: 1, u: "m/s", z: 1 },
+    wind_direction:  { i: "wind",        d: 0, u: "°" },
+    moisture_pct:    { i: "droplets",    d: 0, u: "%" },
+    flow_rate:       { i: "droplets",    d: 1, u: "L/min", z: 1 },
+    volume:          { i: "droplets",    d: 1, u: "L",   z: 1 },
+    voltage_vrms:    { i: "zap",         d: 1, u: "V" },
+    current_arms:    { i: "zap",         d: 2, u: "A",   z: 1 },
+    battery_voltage: { i: "battery",     d: 2, u: "V" },
+    battery_percent: { i: "battery",     d: 0, u: "%" },
+    rssi:            { i: "wifi",        d: 0, u: "dBm" },
+  };
+  var OV_UNIT = { "C": "°C", "ug/m3": "µg/m³", "deg": "°", "Ohm": "Ω", "lux": "lx" };
+
+  function ovMetricMeta(metric) { return OV_METRIC[metric] || {}; }
+  function ovMetricLabel(metric) {
+    var key = "iotExt.m_" + metric;
+    var out = ieT(key);
+    if (out && out !== key) return out;
+    var s = String(metric || "").replace(/_/g, " ");
+    return s.charAt(0).toUpperCase() + s.slice(1);
   }
+  function ovUnit(metric, raw) {
+    var u = ovMetricMeta(metric).u;
+    if (u !== undefined) return u;
+    return OV_UNIT[raw] || raw || "";
+  }
+  function ovFmtValue(metric, v) {
+    var n = Number(v);
+    if (isNaN(n)) return String(v);
+    var d = ovMetricMeta(metric).d;
+    if (d !== undefined) return n.toFixed(d);
+    var s = n.toFixed(2);
+    return s.indexOf(".") !== -1 ? s.replace(/\.?0+$/, "") : s;
+  }
+  function _metricIcon(metric) {
+    var meta = ovMetricMeta((metric || "").toLowerCase());
+    return meta.i || "activity";
+  }
+  // cardId -> { id, name } of the sensor behind a dynamic metric card, for
+  // the deck's "group by sensor".
+  var _ovCardSensor = {};
 
   function _populateSensorPickers(sensors) {
     var picks = document.querySelectorAll(".ov-sensor-pick");
@@ -828,7 +910,7 @@
     sensors.forEach(function (s) {
       if (!s || s.status === "disabled") return;
       (s.metrics || []).forEach(function (m) {
-        valid["sensor__" + s.id + "__" + m] = { name: s.name || s.id, metric: m, id: s.id };
+        valid["sensor__" + s.id + "__" + m] = { name: s.name || "", metric: m, id: s.id };
       });
     });
 
@@ -840,6 +922,7 @@
     Object.keys(OVERVIEW_REGISTRY).forEach(function (k) {
       if (k.indexOf("sensor__") === 0 && !valid[k]) {
         delete OVERVIEW_REGISTRY[k];
+        delete _ovCardSensor[k];
         changed++;
       }
     });
@@ -849,18 +932,23 @@
       if (OVERVIEW_REGISTRY[cardId]) return;
       changed++;
       var sName = valid[cardId].name, m = valid[cardId].metric, sId = valid[cardId].id;
+      _ovCardSensor[cardId] = { id: sId, name: sName };
       OVERVIEW_REGISTRY[cardId] = {
-        title: sName + " · " + m,
+        // The sensor's id is the name its owner gave it ("outside"); the
+        // plugin name ("Remote node") only says what kind of device it is.
+        // A function, so the Customise thumbnails follow a language switch.
+        title: function () { return sId + " · " + ovMetricLabel(m); },
         icon: _metricIcon(m),
         render: function () {
           return '<div class="card ov-metric-card">' +
             '<div class="card-head">' +
-              '<div class="card-title"><span data-icon="' + esc(_metricIcon(m)) + '"></span> ' + esc(m) + '</div>' +
-              '<span class="mono" style="font-size:11px;color:var(--text-3)">' + esc(sName) + '</span>' +
+              '<div class="card-title" title="' + esc(m) + '"><span data-icon="' + esc(_metricIcon(m)) + '"></span> ' + esc(ovMetricLabel(m)) + '</div>' +
+              '<span class="ov-metric-src" title="' + esc(sName) + '">' + esc(sId) + '</span>' +
             '</div>' +
             '<div class="card-body ov-metric-body">' +
               '<span class="ov-metric-value" id="ov-sm-' + esc(cardId) + '-v">—</span>' +
               '<span class="ov-metric-unit" id="ov-sm-' + esc(cardId) + '-u"></span>' +
+              '<span class="ov-spark-scale"></span>' +
             '</div>' +
             '<svg class="metric-spark-bg ov-card-spark" data-sensor="' + esc(sId) + '" data-metric="' + esc(m) + '" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg>' +
           '</div>';
@@ -897,18 +985,9 @@
       var vEl = document.getElementById("ov-sm-" + cardId + "-v");
       var uEl = document.getElementById("ov-sm-" + cardId + "-u");
       if (vEl && it.value !== undefined && it.value !== null) {
-        var val = Number(it.value);
-        if (!isNaN(val)) {
-          var s = val.toFixed(2);
-          if (s.indexOf('.') !== -1) {
-            s = s.replace(/\.?0+$/, '');
-          }
-          vEl.textContent = s;
-        } else {
-          vEl.textContent = String(it.value);
-        }
+        vEl.textContent = ovFmtValue(it.metric, it.value);
       }
-      if (uEl && it.unit) uEl.textContent = it.unit;
+      if (uEl) uEl.textContent = ovUnit(it.metric, it.unit);
     });
 
     // Draw background sparklines for any dynamic sensor-metric cards on the deck
@@ -1454,12 +1533,12 @@
 
       return '<div class="health-tile' + (state === "err" ? " err" : state === "warn" ? " warn" : "") + '">' +
         '<div class="health-tile-head">' +
-          '<div class="health-name"><span data-icon="cpu"></span>' + esc(s.type || s.id) + '</div>' +
+          '<div class="health-name" title="' + esc(s.type || "") + '"><span data-icon="cpu"></span>' + esc(s.id || s.type) + '</div>' +
           '<span class="badge ' + (state === "ok" ? "ok" : state === "err" ? "err" : state === "warn" ? "warn" : "dim") + '">' + state.toUpperCase() + '</span>' +
         '</div>' +
-        '<div class="mono" style="font-size:11px;color:var(--text-3)">' + esc(s.id) + ' · ' + esc(s.interface || "—") + '</div>' +
+        '<div style="font-size:11px;color:var(--text-3)">' + esc(s.name || s.type || "") + (s.interface ? ' · ' + esc(s.interface) : '') + '</div>' +
         '<div>' +
-          '<div class="mono" style="font-size:10px;color:var(--text-3);margin-bottom:4px">24h uptime · ' + uptime.toFixed(1) + '%</div>' +
+          '<div class="mono" style="font-size:11px;color:var(--text-3);margin-bottom:4px">24h uptime · ' + uptime.toFixed(1) + '%</div>' +
           '<div class="health-uptime-bar" aria-label="24-hour uptime">' + uptimeBar(uptime, state) + '</div>' +
         '</div>' +
         '<div class="health-stats">' +
