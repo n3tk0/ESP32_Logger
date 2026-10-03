@@ -4579,7 +4579,12 @@ draw_forecast_body() {
             [ "$tsz" -lt $(( FC_TEXT_SZ * 2 / 5 )) ] && tsz=$(( FC_TEXT_SZ * 2 / 5 ))
             ty=$(( FC_TEXT_Y + (FC_TEXT_SZ - tsz) / 2 ))
         fi
-        draw_text_reg "$FC_TEXT_X" "$ty" "$tsz" "BLACK" "$FC_SUMMARY"
+        # Bold on the wall page, where it is read from across the room.
+        if [ "${WALL:-0}" = "1" ]; then
+            draw_text_bold "$FC_TEXT_X" "$ty" "$tsz" "BLACK" "$FC_SUMMARY"
+        else
+            draw_text_reg "$FC_TEXT_X" "$ty" "$tsz" "BLACK" "$FC_SUMMARY"
+        fi
         draw_text_bold "$FC_TEMP_X" "$FC_TEMP_Y" "$FC_TEMP_SZ" "BLACK" "${FC_HIGH}°/${FC_LOW}°"
         # THE AGE BELONGS ON THIS LINE. The page draws "вятър 5 km/h · 8 мин"
         # and the panel drew only the wind, so the one thing that says whether

@@ -368,7 +368,7 @@ tendency, **extra bold** (the bold face drawn twice a hair apart on the panel,
 weight 900 in the browser), **inverted colours** (white on a black plate the
 size of the place) and, for a grid or indoor place whose metric has a scale,
 **a bar** beside the value that fills as the reading gets better (humidity best
-at 40–60 %, the AQI, CO₂, TVOC and dust best low; `kdBarScore()`) — and **how
+at 40–60 %, the AQI, the BME680's IAQ, CO₂, TVOC and dust best low; `kdBarScore()`) — and **how
 dark it is drawn**: black, dark, mid or light grey. Four
 levels rather than a colour picker, because the panel has sixteen real grey
 levels and the ones worth having are the ones far enough apart to render solid,

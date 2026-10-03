@@ -357,7 +357,7 @@ function kdPvPlateEnd() { kdPvInvOn = false; }
 // whole numbers, as the collector works it out.
 var KD_BAR_SCALES = { humidity:[40, 10], humidity_amb:[40, 10], aqi:[0, 500],
   co2:[400, 2000], eco2:[400, 2000], tvoc:[0, 2200], pm1:[0, 75], pm25:[0, 75],
-  pm4:[0, 150], pm10:[0, 150], battery_percent:[100, 0] };
+  pm4:[0, 150], pm10:[0, 150], battery_percent:[100, 0], iaq:[0, 500] };
 function kdPvBarScore(metric, v) {
   var sc = KD_BAR_SCALES[metric];
   if (!sc || isNaN(v)) return -1;
@@ -1344,7 +1344,7 @@ function kdRenderPreview() {
     var fsz = L.fcTextW ? Math.min(L.fcTextSz, kdQ(L.fcTextW * 1000, kdAdvanceMille("Showers")))
                         : L.fcTextSz;
     h += kdT(L.fcTextX, L.fcTextY + kdQ(L.fcTextSz - fsz, 2), fsz, "Showers",
-             { bold:!!(bold & 0x0040) });
+             { bold:L.wall || !!(bold & 0x0040) });
     // The wall page sets the high and low by what they print: kdWallFcFit().
     var tsz = L.fcTempSz;
     if (L.wall) {

@@ -2645,7 +2645,7 @@ static void appendWallForecast(String& p, const KdFlow& f) {
     const unsigned adv = kdAdvanceMille(word);
     int sz = f.fcTextSz;
     if (adv) sz = kdfMax(12, kdfMin(sz, (int)(f.fcTextW * 1000u / adv)));
-    kdWallAt(p, "wfc", f.fcTextX, f.fcTextY, f.fcTextW);
+    kdWallAt(p, "wfc wfs", f.fcTextX, f.fcTextY, f.fcTextW);
     p += F("<span style=\"font-size:"); p += kdPx(sz); p += F("px\">");
     p += word;
     p += F("</span></div>");
@@ -2806,7 +2806,7 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
            ".wl .v1,.wl .v2,.wl .gv,.wl .iv{font-weight:700}"
            ".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}"
            ".wa.wr{height:0;overflow:visible}.wa.wv{width:0;overflow:visible}"
-           ".foot{margin-top:0}.wl .fc-t{font-weight:700;margin:0}.wl .wfw{color:#444;line-height:1.33}"
+           ".foot{margin-top:0}.wl .fc-t{font-weight:700;margin:0}.wl .wfw{color:#444;line-height:1.33}.wfs{font-weight:700}"
            ".wl{position:relative;width:");
     p += kdPx(564);
     p += F("px}.wl .grid .lab{margin-bottom:"); p += kdPx(4);

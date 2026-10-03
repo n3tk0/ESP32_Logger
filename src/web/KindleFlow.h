@@ -181,6 +181,7 @@ static inline int kdBarScore(const char* metric, long v) {
         { "aqi", 0, 500 }, { "co2", 400, 2000 }, { "eco2", 400, 2000 },
         { "tvoc", 0, 2200 }, { "pm1", 0, 75 }, { "pm25", 0, 75 },
         { "pm4", 0, 150 }, { "pm10", 0, 150 }, { "battery_percent", 100, 0 },
+        { "iaq", 0, 500 },   // the BME680's: 0..500, lower is cleaner, as AQI
     };
     if (!metric) return -1;
     for (const Scale& sc : kScales) {
