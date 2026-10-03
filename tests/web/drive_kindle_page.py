@@ -971,6 +971,42 @@ with sync_playwright() as p:
     check(pg.is_visible("#kd-pkg-stop") and not pg.is_visible("#kd-pkg-offer"),
           "  and Stop offering replaces Offer")
 
+    # A NEW UPLOAD WHILE ONE IS OFFERED: the card's five-second reread was
+    # answered slowly by a collector busy with the upload, landed after the
+    # upload's own reread, and drew the old package as stored and offered —
+    # the upload looked as if it had not happened. Here that reread is held
+    # back and answered, stale, after the upload is done.
+    held = []
+    def hold_pkg(route):
+        if route.request.method == "GET" and not held:
+            held.append(route)
+        else:
+            route.continue_()
+    pg.route("**/api/kindle/pkg", hold_pkg)
+    pg.wait_for_timeout(5600)
+    check(len(held) == 1, "  the card rereads itself while a reader is pending")
+    stale = pg.evaluate("fetch('/api/kindle/pkg').then(function(r){return r.text()})")
+    newer = os.path.join(tmpd, "esp32dash-kindle-t3.0.tar")
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+        for name, data in (("esp32dash/VERSION", b"t3.0\n"),
+                           ("esp32dash/update_dash.sh", b"#!/bin/sh\n")):
+            ti = tarfile.TarInfo(name)
+            ti.size = len(data)
+            tf.addfile(ti, io.BytesIO(data))
+    with open(newer, "wb") as f:
+        f.write(buf.getvalue())
+    pg.set_input_files("#kd-pkg-file", newer)
+    pg.wait_for_timeout(1200)
+    if held:
+        held[0].fulfill(status=200, content_type="application/json", body=stale)
+    pg.wait_for_timeout(500)
+    pg.unroute("**/api/kindle/pkg", hold_pkg)
+    check("Stored: t3.0" in pg.inner_text("#kd-pkg") and "Not offered" in pg.inner_text("#kd-pkg"),
+          "  an upload while offering shows the new package at once, whatever answers late")
+    pg.click("#kd-pkg-offer")
+    pg.wait_for_timeout(1000)
+
     pg.click("#kd-pkg-stop")
     pg.wait_for_timeout(1000)
     mk = pg.evaluate("fetch('/__mock/kpkg').then(function(r){return r.json()})")

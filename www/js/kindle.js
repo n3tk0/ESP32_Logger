@@ -2435,6 +2435,7 @@ function kindleDefaults() {
 var kdPkg = null;          // last GET /api/kindle/pkg, or null
 var kdPkgTimer = null;
 var kdPkgBusy = false;     // an upload is in flight
+var kdPkgSeq = 0;          // the latest kdPkgLoad(); older answers are dropped
 
 // The reasons the collector and the readers give, by their words.
 var KD_PKG_ERRS = {
@@ -2466,8 +2467,15 @@ function kdPkgActive() {
   });
 }
 
+// ONLY THE LATEST ANSWER IS DRAWN. While a package is offered the card is
+// reread every five seconds, and the collector answers that read slowly while
+// it is taking an upload — so it used to land after the read the upload made,
+// draw the old package as still stored and offered, and stop following (the
+// new one is not offered, so nothing is "active"). The upload looked as if it
+// had not happened until it was made a second time.
 function kdPkgLoad() {
   if (kdPkgTimer) { clearTimeout(kdPkgTimer); kdPkgTimer = null; }
+  var seq = ++kdPkgSeq;
   return fetchWithTimeout("/api/kindle/pkg", {}, 15000)
     .then(function (r) {
       if (r.status === 404) return null;
@@ -2475,13 +2483,14 @@ function kdPkgLoad() {
       return r.json();
     })
     .then(function (d) {
+      if (seq !== kdPkgSeq) return;
       // A build without it answers 404; anything that is not this object
       // is treated the same way rather than drawn half.
       kdPkg = (d && typeof d.sd === "boolean") ? d : null;
       kdPkgRender();
       kdPkgSchedule();
     })
-    .catch(function () { kdPkgSchedule(); });
+    .catch(function () { if (seq === kdPkgSeq) kdPkgSchedule(); });
 }
 
 // While a reader is working towards the package, follow it; otherwise the
@@ -2491,6 +2500,8 @@ function kdPkgSchedule() {
   if (!kdPkgActive()) return;
   kdPkgTimer = setTimeout(function () {
     kdPkgTimer = null;
+    // Not during an upload: it rereads the card itself when it is done.
+    if (kdPkgBusy) { kdPkgSchedule(); return; }
     if (currentPage === "settings_kindle") kdPkgLoad();
   }, 5000);
 }
