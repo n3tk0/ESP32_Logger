@@ -12,6 +12,7 @@
 #include <string.h>
 #include <time.h>
 #include "../utils/JsonIO.h"
+#include "../utils/Utf8Clip.h"
 
 // Every write in this file runs under fsMutex: datalogAppend() and
 // datalogColsSaveIfLearned() under the caller's, datalogColsFromJson()
@@ -64,10 +65,17 @@ uint8_t onCount() {
 void setCol(DatalogCol& c, const char* s, const char* m, const char* l) {
     c.on = onCount() < DL_MAX_COLS;     // before c counts: s_n is not bumped yet
     c.agg = DL_AGG_AVG;
+    // Kept on a whole letter (Utf8Clip.h): a sensor id cut in the middle of
+    // one went to the page as U+FFFD and came back as another byte, and the
+    // column no longer matched its readings. learn() compares the readings'
+    // id clipped the same way.
     strlcpy(c.sensor, s ? s : "", sizeof(c.sensor));
+    utf8ClipTail(c.sensor);
     strlcpy(c.metric, m ? m : "", sizeof(c.metric));
+    utf8ClipTail(c.metric);
     if (l && *l) strlcpy(c.label, l, sizeof(c.label));
     else snprintf(c.label, sizeof(c.label), "%s_%s", c.sensor, c.metric);
+    utf8ClipTail(c.label);
 }
 
 // Which metric is logged in which column, and how it is combined; labels are
@@ -285,12 +293,17 @@ int datalogColsAggs(uint8_t* out, int max, uint32_t* rev) {
 
 int datalogColsLearn(const char* sensor, const char* metric) {
     if (!sensor || !metric) return -1;
+    // As setCol() keeps them: cut to the buffer on a whole letter.
+    char sid[sizeof(DatalogCol::sensor)], mid[sizeof(DatalogCol::metric)];
+    strlcpy(sid, sensor, sizeof(sid));
+    utf8ClipTail(sid);
+    strlcpy(mid, metric, sizeof(mid));
+    utf8ClipTail(mid);
     ColsLock g;
     int col = 0;                        // position among the logged columns
     for (uint8_t i = 0; i < s_n; i++) {
         const DatalogCol& c = s_cols[i];
-        if (strncmp(c.sensor, sensor, sizeof(c.sensor) - 1) == 0 &&
-            strncmp(c.metric, metric, sizeof(c.metric) - 1) == 0)
+        if (strcmp(c.sensor, sid) == 0 && strcmp(c.metric, mid) == 0)
             return c.on ? col : -1;
         col += c.on;
     }
@@ -442,7 +455,12 @@ int datalogAppend(fs::FS& fs, const char* header, const char* lines,
 
     File f = fs.open(path, FILE_APPEND);
     if (!f) { Serial.printf("[datalog] cannot open %s\n", path); return -1; }
-    const size_t before = f.size();
+    // NOT f.size() when the file is new: core 2.0.x fills a File's size from
+    // a stat() at open, which fails for a file that open() is creating, and
+    // returns whatever that failed stat left — so the header was skipped and
+    // the next write, finding a row where the header should be, moved the
+    // file aside. `size` is 0 for a missing, archived or empty file.
+    const size_t before = size ? f.size() : 0;
     if (before == 0) { f.print(header); f.print("\r\n"); }
 
     int written = 0;
