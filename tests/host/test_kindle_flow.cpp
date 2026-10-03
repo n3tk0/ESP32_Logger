@@ -106,7 +106,7 @@ static void test_the_ordinary_page_keeps_its_sections() {
     CHECK_EQ(f.rule3Y, 552);
     CHECK_EQ(f.wkRuleY, 676);
     CHECK_EQ(f.heroSz, 88);
-    CHECK_EQ(f.bigSz, 44);
+    CHECK_EQ(f.bigSz, 52);
     CHECK_EQ(f.clSize, 96);
     CHECK_EQ(f.labSz, 14);
     CHECK_EQ(f.subY, 128);
@@ -222,7 +222,7 @@ static void test_a_wide_reading_fits_its_column() {
     ord.heroAdv = (uint16_t)kdFlowFieldAdvance("8.4", "\xC2\xB0", false);
     ord.bigAdv  = (uint16_t)kdFlowFieldAdvance("71", "%", false);
     CHECK_EQ(kdFlowCompute(ord).heroSz, 88);
-    CHECK_EQ(kdFlowCompute(ord).bigSz, 44);
+    CHECK_EQ(kdFlowCompute(ord).bigSz, 52);
 
     KdFlowIn in = defaultPage();
     in.heroAdv = (uint16_t)T;
@@ -235,9 +235,9 @@ static void test_a_wide_reading_fits_its_column() {
     KdFlowIn plain = defaultPage();
     CHECK_EQ(f.inValSz1, kdFlowCompute(plain).inValSz1);
 
-    // The humidity sized for two figures keeps the layout's 44 whatever it
-    // reads, and the headline, by what it prints, takes what is left: 77 for
-    // "21.7°", 67 for "-38.8°". It used to be the other way round, and the
+    // The humidity sized for two figures keeps the layout's 52 whatever it
+    // reads, and the headline, by what it prints, takes what is left: 71 for
+    // "21.7°", 62 for "-38.8°". It used to be the other way round, and the
     // humidity went down to 28 and could not be read.
     const char* temps[] = { "-38.8", "-0.4", "8.4", "21.7", "39.9" };
     const char* hums[]  = { "5", "37", "99" };
@@ -247,7 +247,7 @@ static void test_a_wide_reading_fits_its_column() {
         k.bigAdv    = (uint16_t)kdFlowFieldAdvance(hu, "%", false);
         k.bigFitAdv = (uint16_t)kdFlowPairAdvance("humidity", hu, "%", false);
         const KdFlow kf = kdFlowCompute(k);
-        CHECK_EQ(kf.bigSz, 44);
+        CHECK_EQ(kf.bigSz, KDF_BIG_SZ);
         CHECK(kf.heroSz > kf.bigSz && kf.heroSz <= 88);
         CHECK(kf.heroSz * (int)k.heroAdv / 1000 + kf.headGap + kf.slashW
               + kf.bigSz * (int)k.bigFitAdv / 1000 <= kf.colLW);
@@ -257,7 +257,7 @@ static void test_a_wide_reading_fits_its_column() {
     year.bigAdv    = (uint16_t)kdFlowFieldAdvance("37", "%", false);
     year.bigFitAdv = (uint16_t)kdFlowPairAdvance("humidity", "37", "%", false);
     const KdFlow y = kdFlowCompute(year);
-    CHECK_EQ(y.heroSz, 77);
+    CHECK_EQ(y.heroSz, 71);
     // "100%" is wider than it was sized for: both give a little, it fits.
     KdFlowIn fog = year;
     fog.bigAdv = (uint16_t)kdFlowFieldAdvance("100", "%", false);
@@ -754,6 +754,150 @@ static void test_page_css() {
     CHECK_EQ(kdFlowHtmlChartH(kdFlowCompute(defaultPage())), 220 - 50);
 }
 
+// ---------------------------------------------------------------------------
+// The wall page
+// ---------------------------------------------------------------------------
+static KdFlowIn wallPage() {
+    KdFlowIn in = defaultPage();
+    in.wall = true;
+    in.chart = false;
+    in.week = false;
+    in.forecast = true;
+    in.clock = true;
+    in.sub = true;
+    in.heroAdv = (uint16_t)kdFlowWorstAdvance("temperature", "-38.8", "\xC2\xB0", false);
+    in.bigAdv  = (uint16_t)kdFlowPairAdvance("humidity", "37", "%", false);
+    return in;
+}
+
+/// Every block in its own band, top to bottom, none over the next.
+static void checkWallStacks(const KdFlow& f) {
+    CHECK(f.wall);
+    CHECK(!f.chart && !f.week);
+    CHECK(f.heroY + f.heroSz <= f.subY);
+    CHECK(f.subY < f.headRuleY);   // the line under it, when it has one, above the rule
+    CHECK(f.headRuleY < f.gridY);
+    if (f.gridNRows)
+        CHECK(f.gridY + (f.gridNRows - 1) * f.gridRowH + f.labSz + 4 + f.gridValSz
+              <= f.rule3Y);
+    if (f.inValSz1) {
+        CHECK(f.inVcol);
+        CHECK(f.inVal3Y >= f.inVal2Y && f.inVal2Y > f.inValY);
+    }
+    CHECK(f.inValY + f.inValSz1 <= f.rule3Y);
+    if (f.clock) {
+        CHECK(f.clY + f.clH <= f.footY);
+        // Its box on the screen, and in the middle of the band when alone.
+        CHECK(f.clX >= 18 && f.clX + f.clW <= 582);
+        if (!f.sep2H) CHECK_EQ(f.clX - 18, 582 - (f.clX + f.clW));
+    }
+    if (f.forecast) {
+        CHECK(f.fcWindY + f.fcWindSz <= f.footY);
+        // The word in the heading's place, the large icon under it with the
+        // wind's three lines beside it, the high and low under the icon at no
+        // more than the band leaves.
+        CHECK(f.fcTextY + f.fcTextSz <= f.fcIconY);
+        CHECK(f.fcTextX + f.fcTextW <= 582);
+        CHECK(f.fcWindX >= f.fcIconX + KDF_WALL_FC_ICON);
+        CHECK(f.fcWindY >= f.fcIconY);
+        CHECK(f.fcWindY + 3 * f.fcWindSz + 2 * 6 <= f.fcIconY + KDF_WALL_FC_ICON);
+        CHECK(f.fcTempY >= f.fcIconY + KDF_WALL_FC_ICON);
+        CHECK(f.fcTempSz <= kdWallFcTempMax(f));
+        CHECK(kdWallFcTempMax(f) >= 50);
+        CHECK(f.fcTempY + kdWallFcTempMax(f) <= f.footY);
+        CHECK(f.fcIconX >= (f.sep2H ? f.sep2X : 18));
+    }
+    if (f.clock || f.forecast) CHECK(f.rule3Y < f.footY);
+}
+
+static void test_wall_page() {
+    // Two outdoor places: everything larger than on the desk page.
+    const KdFlow desk = kdFlowCompute(defaultPage());
+    const KdFlow f = kdFlowCompute(wallPage());
+    checkWallStacks(f);
+    // "-38.8° / 37%", the widest it reads, with the air both sides of the
+    // slash.
+    CHECK(f.heroSz >= 125);
+    CHECK_EQ(f.bigSz, KDF_WALL_BIG);
+    CHECK(f.gridValSz > desk.gridValSz);
+    CHECK(f.inValSz > desk.inValSz);
+    CHECK_EQ(f.clSize, 124);
+
+    // THE HEADLINE'S ROW IS ONE HEIGHT whatever it reads: a narrower reading
+    // sets the headline larger and moves nothing under it.
+    KdFlowIn warm = wallPage();
+    warm.heroAdv = (uint16_t)kdFlowWorstAdvance("temperature", "8.4", "\xC2\xB0", false);
+    const KdFlow w = kdFlowCompute(warm);
+    CHECK(w.heroSz >= f.heroSz);
+    CHECK_EQ(w.subY, f.subY);
+    CHECK_EQ(w.headRuleY, f.headRuleY);
+    CHECK_EQ(w.heroY + w.heroSz, f.heroY + f.heroSz);
+}
+
+// THE GRID IS LAID OUT BY HOW MANY READINGS IT HAS: two one under the other,
+// four 2 x 2, six three rows of two, an odd one alone on the last row. The
+// indoor readings stay a column of their own on the right whatever it holds.
+static void test_wall_grid_by_count() {
+    static const uint8_t want[7][3] = {
+        {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {2, 1, 0}, {2, 2, 0}, {2, 2, 1}, {2, 2, 2}};
+    for (int g = 1; g <= 6; g++) {
+        KdFlowIn in = wallPage();
+        in.nGrid = (uint8_t)g;
+        for (int i = 0; i < g; i++) in.gridAdv[i] = (uint16_t)advPress();
+        const KdFlow f = kdFlowCompute(in);
+        checkWallStacks(f);
+        CHECK_EQ(f.gridNRows, g <= 2 ? g : (g + 1) / 2);
+        for (int r = 0; r < f.gridNRows; r++) CHECK_EQ(f.gridRows[r], want[g][r]);
+        CHECK_EQ(f.colLW, KDF_WALL_COL);
+        CHECK(f.inVcol);
+        CHECK_EQ(f.inX, KDF_WALL_RX);
+    }
+
+    // Pressure, dew point, PM2.5 and PM10: 2 x 2, each cell as large as the
+    // widest of them allows across half the column.
+    KdFlowIn in = wallPage();
+    in.nGrid = 4;
+    in.gridAdv[2] = (uint16_t)kdFlowWorstAdvance("pm25", "6", "\xC2\xB5g/m\xC2\xB3", false);
+    in.gridAdv[3] = (uint16_t)kdFlowWorstAdvance("pm10", "14", "\xC2\xB5g/m\xC2\xB3", false);
+    const KdFlow f = kdFlowCompute(in);
+    CHECK_EQ(f.gridNRows, 2);
+    const int cell = KDF_WALL_COL / 2 - KDF_CELL_PAD;
+    int widest = 0;
+    for (int i = 0; i < 4; i++) widest = kdfMax(widest, (int)in.gridAdv[i]);
+    CHECK_EQ(f.gridValSz, cell * 1000 / widest);
+
+    // Every combination of places and bands stacks.
+    for (int g = 0; g <= 6; g++)
+        for (int m = 0; m <= 3; m++)
+            for (int b = 0; b < 4; b++) {
+                KdFlowIn c = wallPage();
+                c.nGrid = (uint8_t)g;
+                for (int i = 0; i < g; i++) c.gridAdv[i] = (uint16_t)advPress();
+                c.nIn = (uint8_t)m;
+                c.clock = (b & 1) != 0;
+                c.forecast = (b & 2) != 0;
+                c.sub = g != 3;
+                checkWallStacks(kdFlowCompute(c));
+            }
+}
+
+static void test_wall_panel_keys() {
+    KdFlowIn in = wallPage();
+    in.nGrid = 4;
+    in.gridAdv[2] = in.gridAdv[3] = (uint16_t)advPress();
+    const KdFlow f = kdFlowCompute(in);
+    KdFlowKV kv[KDF_PANEL_KEYS];
+    const int n = kdFlowPanelKeys(f, 600, kv);
+    CHECK(n <= KDF_PANEL_KEYS);
+    CHECK_EQ(keyOf(kv, n, "WALL"), 1);
+    CHECK_EQ(keyOf(kv, n, "IN_VCOL"), f.inVcol ? 1 : 0);
+    CHECK_EQ(keyOf(kv, n, "HEAD_RULE_Y"), f.headRuleY);
+    CHECK_EQ(keyOf(kv, n, "COL_L_W"), f.colLW);
+    CHECK_EQ(keyOf(kv, n, "OL_N"), 0);
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++) CHECK(strcmp(kv[i].key, kv[j].key) != 0);
+}
+
 int main() {
     RUN(test_worst_advance_is_the_widest_it_gets);
     RUN(test_the_ordinary_page_keeps_its_sections);
@@ -771,5 +915,8 @@ int main() {
     RUN(test_switching_a_section_off_never_shrinks_anything);
     RUN(test_panel_keys);
     RUN(test_page_css);
+    RUN(test_wall_page);
+    RUN(test_wall_grid_by_count);
+    RUN(test_wall_panel_keys);
     return SUMMARY();
 }

@@ -108,7 +108,7 @@ def main() -> int:
     flow = open(FLOW, encoding='utf-8').read()
     body = flow[flow.index('kdFlowPanelKeys(const KdFlow'):]
     body = body[:body.index('#undef KDF_K')]
-    sent = set(re.findall(r'KDF_[KR]\(\s*"([A-Z0-9_]+)"', body))
+    sent = set(re.findall(r'KDF_[KRT]\(\s*"([A-Z0-9_]+)"', body))
     m = re.search(r'^FLOW_KEYS="([^"]*)"', sh, re.M)
     if not sent or not m:
         print('FAIL: could not read the layout keys out of KindleFlow.h or '

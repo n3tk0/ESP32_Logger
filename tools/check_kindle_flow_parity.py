@@ -38,7 +38,11 @@ FIELDS = ['topBot', 'grow', 'labSz', 'heroSz', 'bigSz', 'headGap', 'slashW', 'su
           'clock', 'land', 'pageW', 'pageH', 'groupY', 'colLX', 'colLW', 'inX', 'inW',
           'sepX', 'sepY', 'clX', 'clY', 'clW', 'topRowY', 'rule2X', 'rule2W',
           'labChartX', 'grX', 'grW', 'keyInX', 'keyBand', 'olN', 'olX', 'wkX', 'wkY',
-          'wkCellW', 'wkHdgY', 'wkRule', 'footY', 'statX', 'battX', 'battY']
+          'wkCellW', 'wkHdgY', 'wkRule', 'footY', 'statX', 'battX', 'battY',
+          # The wall page
+          'wall', 'headW', 'headRuleY', 'inVcol', 'sep2X', 'sep2Y', 'sep2H',
+          'labFcX', 'labFcY', 'fcIconX', 'fcIconY', 'fcTextX', 'fcTextY', 'fcTextW',
+          'fcTextSz', 'fcTempX', 'fcTempY', 'fcTempSz', 'fcWindX', 'fcWindY', 'fcWindSz']
 
 PLACES = [
     ('temperature', '8.4', '°', 0), ('temperature', '-12.4', '°', 0),
@@ -89,7 +93,9 @@ def js_engine(js_text):
 
 
 def cases():
-    for mask in range(64):
+    # Bit 6 is the wall page, which only the upright page draws: turned, the
+    # same switches as without it.
+    for mask in range(128):
         for w in WIDTHS:
             for ng in range(7):
                 for ni in range(4):
@@ -100,6 +106,7 @@ def cases():
                         'chart': mask & 1, 'fc': (mask >> 1) & 1, 'week': (mask >> 2) & 1,
                         'sub': (mask >> 3) & 1, 'grid': w[:ng], 'in': w[:ni][::-1],
                         'clk': 1 - ((mask >> 4) & 1), 'land': (mask >> 5) & 1,
+                        'wall': (mask >> 6) & 1,
                         'outp': pct[0], 'inp': pct[1],
                         'hero': head[0], 'big': head[1], 'bigfit': head[2],
                     }
@@ -119,7 +126,7 @@ def run(js_text):
         for c in all_cases:
             args = ['json', 'chart=%d' % c['chart'], 'fc=%d' % c['fc'],
                     'week=%d' % c['week'], 'sub=%d' % c['sub'],
-                    'clk=%d' % c['clk'], 'land=%d' % c['land'],
+                    'clk=%d' % c['clk'], 'land=%d' % c['land'], 'wall=%d' % c['wall'],
                     'grid=' + ','.join(map(str, c['grid'])),
                     'in=' + ','.join(map(str, c['in'])),
                     'outp=%d' % c['outp'], 'inp%%=%d' % c['inp'],
@@ -137,6 +144,7 @@ var out = { adv: input.places.map(function (p) {
             flows: input.cases.map(function (c) {
               return kdFlowCompute({ chart: !!c.chart, forecast: !!c.fc, week: !!c.week,
                                      sub: !!c.sub, clock: !!c.clk, land: !!c.land,
+                                     wall: !!c.wall && !c.land,
                                      nGrid: c.grid.length, gridAdv: c.grid,
                                      nIn: c.in.length, inAdv: c.in,
                                      outPct: c.outp, inPct: c.inp,
@@ -179,6 +187,7 @@ def main():
         # A rule edited on one side only has to be caught: the headline's
         # growth cap, and the caption width the indoor row keeps.
         for old, new in (('GROW_MAX:1180', 'GROW_MAX:1190'), ('IN_CAP_W:66', 'IN_CAP_W:60'),
+                         ('WALL_COL:352', 'WALL_COL:350'),
                          ('w = c === 0xB0 ? 330', 'w = c === 0xB0 ? 340'),
                          ('if (metric !== "temperature") return kdFlowWorstAdvance',
                           'if (metric !== "temperatureX") return kdFlowWorstAdvance')):

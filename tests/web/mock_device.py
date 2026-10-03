@@ -261,7 +261,6 @@ KINDLE_SLOTS = {
     # A heading the reader has overridden, and one they have not.
     "group_out": "БАЛКОН", "group_out_set": "БАЛКОН",
     "group_in": "ВЪТРЕ",   "group_in_set": "",
-    "flag_bold": 1, "flag_unit": 2, "flag_age": 4, "flag_trend": 8,
     "auto_decimals": 255,
 }
 
@@ -318,6 +317,9 @@ KINDLE = {
     # How large the readings are set, per cent of the most that fits.
     "out_size": 100,
     "in_size": 100,
+    # Read from: the FBInk panel and the browser page each a desk or a wall.
+    "page_style": 0,
+    "web_style": 0,
     "outdoor_sensor": "balcony",
     "indoor_sensor": "",
 }
@@ -1128,7 +1130,7 @@ class H(http.server.SimpleHTTPRequestHandler):
                       "fbink_res_w", "layout_mode", "clock", "rotation", "page_rotation", "clock_sync",
                       "browser_dev", "browser_bar",
                       "week_forecast", "week_style", "rule_weight", "rule_ink",
-                      "rule_style", "out_size", "in_size"):
+                      "rule_style", "out_size", "in_size", "page_style", "web_style"):
                 if k in body:
                     KINDLE[k] = int(body[k][0])
             for k in ("face_custom", "outdoor_sensor", "indoor_sensor"):

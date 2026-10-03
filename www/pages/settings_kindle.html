@@ -405,6 +405,22 @@
                 <p class="hint" id="kd-layout-says"></p>
 
                 <div class="field" style="margin-top:14px">
+                  <label class="field-label" for="kd-page" data-i18n="kindle.pageStyle">Read from — the FBInk panel</label>
+                  <select id="kd-page" class="input" data-change="kindleTouched">
+                    <option value="0" data-i18n="kindle.page0">A desk — everything on the page</option>
+                    <option value="1" data-i18n="kindle.page1">A wall — the readings large, no chart or week</option>
+                  </select>
+                </div>
+                <div class="field" style="margin-top:14px">
+                  <label class="field-label" for="kd-wpage" data-i18n="kindle.webStyle">Read from — the browser page (/kindle)</label>
+                  <select id="kd-wpage" class="input" data-change="kindleTouched">
+                    <option value="0" data-i18n="kindle.page0">A desk — everything on the page</option>
+                    <option value="1" data-i18n="kindle.page1">A wall — the readings large, no chart or week</option>
+                  </select>
+                </div>
+                <p class="hint" data-i18n="kindle.pageHint">The wall page puts the outdoor reading across the whole width, the grid and the indoor readings in two columns under it, and the clock beside the forecast at the foot. The chart and the week strip are left off. Upright only: turned, the page is the desk one on its side. The panel and the browser page are set apart; the preview shows the panel.</p>
+
+                <div class="field" style="margin-top:14px">
                   <label class="field-label" for="kd-rot" data-i18n="kindle.rotation">Which way up — the FBInk panel</label>
                   <select id="kd-rot" class="input" data-change="kindleTouched">
                     <option value="0" data-i18n="kindle.rot0">0° — upright, USB at the bottom</option>

@@ -25,6 +25,7 @@ Every fc_<code>_<size>.bmp, against the size's role:
 
     FC_OL_SZ    the outlook columns  -> the pen the plate is filled with
     FC_MAIN_SZ  beside the headline  -> the pen the forecast zone is cleared with
+    FC_WALL_SZ  the wall page's      -> the same pen: it lands on the same zone
 
 BOTH GROUNDS ARE READ OUT OF update_dash.sh, not written down here. A checker
 holding its own copy of a colour is a checker that passes while the plate and
@@ -128,20 +129,20 @@ def weekend_pen(src):
 
 
 def layout_sizes(path):
-    """FC_OL_SZ and FC_MAIN_SZ out of a layout file."""
+    """FC_OL_SZ, FC_MAIN_SZ and FC_WALL_SZ out of a layout file."""
     got = {}
     for line in open(os.path.join(ROOT, path), encoding='utf-8'):
-        m = re.match(r'\s*(FC_OL_SZ|FC_MAIN_SZ)=(\d+)', line)
+        m = re.match(r'\s*(FC_OL_SZ|FC_MAIN_SZ|FC_WALL_SZ)=(\d+)', line)
         if m:
             got[m.group(1)] = int(m.group(2))
-    for key in ('FC_OL_SZ', 'FC_MAIN_SZ'):
+    for key in ('FC_OL_SZ', 'FC_MAIN_SZ', 'FC_WALL_SZ'):
         if key not in got:
             raise SystemExit('check_kindle_icons: %s not in %s' % (key, path))
     return got
 
 
 def resolutions():
-    """{panel width: (main size, outlook size)}, out of the layout files.
+    """{panel width: (main size, outlook size, wall size)}, out of the layouts.
 
     THE LAYOUTS ARE THE SOURCE, because they are what the panel itself reads
     at run time. scripts/generate_kindle_icons.py used to carry its own
@@ -156,7 +157,8 @@ def resolutions():
     for icon_dir, layout in PANELS:
         sizes = layout_sizes(layout)
         out[int(os.path.basename(icon_dir))] = (sizes['FC_MAIN_SZ'],
-                                                sizes['FC_OL_SZ'])
+                                                sizes['FC_OL_SZ'],
+                                                sizes['FC_WALL_SZ'])
     return out
 
 
@@ -375,6 +377,7 @@ def each_icon():
         sizes = layout_sizes(layout)
         role_of = {(sizes['FC_OL_SZ'], ''): 'outlook',
                    (sizes['FC_MAIN_SZ'], ''): 'main',
+                   (sizes['FC_WALL_SZ'], ''): 'main',
                    (sizes['FC_OL_SZ'], 'w'): 'week',
                    (sizes['FC_OL_SZ'], 'd'): 'weekend'}
         full = os.path.join(ROOT, icon_dir)
@@ -539,8 +542,9 @@ def main(argv):
     for rel, path, role, sizes in each_icon():
         if role is None:
             problems.append('%s: drawn at no size this panel uses '
-                            '(FC_OL_SZ=%d, FC_MAIN_SZ=%d)'
-                            % (rel, sizes['FC_OL_SZ'], sizes['FC_MAIN_SZ']))
+                            '(FC_OL_SZ=%d, FC_MAIN_SZ=%d, FC_WALL_SZ=%d)'
+                            % (rel, sizes['FC_OL_SZ'], sizes['FC_MAIN_SZ'],
+                               sizes['FC_WALL_SZ']))
             continue
 
         checked += 1

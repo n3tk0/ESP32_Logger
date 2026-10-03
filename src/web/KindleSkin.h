@@ -595,6 +595,8 @@ inline void kdSkinClamp(KindleConfig& k) {
     // Same reasoning, same safe answer: KLAYOUT_AUTO is both the older
     // config's reserved byte and what a value nobody recognises becomes.
     if (k.layoutMode > KLAYOUT_STANDALONE) k.layoutMode = KLAYOUT_AUTO;
+    if (k.pageStyle > KPAGE_WALL)       k.pageStyle = KPAGE_DESK;
+    if (k.webStyle > KPAGE_WALL)        k.webStyle = KPAGE_DESK;
     // Upright is both what an older config holds and the one answer that is
     // always drawable, so a byte nobody recognises lands there.
     if (k.rotation > KROT_270)          k.rotation = KROT_0;

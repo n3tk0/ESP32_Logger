@@ -154,7 +154,11 @@ constexpr uint8_t KSLOTF_BOLD     = 0x01;  ///< draw the value bold
 constexpr uint8_t KSLOTF_UNIT     = 0x02;  ///< append the reading's own unit
 constexpr uint8_t KSLOTF_AGE      = 0x04;  ///< append "· 4m" when it is stale
 constexpr uint8_t KSLOTF_TREND    = 0x08;  ///< append the 3 h tendency arrow
-constexpr uint8_t KSLOTF_ALL      = 0x0F;
+constexpr uint8_t KSLOTF_HEAVY    = 0x10;  ///< extra bold: the bold face, thickened
+constexpr uint8_t KSLOTF_INV      = 0x20;  ///< white on a black plate
+constexpr uint8_t KSLOTF_BAR      = 0x40;  ///< a bar beside it, fuller the better it is
+constexpr uint8_t KSLOTF_LINE     = 0x80;  ///< keep its 24 h history; the wall draws it
+constexpr uint8_t KSLOTF_ALL      = 0xFF;
 
 /// 0xFF in `decimals` means "use the metric's own convention".
 static const uint8_t KSLOT_DECIMALS_AUTO = 0xFF;

@@ -49,6 +49,8 @@ const KdField KD_FIELDS[] = {
     KF("layout_mode",       "layoutMode",      layoutMode,      KF_U8),
     KF("browser_dev",       "browserDev",      browserDev,      KF_U8),
     KF("browser_bar",       "browserBar",      browserBar,      KF_U8),
+    KF("page_style",        "pageStyle",       pageStyle,       KF_U8),
+    KF("web_style",         "webStyle",        webStyle,        KF_U8),
 };
 #undef KF
 

@@ -160,7 +160,7 @@ void trendStoreLoad() {
     // mutex in between would leave the removes below outside it.
     MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !guard.isLocked()) {
-        Serial.println("[trend] fsMutex timeout — the chart starts empty");
+        Serial.println("[trend] fs busy: empty");
         return;
     }
 
@@ -175,7 +175,7 @@ void trendStoreLoad() {
 
     File f = LittleFS.open(TREND_FILE, "r");
     if (!f) {
-        Serial.println("[trend] the snapshot exists but will not open");
+        Serial.println("[trend] open failed");
         return;
     }
 
@@ -184,8 +184,7 @@ void trendStoreLoad() {
         // A layout change between builds, not corruption. Discard rather than
         // reinterpret: reading one struct as another produces series with
         // plausible names and nonsense temperatures.
-        Serial.printf("[trend] snapshot is %u bytes, this build wants %u "
-                      "— discarding\n", (unsigned)f.size(), (unsigned)need);
+        Serial.printf("[trend] %u B, want %u: dropped\n", (unsigned)f.size(), (unsigned)need);
         f.close();
         LittleFS.remove(TREND_FILE);
         return;
@@ -199,7 +198,7 @@ void trendStoreLoad() {
     f.close();
 
     if (got != need) {
-        Serial.println("[trend] snapshot read short — discarding");
+        Serial.println("[trend] short read: dropped");
         LittleFS.remove(TREND_FILE);
         return;
     }
@@ -208,12 +207,12 @@ void trendStoreLoad() {
         // The CRC is the interesting case: the file was the right length and
         // still did not survive the last power cut. Saying so is the only way
         // anyone learns that this happened rather than that the chart is new.
-        Serial.println("[trend] snapshot failed its own checks — discarding");
+        Serial.println("[trend] bad snapshot: dropped");
         LittleFS.remove(TREND_FILE);
         return;
     }
 
-    Serial.println("[trend] 24-hour chart restored from flash");
+    Serial.println("[trend] restored");
 }
 
 #endif  // FEATURE_KINDLE_DASHBOARD

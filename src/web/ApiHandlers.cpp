@@ -37,6 +37,7 @@
 #include "FormArgs.h"                 // formArg / queryArg / formParam
 #include "KindleSlotStore.h"           // GET/POST /api/kindle/slots
 #include "KindlePkg.h"                 // /api/kindle/pkg*, docs/KINDLE_UPDATE.md
+#include "KindleDashboard.h"           // kindleTrackTrends() after a places save
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -942,10 +943,9 @@ static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
     }
     doc["grid_cols"] = KZ_GRID_COLS;
 
-    doc["flag_bold"]  = KSLOTF_BOLD;
-    doc["flag_unit"]  = KSLOTF_UNIT;
-    doc["flag_age"]   = KSLOTF_AGE;
-    doc["flag_trend"] = KSLOTF_TREND;
+    // The place flags (KSLOTF_*) are not sent: they are fixed bits the page
+    // carries itself — www/js/kindle.js, kdFlags — and every byte of this
+    // handler is a byte of the C3 build, which has none to spare.
     doc["auto_decimals"] = KSLOT_DECIMALS_AUTO;
 
     sendJsonResponse(req, doc);
@@ -1008,6 +1008,7 @@ static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, siz
     // Only now. The renderers read this without a lock, so it is replaced once,
     // after the write that makes it survive a reboot.
     kdSlots() = fresh;
+    kindleTrackTrends();   // a place's "24 h line" may have changed
 
     JsonDocument res;
     res["ok"]      = true;

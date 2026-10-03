@@ -159,6 +159,10 @@ struct ChartBmpCtx {
     TrendRing::Hour tOut[TrendRing::HOURS];
     TrendRing::Hour tIn[TrendRing::HOURS];
     bool haveOut, haveIn;
+    /// The wall page's line behind the headline (/kindle/graph.bmp?line=1):
+    /// the outdoor mean alone, light grey and thick, edge to edge, with no
+    /// grid, band or indoor line — the headline's figures are drawn over it.
+    bool lineOnly = false;
     float yScale;  // (B - T) / span
 
     // Precomputed X positions for each hour
@@ -192,6 +196,7 @@ struct ChartBmpCtx {
         R = ChartBmp::marginR(W);
         T = ChartBmp::marginT(H);
         B = ChartBmp::marginB(H);
+        if (lineOnly) { L = 0; R = W - 1; T = 4; B = H - 5; haveIn = false; }
         dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
 
         // Compute Y scale
@@ -238,6 +243,7 @@ struct ChartBmpCtx {
     void renderRow(uint8_t* row, int y) const {
         // Fill with white (palette index 15)
         memset(row, 0xFF, rowBytes);
+        if (lineOnly) { renderLine(row, y, 2, cssGrey(0xC0)); return; }
 
         // ── Vertical grid lines (every 3h + "now") ──
         if (y >= T && y <= B) {
@@ -279,19 +285,7 @@ struct ChartBmpCtx {
         }
 
         // ── Outdoor mean line (3px wide, #000) ──
-        if (haveOut) {
-            for (int i = 0; i < TrendRing::HOURS - 1; i++) {
-                if (!hourValid[i] || !hourValid[i+1]) continue;
-                int x0 = hourX[i], x1 = hourX[i+1];
-                for (int x = x0; x <= x1; x++) {
-                    float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
-                    int my = outMeanY[i] + (int)(t * (outMeanY[i+1] - outMeanY[i]));
-                    // 3px thick: draw if within ±1 of mean
-                    if (y >= my - 1 && y <= my + 1)
-                        setPixel4(row, x, 0);  // black
-                }
-            }
-        }
+        renderLine(row, y, 1, 0);
 
         // ── Indoor mean line (2px wide, #777, dashed 7-5) ──
         if (haveIn) {
@@ -307,6 +301,21 @@ struct ChartBmpCtx {
                     if (y >= my && y <= my + 1)
                         setPixel4(row, x, cssGrey(0x77));
                 }
+            }
+        }
+    }
+
+    /// The outdoor mean line on row `y`, 2 * `half` + 1 px thick.
+    void renderLine(uint8_t* row, int y, int half, uint8_t palIdx) const {
+        if (!haveOut) return;
+        for (int i = 0; i < TrendRing::HOURS - 1; i++) {
+            if (!hourValid[i] || !hourValid[i+1]) continue;
+            int x0 = hourX[i], x1 = hourX[i+1];
+            for (int x = x0; x <= x1; x++) {
+                int my = outMeanY[i] + (x1 > x0 ? (x - x0) * (outMeanY[i+1] - outMeanY[i])
+                                                    / (x1 - x0) : 0);
+                if (y >= my - half && y <= my + half)
+                    setPixel4(row, x, palIdx);
             }
         }
     }

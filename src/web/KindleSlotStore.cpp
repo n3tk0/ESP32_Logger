@@ -50,7 +50,7 @@ static void adoptLegacyArray(KindleZones& out, JsonArrayConst arr) {
         if (!s.used()) continue;
         out.z[ORDER[n++]] = s;
     }
-    Serial.printf("[kindle] migrated %d reading(s) from the old slot list\n", n);
+    Serial.printf("[kindle] %d old slot(s) migrated\n", n);
 }
 
 bool kdSlotsLoad(fs::FS& fs, KindleZones& out,
@@ -68,7 +68,7 @@ bool kdSlotsLoad(fs::FS& fs, KindleZones& out,
     // not up yet and there is nothing to serialise against.
     MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !guard.isLocked()) {
-        Serial.println("[kindle] layout not read: the filesystem is busy — using defaults");
+        Serial.println("[kindle] fs busy: default layout");
         return false;
     }
 
@@ -90,7 +90,7 @@ bool kdSlotsLoad(fs::FS& fs, KindleZones& out,
 
     const size_t sz = f.size();
     if (sz > KINDLE_SLOTS_MAX_BYTES) {
-        Serial.printf("[kindle] %s is %u bytes (cap %u) — quarantining\n",
+        Serial.printf("[kindle] %s %u B > %u, quarantined\n",
                       path, (unsigned)sz, (unsigned)KINDLE_SLOTS_MAX_BYTES);
         f.close();
         fs.remove(bad.c_str());
@@ -103,11 +103,11 @@ bool kdSlotsLoad(fs::FS& fs, KindleZones& out,
     f.close();
     // Out of heap is not a bad file (the size was checked above): keep it.
     if (err == DeserializationError::NoMemory) {
-        Serial.printf("[kindle] %s: out of memory — file kept\n", path);
+        Serial.printf("[kindle] %s: no memory\n", path);
         return false;
     }
     if (err) {
-        Serial.printf("[kindle] %s: %s — quarantining\n", path, err.c_str());
+        Serial.printf("[kindle] %s: %s, quarantined\n", path, err.c_str());
         fs.remove(bad.c_str());
         fs.rename(path, bad.c_str());
         return false;
@@ -185,7 +185,7 @@ bool kdSlotsSave(fs::FS& fs, const KindleZones& zones, const char* path) {
     // is the corruption that does not reproduce on the bench.
     MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !guard.isLocked()) {
-        Serial.println("[kindle] layout not saved: the filesystem is busy");
+        Serial.println("[kindle] fs busy: not saved");
         return false;
     }
 
@@ -195,7 +195,7 @@ bool kdSlotsSave(fs::FS& fs, const KindleZones& zones, const char* path) {
     const String tmp = String(path) + ".new";
     File f = fs.open(tmp.c_str(), FILE_WRITE);
     if (!f) {
-        Serial.printf("[kindle] cannot open %s for writing\n", tmp.c_str());
+        Serial.printf("[kindle] open %s failed\n", tmp.c_str());
         return false;
     }
     const size_t want    = measureJson(doc);
@@ -206,7 +206,7 @@ bool kdSlotsSave(fs::FS& fs, const KindleZones& zones, const char* path) {
     // place, and the next boot quarantined it as corrupt — losing the layout
     // to the one failure this temp-file dance exists to survive.
     if (written == 0 || written < want) {
-        Serial.printf("[kindle] layout wrote %u of %u bytes — leaving the old one\n",
+        Serial.printf("[kindle] wrote %u of %u B, old kept\n",
                       (unsigned)written, (unsigned)want);
         fs.remove(tmp.c_str());
         return false;
@@ -223,7 +223,7 @@ bool kdSlotsSave(fs::FS& fs, const KindleZones& zones, const char* path) {
     if (fs.rename(tmp.c_str(), path)) return true;
     if (fs.exists(path) && fs.remove(path) && fs.rename(tmp.c_str(), path)) return true;
 
-    Serial.printf("[kindle] could not rename %s into place\n", tmp.c_str());
+    Serial.printf("[kindle] rename %s failed\n", tmp.c_str());
     fs.remove(tmp.c_str());
     return false;
 }

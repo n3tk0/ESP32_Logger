@@ -263,7 +263,32 @@ static void test_survives_a_completely_empty_ring() {
     CHECK_EQ((long)got, (long)rd.total);
 }
 
+// The wall page's line behind the headline (?line=1): the outdoor mean alone,
+// light grey and edge to edge — no black pixel, no grid, no indoor line.
+static void test_line_only() {
+    ChartBmpCtx c;
+    fillCtx(c, true);
+    c.lineOnly = true;
+    c.init(560, 160);
+    CHECK(!c.haveIn);
+    CHECK_EQ(c.L, 0);
+    CHECK_EQ(c.R, 559);
+    int grey = 0, other = 0;
+    std::vector<uint8_t> row(c.rowBytes);
+    for (int y = 0; y < 160; y++) {
+        c.renderRow(row.data(), y);
+        for (int x = 0; x < 560; x++) {
+            const uint8_t v = (x & 1) ? (row[x / 2] & 0x0F) : (row[x / 2] >> 4);
+            if (v == cssGrey(0xC0)) grey++;
+            else if (v != 15) other++;
+        }
+    }
+    CHECK(grey > 560 * 3);
+    CHECK_EQ(other, 0);
+}
+
 int main() {
+    RUN(test_line_only);
     RUN(test_header_is_a_valid_4bit_bmp);
     RUN(test_row_bytes_are_exact);
     RUN(test_chunking_is_transparent);

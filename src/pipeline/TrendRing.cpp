@@ -51,6 +51,17 @@ bool TrendRing::track(const char* sensorId, const char* metric) {
     return idx >= 0;
 }
 
+void TrendRing::keepOnly(const char* const* sensors, const char* const* metrics, int n) {
+    taskENTER_CRITICAL(&_mux);
+    for (int i = 0; i < MAX_SERIES; i++) {
+        bool keep = false;
+        for (int k = 0; k < n && !keep; k++)
+            keep = !strcmp(_s[i].sensorId, sensors[k]) && !strcmp(_s[i].metric, metrics[k]);
+        if (!keep) _s[i].used = false;
+    }
+    taskEXIT_CRITICAL(&_mux);
+}
+
 // Fold one value into a ring of HOURS buckets keyed by an absolute slot
 // number (an hour, or a five-minute slot). Returns true when the reading
 // opened a new slot. See add() for why every skipped slot is cleared.

@@ -467,6 +467,13 @@ with sync_playwright() as p:
         check("\u00b0" in head or "8" in head,
               "with the value badge redrawn for the new reading (%r)" % head.strip()[:40])
 
+    # The 24 h line: offered on a grid place (it is the wall grid that draws
+    # it), and not on the headline.
+    check(pg.locator(g1 + " .kd-flag", has_text="24 h line").count() == 1,
+          "a grid place offers its own 24 h line")
+    check(pg.locator("#kd-zone-hero .kd-flag", has_text="24 h line").count() == 0,
+          "and the headline does not")
+
     # ── "By hand…" stays open once it has been chosen ───────────────────────
     # kdCadenceName() reads the VALUES, and the custom fields start at whatever
     # the last named choice left in them — so every edit anywhere on the page
@@ -718,7 +725,7 @@ with sync_playwright() as p:
         "rule2Y":"RULE2_Y", "grY":"GR_Y", "grH":"GR_H", "rule3Y":"RULE3_Y",
     }
     # The sections, before the headline is fitted to what it reads: beside a
-    # humidity that keeps its 44 it comes out smaller than the file's 88, and
+    # humidity that keeps its 52 it comes out smaller than the file's 88, and
     # the line under it comes up — kdFlowHeadFit(). An older collector sends
     # no headline widths and draws the file's sizes.
     ordinary = pg.evaluate(
@@ -730,8 +737,8 @@ with sync_playwright() as p:
           % ("; ".join(drift) if drift else "all %d agree" % len(KEYS)))
     fitted = pg.evaluate(
         "(function(){var i=kdFlowInput(0x1FF);i.forecast=true;return kdFlowCompute(i);})()")
-    check(fitted["bigSz"] == 44 and fitted["bigSz"] < fitted["heroSz"] <= 88,
-          "and fitted, the value beside the headline keeps its 44 (%d, %d)"
+    check(fitted["bigSz"] == 52 and fitted["bigSz"] < fitted["heroSz"] <= 88,
+          "and fitted, the value beside the headline keeps its 52 (%d, %d)"
           % (fitted["heroSz"], fitted["bigSz"]))
 
     # It is a setting like any other: unsaved until Save, then read back.
@@ -970,6 +977,42 @@ with sync_playwright() as p:
     check("install by hand" in rows, "  and one too old to update itself says so")
     check(pg.is_visible("#kd-pkg-stop") and not pg.is_visible("#kd-pkg-offer"),
           "  and Stop offering replaces Offer")
+
+    # A NEW UPLOAD WHILE ONE IS OFFERED: the card's five-second reread was
+    # answered slowly by a collector busy with the upload, landed after the
+    # upload's own reread, and drew the old package as stored and offered —
+    # the upload looked as if it had not happened. Here that reread is held
+    # back and answered, stale, after the upload is done.
+    held = []
+    def hold_pkg(route):
+        if route.request.method == "GET" and not held:
+            held.append(route)
+        else:
+            route.continue_()
+    pg.route("**/api/kindle/pkg", hold_pkg)
+    pg.wait_for_timeout(5600)
+    check(len(held) == 1, "  the card rereads itself while a reader is pending")
+    stale = pg.evaluate("fetch('/api/kindle/pkg').then(function(r){return r.text()})")
+    newer = os.path.join(tmpd, "esp32dash-kindle-t3.0.tar")
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+        for name, data in (("esp32dash/VERSION", b"t3.0\n"),
+                           ("esp32dash/update_dash.sh", b"#!/bin/sh\n")):
+            ti = tarfile.TarInfo(name)
+            ti.size = len(data)
+            tf.addfile(ti, io.BytesIO(data))
+    with open(newer, "wb") as f:
+        f.write(buf.getvalue())
+    pg.set_input_files("#kd-pkg-file", newer)
+    pg.wait_for_timeout(1200)
+    if held:
+        held[0].fulfill(status=200, content_type="application/json", body=stale)
+    pg.wait_for_timeout(500)
+    pg.unroute("**/api/kindle/pkg", hold_pkg)
+    check("Stored: t3.0" in pg.inner_text("#kd-pkg") and "Not offered" in pg.inner_text("#kd-pkg"),
+          "  an upload while offering shows the new package at once, whatever answers late")
+    pg.click("#kd-pkg-offer")
+    pg.wait_for_timeout(1000)
 
     pg.click("#kd-pkg-stop")
     pg.wait_for_timeout(1000)

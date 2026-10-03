@@ -77,6 +77,11 @@ public:
     /// Call from setup, before ProcessingTask starts feeding the ring.
     bool track(const char* sensorId, const char* metric);
 
+    /// Stop tracking every series that is not one of the `n` pairs
+    /// (`sensors[i]`, `metrics[i]`); their hours go with them, and track()
+    /// has the room again. Series that stay keep their history.
+    void keepOnly(const char* const* sensors, const char* const* metrics, int n);
+
     /// Fold one reading into its hour bucket. Ignores readings for untracked
     /// series, non-finite values, and timestamps before 2001 (no NTP yet).
     void add(const SensorReading& r);

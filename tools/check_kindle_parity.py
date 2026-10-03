@@ -457,9 +457,9 @@ def main():
     # numbers live in two places: edit FC_OL_SZ in a layout and this checker
     # went on verifying that the OLD size exists while the panel drew the new
     # one, and nothing named the two copies that disagreed.
-    for res, (main_sz, ol_sz) in check_kindle_icons.resolutions().items():
+    for res, (main_sz, ol_sz, wall_sz) in check_kindle_icons.resolutions().items():
         for code in want:
-            for sz in (main_sz, ol_sz):
+            for sz in (main_sz, ol_sz, wall_sz):
                 f = os.path.join(ROOT, 'kindle/icons', str(res),
                                  'fc_%d_%d.bmp' % (code, sz))
                 if not os.path.isfile(f):

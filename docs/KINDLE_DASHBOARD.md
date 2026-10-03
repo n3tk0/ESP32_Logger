@@ -363,8 +363,13 @@ eleven, always in the same spot at the same size:
 ```
 
 Each place names a sensor, a metric, an optional caption, how many decimals,
-four switches — bold, show the unit, show the age when stale, show the pressure
-tendency — and **how dark it is drawn**: black, dark, mid or light grey. Four
+seven switches — bold, show the unit, show the age when stale, show the pressure
+tendency, **extra bold** (the bold face drawn twice a hair apart on the panel,
+weight 900 in the browser), **inverted colours** (white on a black plate the
+size of the place) and, for a grid or indoor place whose metric has a scale,
+**a bar** beside the value that fills as the reading gets better (humidity best
+at 40–60 %, the AQI, the BME680's IAQ, CO₂, TVOC and dust best low; `kdBarScore()`) — and **how
+dark it is drawn**: black, dark, mid or light grey. Four
 levels rather than a colour picker, because the panel has sixteen real grey
 levels and the ones worth having are the ones far enough apart to render solid,
 which is what the page's palette already is. Set under Settings → E-ink dashboard; stored in
@@ -689,10 +694,10 @@ sized by 0.5 was cut at its cell's right edge.
 The headline and the value beside it share one line in a 270 px column, and
 "23.5° / 1013 hPa" does not fit it at 88 and 44. The value beside the
 headline keeps its size and the headline gives way. The value is sized for
-two figures, "00%", so "5%" and "37%" are one size: 44 on the ordinary page,
-48 as the page grows. The headline, by what it prints, takes what is left,
-down to 40: 77 for "21.7°", 67 for "-38.8°", and 88 for "8.4°", which fits
-as it is. Only a value wider than it was sized for ("100%" in fog) makes the
+two figures, "00%", so "5%" and "37%" are one size: 52 on the ordinary page,
+57 as the page grows (it was 44 and 48, and read as a footnote from across a
+room). The headline, by what it prints, takes what is left, down to 40: 71
+for "21.7°", 62 for "-38.8°", and 88 for "8.4°", which fits as it is. Only a value wider than it was sized for ("100%" in fog) makes the
 two give way in turn, down to 28 for the value. The humidity used to give
 way first, and "21.7° / 37%" took it down to 28, where it could not be read.
 
@@ -771,6 +776,74 @@ coordinates: `/kindle/data` sends `RES_W`/`RES_H` swapped, `PAGE_ROT`, and the
 landscape page's x positions as `LY_*` keys as well as its heights; the chart
 image is fetched as `/kindle/graph.bmp?h=H&w=W`. The reader can override the
 collector with `ROTATE=` in `dash.conf`, sent as `?rot=`.
+
+### Read from a wall: the wall page
+
+The desk page's headline shares a 270 px column with the clock's, so it
+cannot pass about 77 px whatever is switched off: a section that gives its
+height back gives it to the chart, or to air. **Read from** draws a page that
+spends the width instead, laid out by `kdFlowWall()`. The FBInk panel and the
+browser page are set apart, as their rotations are: `page_style` and
+`web_style` in `/api/kindle/config`, each 0 for a desk (the default, and what
+an older config holds) or 1 for a wall.
+
+| row | what is in it |
+|---|---|
+| top | the outdoor headline and the value beside it across the whole page, up to 160 and 96 px, and the line under them |
+| middle | the grid on the left, 352 px, laid out by how many readings it has (below); the indoor readings one under the other on the right, the first with no caption, the others at seven tenths of it |
+| band | the clock (124 px), and beside it the forecast: the condition word in place of a heading (up to 24 px, smaller for a long word), a 100 px icon under it with the wind and the age beside it in three lines, and the day's high and low under the icon (up to 54 px, by what they print). Either alone has the band to itself |
+| footer | as on the desk page |
+
+**The grid is laid out by how many readings it has**, not by a search for
+the largest: two one under the other, four 2 x 2, six three rows of two, an
+odd one alone on the last row. Each is then as large as its cell allows, all
+at one size and never above the headline. Two readings come out at about 95 px;
+four or six with "1010 hPa" among them at about 66, the width half the column
+leaves for the widest.
+
+**A grid reading's unit goes on its caption's line**, "PRESSURE / hPa", and
+the value is its figures alone, which is what lets them be that large: the
+collector takes the unit off the value before the layout sizes the grid
+(`kdWallUnits()`) and sends it as `Z_<zone>_CAPUNIT`; a tendency arrow goes
+after it. ° and % stay on the value, where they read as part of it. The
+captions are 22 px. The slash beside the headline is black, as the captions
+are, 28 px after the headline's degree and about as far before the second
+value (`SLASH_W` 54). Hairlines in the rules' ink separate the grid's places:
+across at the middle of the air between two rows, and down 8 px left of a
+row's second cell.
+
+**The chart's switch draws the outdoor line behind the headline** on this
+page, which has no chart: the last 24 hours' mean, light grey and 5 px thick,
+across the headline's row. The panel fetches it as
+`/kindle/graph.bmp?line=1&w=…&h=…` when the payload says `HERO_LINE=1`, and
+draws it before the figures; the browser page shows the same image,
+stretched over the row.
+
+**A grid place's own 24 h line** works the same way, for any reading: tick
+*24 h line on the wall* on the place (`KSLOTF_LINE`). The payload says
+`Z_<PLACE>_LINE=1`; the panel fetches `/kindle/graph.bmp?line=1&z=<place>&w=…&h=…`
+as wide as the cell less its gutter and as tall as the figures, and draws it
+behind them; the browser page puts the same image under the value. So PM2.5
+and PM10 can carry a line as the outdoor temperature does.
+
+The headline's row is as tall as the largest headline, whatever this one
+came out at, and the headline stands on its foot, so a reading that gains a
+figure does not move everything under it. The chart and the week strip are
+not drawn, whatever their switches say: a line one pixel wide does not read
+at three metres, and the room they took is the room the readings want. The
+captions and the line under the headline are black, every value is bold,
+the value beside the headline is black rather than #444, and the rules are
+the heaviest black ones unless they have been set.
+
+Upright only: turned to 90° or 270°, the page is the desk one on its side.
+The FBInk script asks for it with `?wall=1`, and only a script that does gets
+it (`WALL=1`, `HEAD_W`, `HEAD_RULE_Y`, `IN_VCOL`, `SEP_Y`, `SEP2_*`, and the
+forecast's `FC_*_X`, `FC_*_SZ` and `FC_TEXT_W` as `LY_*` keys); an older
+script keeps drawing the desk page. Its clock is inside the forecast's
+rectangle, so the forecast tier draws it again. The tiers are the desk
+page's: the readings above the band, the clock's own rectangle each minute
+and the forecast each repaint only themselves, without flashing, and the
+whole screen flashes only on the full tier (`FULL_EVERY`).
 
 ## Appearance
 
@@ -1510,6 +1583,15 @@ a fixed grid of hourly aggregates instead:
 That is affordable on every target including the C3, which is what makes the
 headline feature work on the board you probably have rather than only on the
 one with PSRAM.
+
+**Which four is the reader's choice, not a fifth series.** `kindleTrackTrends()`
+keeps, while there is room: the outdoor temperature (the chart and the
+headline's line), then in place order every place ticked *24 h line* or
+showing a pressure tendency arrow, then the indoor temperature, the outdoor
+pressure and humidity. A places save applies it at once
+(`TrendRing::keepOnly()`): a series no longer chosen is dropped with its
+hours, a new one starts empty and fills an hour at a time, and the ones that
+stay keep their history.
 
 It stores **min / max / mean per hour**, not raw samples. A 6" panel cannot
 resolve more than a couple of hundred horizontal pixels of line anyway, and

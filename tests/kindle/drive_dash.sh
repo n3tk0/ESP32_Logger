@@ -104,6 +104,11 @@ case "$url" in
         echo "$url" >> "${WGET_LOG:-/dev/null}"
         if [ -n "${PKG_FILE:-}" ] && [ -n "$out" ]; then cp "$PKG_FILE" "$out"; exit 0; fi
         ;;
+    # The wall's lines behind a value: logged, and a stand-in image.
+    *"$WGET_OK_HOST"*/kindle/graph.bmp\?line=1*)
+        echo "$url" >> "${WGET_LOG:-/dev/null}"
+        [ -n "$out" ] && printf 'BM' > "$out"
+        exit 0 ;;
     # ?h= is the chart's height on the collector's layout.
     *"$WGET_OK_HOST"*/kindle/graph.bmp|*"$WGET_OK_HOST"*/kindle/graph.bmp\?h=*)
         echo "$url" >> "${WGET_LOG:-/dev/null}"
@@ -1331,6 +1336,227 @@ check "$?" "two readings the layout stacks are drawn one under the other, centre
   exit 0 )
 check "$?" "three indoor readings are two columns, one alone is centred"
 
+# THE WALL PAGE WITH FOUR OUTDOOR PLACES: 2 x 2 in the left column, the indoor
+# readings one under the other in the right one.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0 \
+      gridp='pressure:1010:hPa:1;dew_point:6.7:°;pm25:6:µg/m³;pm10:14:µg/m³'
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "${WALL:-0}" = "1" ] || exit 1
+  [ "$LY_GRID_ROWS" = "2 2" ] || { echo "LY_GRID_ROWS [$LY_GRID_ROWS]" >&2; exit 2; }
+  [ "${IN_VCOL:-0}" = "1" ] || exit 3
+  [ "$COL_R_X" -gt "$COL_L_W" ] || exit 4
+  reset_log
+  draw_zones >/dev/null 2>&1
+  px=$(px_of "$IN_VAL_SZ")
+  lefts=""; tops=""
+  for v in "$Z_IHUM_VALUE" "$Z_IAQI_VALUE"; do
+    at=$(grep -- "px=$px,left=" "$FBINK_LOG" | grep -e "--${T}${v}${T}" | head -1 |
+         sed 's/.*left=\([0-9]*\),top=\([0-9]*\).*/\1 \2/')
+    set -- $at
+    [ $# -eq 2 ] || { echo "indoor value $v not drawn at $px" >&2; exit 5; }
+    lefts="$lefts $1"; tops="$tops $2"
+  done
+  set -- $lefts
+  [ "$1" = "$2" ] && [ "$1" -ge "$COL_R_X" ] || { echo "not one column: $lefts" >&2; exit 6; }
+  set -- $tops
+  [ "$1" -lt "$2" ] || { echo "not one under the other: $tops" >&2; exit 7; }
+  exit 0 )
+check "$?" "the wall page with four outdoor places: 2 x 2 on the left, the indoor column on the right"
+
+# THE WALL PAGE'S UNITS BY THE CAPTION, "PRESSURE / hPa", when the collector
+# sends one (Z_<zone>_CAPUNIT), and the slash beside the headline in black.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  [ "${WALL:-0}" = "1" ] || exit 1
+  first=$(echo $GRID_ZONES | cut -d' ' -f1)
+  eval "lab=\${Z_${first}_LABEL}"
+  [ -n "$lab" ] || exit 2
+  eval "Z_${first}_CAPUNIT=hPa"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -q -e "--${T}${lab} / hPa${T}" "$FBINK_LOG" || { echo "no '$lab / hPa'" >&2; exit 3; }
+  # A tendency arrow goes after it with air between: the caption's estimate
+  # and 15 % more, and half the caption's size. The arrow's first stroke
+  # starts there.
+  ladv=5550; eval "Z_${first}_ARROW='↘'; Z_${first}_LADVW=$ladv"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  ax=$(( COL_L_X + GRID_LAB_SZ * ladv * 115 / 100000 + GRID_LAB_SZ / 2 ))
+  grep -q -e "-k${T}top=[0-9]*,left=${ax}," "$FBINK_LOG" || \
+      { echo "no arrow at $ax (ladv $ladv)" >&2; exit 6; }
+  [ "$SLASH_INK" = "BLACK" ] && [ "$LAB_INK" = "BLACK" ] || exit 4
+  # The desk page keeps its grey slash.
+  flow_payload "$WORK/ly.txt" res=600
+  ly_load "$WORK/ly.txt"; load_layout
+  [ "${WALL:-0}" = "0" ] && [ "$SLASH_INK" = "GRAYA" ] || exit 5
+  exit 0 )
+check "$?" "the wall page sets a unit by its caption and the slash in black"
+
+# A PLACE'S OWN STYLE: white on a black plate (Z_<PLACE>_INV), extra bold
+# (_HEAVY, the value drawn twice), the bar beside it (_BAR, an outline and a
+# fill from the foot) — and the wall page's forecast with no heading, its
+# wind in three lines, and the outdoor line drawn before the headline.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  first=$(echo $GRID_ZONES | cut -d' ' -f1)
+  ins=$(echo $IN_ZONES | cut -d' ' -f2)
+  [ -n "$first" ] && [ -n "$ins" ] || exit 1
+  eval "Z_${first}_INV=1; Z_${first}_HEAVY=1"
+  eval "Z_${ins}_BAR=50"
+  eval "gval=\$Z_${first}_VALUE; ival=\$Z_${ins}_VALUE"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  # The plate, then the caption and the value knocked out of it.
+  grep -q -e "-B${T}BLACK${T}-k" "$FBINK_LOG" || { echo "no black plate" >&2; exit 2; }
+  n=$(grep -e "--${T}${gval}${T}" "$FBINK_LOG" | grep -c -e "${T}-h${T}")
+  [ "$n" -eq 2 ] || { echo "inverted heavy value drawn $n times" >&2; exit 3; }
+  # Only that place: the next one is drawn as ever.
+  n=$(grep -e "--${T}${ival}${T}" "$FBINK_LOG" | grep -c -e "${T}-h${T}")
+  [ "$n" -eq 0 ] || { echo "the inverse leaked: $n" >&2; exit 4; }
+  # The bar: three rectangles after the value, the last half as tall.
+  n=$(grep -c -e "-k${T}" "$FBINK_LOG")
+  [ "$n" -ge 4 ] || { echo "rectangles: $n" >&2; exit 5; }
+  # The forecast: no heading on the wall page, three lines of wind.
+  FC_SUMMARY="Rain"; FC_ICON=61; FC_HIGH=19; FC_LOW=5; FC_WIND=4; FC_AGE="1 min"
+  LBL_WIND="wind"; LBL_FORECAST="FORECAST"
+  fc_wanted() { return 0; }
+  reset_log
+  draw_forecast_body >/dev/null 2>&1
+  grep -q -e "--${T}FORECAST${T}" "$FBINK_LOG" && { echo "heading drawn" >&2; exit 6; }
+  for w in "wind" "4 km/h" "1 min" "Rain" "19°/5°"; do
+    grep -q -e "--${T}${w}${T}" "$FBINK_LOG" || { echo "no '$w'" >&2; exit 7; }
+  done
+  grep -q "fc_61_${FC_WALL_SZ}.bmp" "$FBINK_LOG" || { echo "not the wall's icon" >&2; exit 8; }
+  # The outdoor line, drawn first, when the collector asks for it.
+  HERO_LINE=1; printf 'BM' > "$TMP/heroline.bmp"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  head -1 "$FBINK_LOG" | grep -q "heroline.bmp" || { echo "line not first" >&2; exit 9; }
+  rm -f "$TMP/heroline.bmp"
+  exit 0 )
+check "$?" "a place's own style: inverted, extra bold, the bar; the wall forecast and line"
+
+# THE WALL PAGE'S HAIRLINES BETWEEN THE OUTDOOR PLACES: down 8 px left of the
+# second cell of a row, across in the air above every row but the first —
+# appendWallBody()'s, at the same design pixels. The desk page has neither.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  set -- $LY_GRID_ROWS
+  [ "$#" -ge 2 ] && [ "$1" = "2" ] || { echo "rows '$LY_GRID_ROWS'" >&2; exit 1; }
+  reset_log
+  draw_zones >/dev/null 2>&1
+  cell=$(( GRID_LAB_SZ + 4 + GRID_VAL_SZ ))
+  vx=$(( COL_L_X + COL_L_W / 2 - 8 ))
+  grep -q -e "-k${T}top=$(( GRID_Y - 2 )),left=${vx},width=[0-9]*,height=$(( cell + 4 ))" \
+      "$FBINK_LOG" || { echo "no line down at $vx" >&2; exit 2; }
+  hy=$(( GRID_Y + GRID_ROW_H - (GRID_ROW_H - cell) / 2 ))
+  grep -q -e "-k${T}top=${hy},left=${COL_L_X},width=$(( COL_L_W - 8 ))," "$FBINK_LOG" || \
+      { echo "no line across at $hy" >&2; exit 3; }
+  # The desk page: none of either.
+  flow_payload "$WORK/ly.txt" res=600
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"; load_layout
+  [ "${WALL:-0}" = "0" ] || exit 4
+  reset_log
+  draw_zones >/dev/null 2>&1
+  cell=$(( GRID_LAB_SZ + 4 + GRID_VAL_SZ ))
+  grep -q -e "height=$(( cell + 4 ))\$" "$FBINK_LOG" && { echo "desk line down" >&2; exit 5; }
+  exit 0 )
+check "$?" "the wall page draws hairlines between its outdoor places, the desk page none"
+
+# A WALL GRID PLACE'S OWN 24 h LINE (Z_<PLACE>_LINE): fetched for that place
+# alone, a cell wide less the gutter and as tall as its figures, and drawn
+# before the figures. A place that did not ask fetches nothing.
+( : > "$WORK/wget.log"; WGET_LOG="$WORK/wget.log"; export WGET_LOG
+  flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  WGET_OK_HOST=10.9.9.42; HOST=10.9.9.42; export WGET_OK_HOST
+  set -- $GRID_ZONES; first="$1"; second="$2"
+  set -- $LY_GRID_ROWS
+  [ -n "$second" ] && [ "$1" = "2" ] || { echo "rows '$LY_GRID_ROWS'" >&2; exit 1; }
+  eval "Z_${first}_LINE=1"
+  rm -f "$TMP"/zline_*.bmp
+  fetch_zonelines >/dev/null 2>&1
+  lz=$(echo "$first" | tr 'A-Z' 'a-z')
+  grep -q "/kindle/graph.bmp?line=1&z=${lz}&w=$(( COL_L_W / 2 - 14 ))&h=${GRID_VAL_SZ}\$" \
+      "$WORK/wget.log" || { cat "$WORK/wget.log" >&2; exit 2; }
+  [ "$(grep -c 'line=1&z=' "$WORK/wget.log")" = "1" ] || exit 3
+  [ -s "$TMP/zline_${first}.bmp" ] || exit 4
+  eval "gval=\$Z_${first}_VALUE"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  li=$(grep -n "zline_${first}.bmp" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  vi=$(grep -n -e "--${T}${gval}${T}" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  [ -n "$li" ] && [ -n "$vi" ] && [ "$li" -lt "$vi" ] || { echo "line $li value $vi" >&2; exit 5; }
+  grep "zline_${first}.bmp" "$FBINK_LOG" | grep -q "x=${COL_L_X},y=$(( GRID_Y + GRID_LAB_SZ + 4 ))" || exit 6
+  # Switched off, it is not drawn even with the file still there.
+  eval "Z_${first}_LINE="
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -q "zline_" "$FBINK_LOG" && exit 7
+  rm -f "$TMP"/zline_*.bmp
+  exit 0 )
+check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind it"
+
+# AND IT REPAINTS BY ZONES, AS THE DESK PAGE DOES: the readings above the band,
+# the clock its own rectangle in the band every minute, the forecast beside it
+# — each refreshed once and none of them flashing; the whole screen only on
+# the full tier.
+( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  data_stale() { return 1; }
+  [ "$Z_SENS_H" = "$RULE3_Y" ] || { echo "readings rect $Z_SENS_H, band at $RULE3_Y" >&2; exit 1; }
+  [ "$Z_CHART_H" = "0" ] || exit 2
+  [ "$Z_CLOCK_Y" -ge "$RULE3_Y" ] || { echo "clock at $Z_CLOCK_Y, above the band" >&2; exit 3; }
+  reset_log; redraw_clock "12:35" 0
+  [ "$(grep -c -- '	-s	' "$FBINK_LOG")" = "1" ] || exit 4
+  grep -q -- '-s	top='"$Z_CLOCK_Y"',left='"$Z_CLOCK_X"',width='"$Z_CLOCK_W"',height='"$Z_CLOCK_H" \
+      "$FBINK_LOG" || exit 5
+  reset_log; redraw_sensors "12:35" 0
+  [ "$(grep -c -- '	-s	' "$FBINK_LOG")" = "1" ] || exit 6
+  grep -q -- '-s	top=0,left=0,width=600,height='"$RULE3_Y" "$FBINK_LOG" || exit 7
+  grep -q -- '-f	-s' "$FBINK_LOG" && exit 8
+  grep -q -- "${T}12:35${T}" "$FBINK_LOG" && exit 9      # the clock is not in it
+  reset_log; redraw_forecast
+  [ "$(grep -c -- '	-s	' "$FBINK_LOG")" = "1" ] || exit 10
+  grep -q -- '-s	top='"$RULE3_Y"',' "$FBINK_LOG" || exit 11
+  grep -q -- '-f	-s' "$FBINK_LOG" && exit 12
+  exit 0 )
+check "$?" "the wall page repaints by zones: readings, clock, forecast, none flashing"
+
+# THE CLOCK TIER DEFERS TO WHICHEVER TIER DREW IT: the readings on the desk
+# page, the forecast on the wall page — never the readings there, or the wall
+# clock stands a minute behind each time they update.
+( WALL=0
+  clock_covered "sensors clock" || exit 1
+  clock_covered "forecast clock" && exit 2
+  clock_covered "clock" && exit 3
+  WALL=1
+  clock_covered "sensors clock" && exit 4
+  clock_covered "forecast clock" || exit 5
+  clock_covered "sensors chart forecast clock" || exit 6
+  clock_covered "clock" && exit 7
+  exit 0 )
+check "$?" "the clock tier skips only when its own rectangle's tier drew it (desk: readings, wall: forecast)"
+
 # Old script, new collector: the file's own GRID_ROWS is still sent for it.
 grep -q 'GRID_ROWS=' "$FIXTURE"
 check "$?" "the fixture still carries the file-page GRID_ROWS older scripts read"
@@ -1347,7 +1573,7 @@ check "$?" "the fixture still carries the file-page GRID_ROWS older scripts read
   fetch_data >/dev/null 2>&1
   # And which version of the scripts asks: the repository's kindle/ has no
   # VERSION file, which is a folder copied from a checkout — "none".
-  grep -q "/kindle/data?shape=standalone&col=1&pkg=none$" "$WORK/wget.log" || exit 2
+  grep -q "/kindle/data?shape=standalone&col=1&wall=1&pkg=none$" "$WORK/wget.log" || exit 2
   exit 0 )
 check "$?" "the chart is fetched at the layout's height, the data for the chosen page"
 LAYOUT=auto; unset PAGE_MODE; RES_W=600; RES_H=800
@@ -2730,7 +2956,7 @@ if [ -n "$PKG_GOOD" ]; then
       # ...and the refusal rides along on the next fetch.
       DASH_DIR="$KDIR"; DASH_VER=""
       fetch_data >/dev/null 2>&1
-      grep -q '/kindle/data?col=1&pkg=none&pkgerr=md5&pkgfor=0123456789abcdef0123456789abcdef$' \
+      grep -q '/kindle/data?col=1&wall=1&pkg=none&pkgerr=md5&pkgfor=0123456789abcdef0123456789abcdef$' \
           "$WORK/wget.log" || exit 7
       exit 0 )
     check "$?" "a package whose MD5 is not the offer's changes nothing, is reported, and is not retried"
