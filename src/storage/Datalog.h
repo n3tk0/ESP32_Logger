@@ -48,6 +48,8 @@ constexpr uint8_t DL_BATCH_ROWS = 8;
 constexpr size_t  DL_HEADER_MAX = 1024;
 
 struct DatalogCol {
+    // The page keys its column table by these sizes too (dlColKey() in
+    // www/js/settings.js): change them together.
     char sensor[17];
     char metric[16];
     char label[24];

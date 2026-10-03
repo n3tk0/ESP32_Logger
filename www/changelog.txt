@@ -6,6 +6,10 @@
 - [Added] Kindle browser page per device: the page is laid out at the reader's own screen size (auto-detected, or a Device setting: Kindle 7, Paperwhite 1/2, 3/4, 5, Oasis) instead of a fixed 600 px, so it fits the Paperwhite 4 (536×724) without being cut off, and several Kindles can show it at once; a Browser bar setting keeps the page clear of the browser's address bar.
 - [Fixed] Kindle panel with a wide typeface (Futura): the clock no longer breaks onto a second line (e.g. at 00:36). The script reads the bold face's own figure widths from its font file and sets the time just small enough to fit its box, centring it by its real width.
 - [Added] Air Quality card: with a BME680/688 (wired or on a node) it shows an estimated TVOC ("TVOC ≈", new tvoc_est metric in ppb) when there is no TVOC sensor, and the dial shows the BME's IAQ when there is no PM sensor; sensors are found by their readings, so a node's PM sensor or BME680 now fills the card, and the eCO₂ row appears only with an SGP30/ENS160 or a real CO₂ sensor (then labelled CO₂).
+- [Fixed] Data log: a new log file now starts with its header row. Without it the next write took the file for one with another layout and moved it aside, so the Collector made a new small file for every 8 rows instead of one per day.
+- [Fixed] Data log columns for sensors with long Cyrillic names (e.g. "Външен сензор") no longer stay empty after the Data log page is saved, and the page no longer adds the same sensor again each time it is opened.
+- [Added] Data log page: a "Reset columns" button rebuilds the column list from the sensors enabled now, dropping columns of removed or renamed sensors (applied on Save; the log starts a new file).
+- [Changed] "Create & Switch" with Timestamp in filename now names the file by the device's clock (NTP or RTC) instead of the time since boot when there is no DS1302.
 - [Changed] Change log rewritten: the 4.2 - 4.7 intermediate releases are now documented, and 4.0 - 4.1 are summarised under v4.0.0.
 
 ## v5.0.0 - Kindle Display, remote nodes and firmware optimisation
