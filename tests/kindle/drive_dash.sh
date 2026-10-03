@@ -161,6 +161,8 @@ printf 'get %s\n' "$*" >> "$LIPC_LOG"
 # can tell "the panel did not ask" from "the panel asked and got nothing".
 case "$*" in
     *battLevel*) echo "${FAKE_BATT:-62}"; exit 0 ;;
+    # The network's name, only when it is asked for by that name.
+    *currentEssid*) [ -n "${FAKE_ESSID:-}" ] && echo "$FAKE_ESSID"; exit 0 ;;
 esac
 [ -f "$WIFI_STATE" ] && cat "$WIFI_STATE"
 exit 0
@@ -1443,6 +1445,23 @@ check "$?" "the wall page sets a unit by its caption and the slash in black"
   draw_zones >/dev/null 2>&1
   head -1 "$FBINK_LOG" | grep -q "line_HERO_" || { echo "line not first" >&2; exit 9; }
   rm -f "$hl"
+  # Over a band it stops 8 px short, where the headline's plate does.
+  Z_SUB="${Z_SUB:-1 to 9°}"; SUB_BAND=GRAY4; SUB_INK=WHITE
+  hl="$TMP/line_HERO_${HEAD_W}x$(( SUB_Y - HERO_Y - 8 ))_0.bmp"; printf 'BM' > "$hl"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -q "line_HERO_${HEAD_W}x$(( SUB_Y - HERO_Y - 8 ))_0" "$FBINK_LOG" || { echo "line not short of the band" >&2; exit 10; }
+  unset SUB_BAND SUB_INK
+  # Lines nothing asks for any more, and the files of before, are cleared.
+  : > "$TMP/heroline.bmp"; : > "$TMP/zline_G1.bmp"; : > "$TMP/line_G9_10x10_0.bmp"
+  LAYOUT_FLOW=1; WALL=0
+  wget() { return 1; }
+  fetch_lines
+  for f in heroline.bmp zline_G1.bmp line_G9_10x10_0.bmp; do
+    [ -e "$TMP/$f" ] && { echo "$f left behind" >&2; exit 11; }
+  done
+  [ -e "$hl" ] || { echo "the headline's own line went too" >&2; exit 12; }
+  rm -f "$hl"
   exit 0 )
 check "$?" "a place's own style: inverted, extra bold; the wall forecast and line"
 
@@ -1576,7 +1595,7 @@ check "$?" "the wall page's band under the headline, in its shades, instead of t
   lx=$(( COL_L_X + (gcw - lw) / 2 ))
   grep -e "--${T}${lab}" "$FBINK_LOG" | grep -q "left=${lx}," || \
       { grep -e "${lab}" "$FBINK_LOG" >&2; echo "want $lx" >&2; exit 1; }
-  hx=$(( COL_R_X + (COL_R_W - GROUP_LAB_SZ * 3) / 2 ))
+  hx=$(( COL_R_X + (COL_R_W - GROUP_LAB_SZ * 3000 * 115 / 100000) / 2 ))
   grep -e "--${T}${Z_GROUP_IN}${T}" "$FBINK_LOG" | grep -q "left=${hx}," || exit 2
   # The indoor values: none at the column's left edge any more.
   for z in $IN_ZONES; do
@@ -1590,22 +1609,38 @@ check "$?" "the wall page centres its grid cells and its indoor column"
 # signal /proc/net/wireless gives, and wifid's name for the network. Not on
 # the desk page.
 ( printf 'Inter-| sta-|   Quality        |   Discarded packets\n face | tus | link level noise |  nwid  crypt\n  wlan0: 0000   45.  -65.  -256        0      0\n' > "$WORK/wireless"
-  WIFI_PROC="$WORK/wireless"; printf 'HomeNet\n' > "$WIFI_STATE"
+  WIFI_PROC="$WORK/wireless"; export FAKE_ESSID=HomeNet
   WALL=1; STAT_X=396; STAT_Y=770; STAT_SZ=12
   reset_log
   draw_wifi >/dev/null 2>&1
   [ "$(grep -c -e "-B${T}BLACK${T}-k" "$FBINK_LOG")" = "3" ] || { cat "$FBINK_LOG" >&2; exit 1; }
   [ "$(grep -c -e "-B${T}GRAYC${T}-k" "$FBINK_LOG")" = "2" ] || exit 2
   grep -q -e "--${T}HomeNet${T}" "$FBINK_LOG" || exit 3
-  grep -q -e "left=$(( 396 - WIFI_W ))," "$FBINK_LOG" || exit 4
+  grep -q -e "left=$(( 396 - 12 * 10 ))," "$FBINK_LOG" || exit 4
   # dBm + 256 and a percentage, as other drivers give it.
   sed -i 's/-65\./201./' "$WORK/wireless"; wifi_read; [ "$WIFI_BARS" = "5" ] || exit 5
   sed -i 's/201\./30./' "$WORK/wireless"; wifi_read; [ "$WIFI_BARS" = "2" ] || exit 6
+  # The last bar holds to -86 dBm; past it there is none.
+  sed -i 's/ 30\./ -86./' "$WORK/wireless"; wifi_read; [ "$WIFI_BARS" = "1" ] || exit 7
+  sed -i 's/-86\./-87./' "$WORK/wireless"; wifi_read; [ "$WIFI_BARS" = "0" ] || exit 8
+  # A long name is cut to the room before the status, by letters, never
+  # inside one: at 12 px the name starts at 396-120+25+4 = 305 and has
+  # (396-6-305)*2/12 = 14 letters before the status.
+  FAKE_ESSID="МояДомашнаМрежаЗаКухнятаИВсичко1"
+  reset_log
+  draw_wifi >/dev/null 2>&1
+  want="МояДомашнаМреж"
+  grep -q -e "--${T}${want}${T}" "$FBINK_LOG" || { grep -e "--" "$FBINK_LOG" >&2; exit 9; }
+  # On the collector's own access point the footer's note names the network.
+  LBL_MEASURED="AP Logger · 2 nodes"
+  reset_log
+  draw_wifi >/dev/null 2>&1
+  [ -s "$FBINK_LOG" ] && exit 10
+  unset LBL_MEASURED
   WALL=0
   reset_log
   draw_wifi >/dev/null 2>&1
-  [ -s "$FBINK_LOG" ] && exit 7
-  rm -f "$WIFI_STATE"
+  [ -s "$FBINK_LOG" ] && exit 11
   exit 0 )
 check "$?" "the wall page's footer has the reader's WiFi: five bars and the network's name"
 

@@ -2914,25 +2914,45 @@ draw_line() {
     return 0
 }
 
+# The headline's line stops where its plate does: 8 px short of the band, so
+# the white between the two stays white under an inverted headline too.
+hero_line_h() {
+    LINE_H=$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))
+    sub_band && LINE_H=$(( LINE_H - 8 ))
+    return 0
+}
+
 fetch_lines() {
     if [ "${LAYOUT_FLOW:-0}" != "1" ]; then rm -f "$TMP"/line_*.bmp; return 0; fi
     if [ "${HERO_LINE:-0}" = "1" ]; then
-        fetch_line HERO "" "${HEAD_W:-564}" "$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))"
+        hero_line_h
+        fetch_line HERO "" "${HEAD_W:-564}" "$LINE_H"
     else
         rm -f "$TMP"/line_HERO_*.bmp
     fi
-    [ "${WALL:-0}" = "1" ] || return 0
-    local gcols gvsz gi z
-    set -- ${GRID_ZONES:-}
+    # Files from before lines were named by their shape.
+    rm -f "$TMP/heroline.bmp" "$TMP"/zline_*.bmp
+    local gcols gvsz gi z f keep=" HERO "
+    set --
+    if [ "${WALL:-0}" = "1" ]; then set -- ${GRID_ZONES:-}; fi
     for gcols in ${LY_GRID_ROWS:-}; do
+        [ -n "${1:-}" ] || break
         if [ "$gcols" -ge 3 ]; then gvsz="${GRID_VAL_SZ_3:-26}"; else gvsz="${GRID_VAL_SZ:-31}"; fi
         gi=0
         while [ "$gi" -lt "$gcols" ] && [ -n "${1:-}" ]; do
             z="$1"; shift; gi=$((gi + 1))
             eval "[ \"\${Z_${z}_LINE:-}\" = 1 ]" || continue
+            keep="$keep$z "
             fetch_line "$z" "z=$(echo "$z" | tr 'A-Z' 'a-z')&" \
                        "$(( ${COL_L_W:-270} / gcols - 14 ))" "$gvsz"
         done
+    done
+    # A place that no longer has a line, or a page that is no longer the
+    # wall, leaves none behind.
+    for f in "$TMP"/line_*.bmp; do
+        [ -e "$f" ] || continue
+        z="${f#"$TMP"/line_}"; z="${z%%_*}"
+        case "$keep" in *" $z "*) ;; *) rm -f "$f" ;; esac
     done
     return 0
 }
@@ -3762,8 +3782,8 @@ wifi_read() {
     WIFI_SSID=$(lipc-get-prop com.lab126.wifid currentEssid 2>/dev/null | head -1)
     [ -n "$WIFI_SSID" ] || \
         WIFI_SSID=$(wpa_cli status 2>/dev/null | sed -n 's/^ssid=//p' | head -1)
-    # Printable, and short enough to stay clear of the status line after it.
-    WIFI_SSID=$(printf '%s' "$WIFI_SSID" | tr -d '\000-\037' | cut -c1-16)
+    # Printable; draw_wifi() cuts it to the room it has.
+    WIFI_SSID=$(printf '%s' "$WIFI_SSID" | tr -d '\000-\037')
     local lvl
     lvl=$(awk 'NR > 2 { sub(/\.$/, "", $4); print $4; exit }' "$WIFI_PROC" 2>/dev/null)
     WIFI_BARS=0
@@ -3784,14 +3804,37 @@ wifi_read() {
     return 0
 }
 
-# Left of the status line, STAT_X less WIFI_W: the bars stand on the
-# footer's baseline, filled to the signal and light grey past it.
-WIFI_W=150
+# The first $2 letters of $1, counted as letters rather than bytes: busybox
+# cut counts bytes, and a name cut inside a two-byte letter draws as a box.
+utf8_head() {
+    printf '%s' "$1" | LC_ALL=C awk -v n="$2" 'BEGIN { RS = "\001" } {
+        o = ""; k = 0
+        for (i = 1; i <= length($0); i++) {
+            c = substr($0, i, 1)
+            if (!(c >= "\200" && c < "\300")) { if (k == n) break; k++ }
+            o = o c
+        }
+        printf "%s", o }'
+}
+
+# How wide a caption is drawn, in percent of the collector's estimate. The
+# estimate is the browser's serif; the Kindle's Bookerly sets a caption 15 %
+# wider, which is what the grid's arrow has always been placed by. Centring
+# on the wall page goes by the same, so its two columns agree.
+cap_pct() { if [ "${WALL:-0}" = "1" ]; then echo 115; else echo 100; fi; }
+
+# Left of the status line, ten type sizes before STAT_X: the bars stand on
+# the footer's baseline, filled to the signal and light grey past it, and the
+# name is cut to the room left before the status. Not on a collector's own
+# access point: the note at the footer's left already names that network,
+# and is long enough to run into this.
 draw_wifi() {
     [ "${WALL:-0}" = "1" ] && [ "${STAT_X:-0}" -gt 0 ] 2>/dev/null || return 0
+    case "${LBL_MEASURED:-}" in "AP "*) return 0 ;; esac
     wifi_read
     local sz="${STAT_SZ:-${FOOT_SZ:-12}}" y="${STAT_Y:-${FOOT_Y:-0}}"
-    local x=$(( STAT_X - WIFI_W )) i=1 h pen bw gap base
+    local x i=1 h pen bw gap base tx n
+    x=$(( STAT_X - sz * 10 ))
     bw=$(( sz / 4 )); [ "$bw" -lt 2 ] && bw=2
     gap=$(( sz / 6 )); [ "$gap" -lt 1 ] && gap=1
     base=$(( y + sz * ${BASELINE_MILLE:-848} / 1000 ))
@@ -3801,8 +3844,11 @@ draw_wifi() {
         fill_rect "$(( x + (i - 1) * (bw + gap) ))" "$(( base - h ))" "$bw" "$h" "$pen"
         i=$((i + 1))
     done
-    [ -n "$WIFI_SSID" ] && \
-        draw_text_reg "$(( x + 5 * (bw + gap) + sz / 3 ))" "$y" "$sz" "GRAY7" "$WIFI_SSID"
+    # About half a type size a letter, and half a size clear of the status.
+    tx=$(( x + 5 * (bw + gap) + sz / 3 ))
+    n=$(( (STAT_X - sz / 2 - tx) * 2 / sz ))
+    [ -n "$WIFI_SSID" ] && [ "$n" -gt 0 ] && \
+        draw_text_reg "$tx" "$y" "$sz" "GRAY7" "$(utf8_head "$WIFI_SSID" "$n")"
     return 0
 }
 
@@ -4180,8 +4226,8 @@ draw_zones() {
     zone_plate "$(( lx - 6 ))" "$(( ${TOP_Y:-20} - 6 ))" \
                "$(( ${HEAD_W:-${COL_L_W:-270}} + 12 ))" "$(( hb - ${TOP_Y:-20} + 6 ))"
     # The outdoor line behind it, on the plate, so the figures are drawn over it.
-    [ "${HERO_LINE:-0}" = "1" ] && \
-        draw_line HERO "$lx" "${HERO_Y:-38}" "${HEAD_W:-564}" "$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))"
+    [ "${HERO_LINE:-0}" = "1" ] && hero_line_h && \
+        draw_line HERO "$lx" "${HERO_Y:-38}" "${HEAD_W:-564}" "$LINE_H"
     draw_text_reg "$lx" "${TOP_Y:-20}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_OUT"
 
     local hero_sz="${HERO_SZ:-84}" hero_y="${HERO_Y:-38}" hx="$lx" sx0="$lx"
@@ -4296,7 +4342,9 @@ draw_zones() {
             lcx="$cx"; vcx="$cx"
             if [ "$gcols" = "1" ] || [ "${WALL:-0}" = "1" ]; then
                 eval "ladv=\${Z_${z}_LADVW:-0}"
-                local lw=$(( ${GRID_LAB_SZ:-10} * ladv * 115 / 100000 ))
+                # A wall caption is measured as the arrow is placed, with
+                # Bookerly's 15 % (CAP_PCT); the desk's row of one as it was.
+                local lw=$(( ${GRID_LAB_SZ:-10} * ladv * $(cap_pct) / 100000 ))
                 [ -n "$capa" ] && lw=$(( lw + ${GRID_LAB_SZ:-10} * 2 ))
                 [ "$ladv" -gt 0 ] 2>/dev/null || lw=0
                 centre_in "$cx" "$gcw" "$lw"
@@ -4352,7 +4400,7 @@ draw_zones() {
         fi
         # Centred over the column on the wall page, as everything in it is.
         CENTRE_X="$rx"
-        [ "${WALL:-0}" = "1" ] && centre_in "$rx" "$rw" "$(( lab_sz * ${Z_GROUP_IN_ADVW:-0} / 1000 ))"
+        [ "${WALL:-0}" = "1" ] && centre_in "$rx" "$rw" "$(( lab_sz * ${Z_GROUP_IN_ADVW:-0} * $(cap_pct) / 100000 ))"
         draw_text_reg "$CENTRE_X" "${IN_LAB_Y:-134}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_IN"
 
         # The first field gets more of the row, not an equal share: it is set
@@ -4421,7 +4469,7 @@ draw_zones() {
                 CENTRE_X="$rx"
                 if [ "${WALL:-0}" = "1" ]; then
                     eval "ladv=\${Z_${z}_LADVW:-0}"
-                    centre_in "$rx" "$rw" "$(( ${GRID_LAB_SZ:-10} * ladv / 1000 ))"
+                    centre_in "$rx" "$rw" "$(( ${GRID_LAB_SZ:-10} * ladv * $(cap_pct) / 100000 ))"
                 fi
                 in_caption "$cx" "$y" "$rw" "$vsz" "$lab" "$CENTRE_X"
             elif [ "$col" = "1" ]; then

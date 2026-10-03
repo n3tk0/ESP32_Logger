@@ -857,9 +857,14 @@ condition word. The panel centres by the widths the collector sends
 
 **The footer shows the WiFi signal**, on the panel only: five bars filled by
 strength (the link level in `/proc/net/wireless`, as dBm or as percent; −55
-dBm and better is five, −86 and worse is none) and the network's name, cut to
-16 characters, left of the status. The name comes from the Kindle's own
-`com.lab126.wifid`, else `wpa_cli`; the collector is not asked.
+dBm and better is five, −86 still one, weaker none) and the network's name,
+ten type sizes left of the status and cut, by letters, to the room before it.
+The name comes from the Kindle's own `com.lab126.wifid`, else `wpa_cli`; the
+collector is not asked. On a collector's own access point it is not drawn:
+the footer's note already names that network, and is long enough to meet it.
+Over a band, the headline's line stops 8 px short of it, as its plate does.
+On the wall page the panel centres a caption at 115 % of the collector's
+estimate, Bookerly's width, as the grid's arrow has always been placed.
 
 Upright only: turned to 90° or 270°, the page is the desk one on its side.
 The FBInk script asks for it with `?wall=1`, and only a script that does gets

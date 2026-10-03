@@ -2612,8 +2612,9 @@ static void kdWallAt(String& p, const char* cls, int x, int y, int w = 0, int h 
 /// The outdoor mean of the last 24 hours behind the wall page's headline, light
 /// grey and thick, edge to edge of its row: the panel's own graph.bmp?line=1,
 /// which the browser stretches over the row as an image.
-static void appendHeroLine(String& p, const KdFlow& f, bool inv) {
-    const int H = f.subY - f.heroY;
+static void appendHeroLine(String& p, const KdFlow& f, bool inv, bool band) {
+    // Short of a band by the white between it and the headline's plate.
+    const int H = f.subY - f.heroY - (band ? 8 : 0);
     kdWallAt(p, "", f.colLX, f.heroY, f.headW, H);
     p += F("<img src=\"/kindle/graph.bmp?line=1&amp;w=");
     p += f.headW;
@@ -2702,7 +2703,7 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
                     (band ? f.subY - 8 : f.headRuleY - 4) - (f.groupY - 6));
     }
     // The outdoor line behind the figures, on the plate.
-    if (rd.heroLine) appendHeroLine(p, f, hInv);
+    if (rd.heroLine) appendHeroLine(p, f, hInv, band);
     kdWallAt(p, "lab", f.colLX, f.groupY, f.headW);
     appendEscaped(p, kdGroupOutLabel(zones));
     if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive())

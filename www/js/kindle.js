@@ -1126,7 +1126,7 @@ function kdRenderPreview() {
   // chart's switch on a page with no chart — appendHeroLine() and
   // graph.bmp?line=1.
   if (L.wall && (show & 0x0020)) {
-    h += kdPvLine(X, L.heroY, HW, L.subY - L.heroY, 5);
+    h += kdPvLine(X, L.heroY, HW, L.subY - L.heroY - (sband ? 8 : 0), 5);
   }
   h += kdT(X, L.groupY, L.labSz, kdGroups.out || kdGroupPh.out, { ink:capInk, bold:capB });
   v = kdPvValue(z);
@@ -1291,7 +1291,7 @@ function kdRenderPreview() {
       // The plate as the panel lays it (update_dash.sh): the column's width
       // in a column or alone, the first place's share beside the others.
       h += kdPvPlate(z, px - 6, ptop,
-                     L.inVcol || L.inStack || ilive.length === 1 ? IW
+                     L.inVcol || (big && L.inStack) || ilive.length === 1 ? IW
                        : (big ? w1 : (L.inCol ? IW - w1 : cw2)),
                      iy + ivs + 6 - ptop);
       var cap = kdPvCaption(z);
@@ -1424,13 +1424,14 @@ function kdRenderPreview() {
   h += kdT(18, L.footY + 8, 15, "measured on site", { ink:"#545c68" });
   // The wall page's reader WiFi, left of the status line: draw_wifi().
   if (L.wall) {
-    var wx = L.statX - 150, wb = L.footY + 8 + 12;
+    // At the panel's STAT_SZ, 15: bars 3 px wide, 2 apart, on the baseline.
+    var wx = L.statX - 150, wb = L.footY + 8 + Math.round(15 * 0.848);
     for (i = 1; i <= 5; i++) {
-      h += "<u style='left:" + (wx + (i - 1) * 5) + "px;top:" + (wb - Math.round(12 * (i + 1) / 6)) +
-           "px;width:3px;height:" + Math.round(12 * (i + 1) / 6) + "px;background:" +
+      h += "<u style='left:" + (wx + (i - 1) * 5) + "px;top:" + (wb - Math.floor(15 * (i + 1) / 6)) +
+           "px;width:3px;height:" + Math.floor(15 * (i + 1) / 6) + "px;background:" +
            (i <= 4 ? "#000" : "#ccc") + "'></u>";
     }
-    h += kdT(wx + 29, L.footY + 8, 12, "HomeWiFi", { ink:"#777777" });
+    h += kdT(wx + 30, L.footY + 8, 15, "HomeWiFi", { ink:"#777777" });
   }
 
   // ── The hit targets ──
