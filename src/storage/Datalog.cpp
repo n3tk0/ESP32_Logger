@@ -442,7 +442,12 @@ int datalogAppend(fs::FS& fs, const char* header, const char* lines,
 
     File f = fs.open(path, FILE_APPEND);
     if (!f) { Serial.printf("[datalog] cannot open %s\n", path); return -1; }
-    const size_t before = f.size();
+    // NOT f.size() when the file is new: core 2.0.x fills a File's size from
+    // a stat() at open, which fails for a file that open() is creating, and
+    // returns whatever that failed stat left — so the header was skipped and
+    // the next write, finding a row where the header should be, moved the
+    // file aside. `size` is 0 for a missing, archived or empty file.
+    const size_t before = size ? f.size() : 0;
     if (before == 0) { f.print(header); f.print("\r\n"); }
 
     int written = 0;
