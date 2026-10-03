@@ -4,6 +4,7 @@
  * Port of the design system's editable.jsx + MasonryDeck. Provides:
  *   • drag-reorder via Pointer Events (works on touch + mouse + pen)
  *   • per-card span chips (3 / 4 / 6 / 8 / 12 of 12)
+ *   • per-card height chips (auto / S / M / L / XL)
  *   • hide-to-tray + restore + add-from-library
  *   • live-mode masonry packing (no row-height gaps)
  *   • localStorage persistence per page
@@ -36,6 +37,11 @@
 
   var STORAGE_PREFIX = "esp32logger.layout.";
   var ALLOWED_SPANS  = [3, 4, 6, 8, 12];
+  // Fixed card heights in px, keyed by the chip label. A card with no `h`
+  // takes its natural height and stretches to the tallest card of its row;
+  // a card with one keeps exactly that height and scrolls what does not fit.
+  var HEIGHTS        = { S: 120, M: 200, L: 300, XL: 420 };
+  var HEIGHT_KEYS    = ["", "S", "M", "L", "XL"];
   var COLUMNS        = 12;
   var GAP            = 14;
   var THUMB_HEIGHT   = 96;
@@ -88,11 +94,12 @@
     // single-column phone breakpoint).
     var forceFull = width < 560;
 
-    // First pass: set widths and clear explicit heights so natural height is measured.
+    // First pass: set widths and clear explicit heights so natural height is
+    // measured (a fixed-height card gets its own height straight away).
     slots.forEach(function (slot) {
       var span = forceFull ? COLUMNS : Math.max(1, Math.min(COLUMNS, +slot.dataset.span || 4));
       slot.style.width = (span * colW + (span - 1) * GAP) + "px";
-      slot.style.height = "";
+      slot.style.height = HEIGHTS[slot.dataset.h] ? HEIGHTS[slot.dataset.h] + "px" : "";
     });
     // Force layout flush before measuring.
     // eslint-disable-next-line no-unused-expressions
@@ -113,8 +120,9 @@
         currentCol = 0;
       }
       
-      var naturalH = slot.offsetHeight;
-      currentRow.push({ slot: slot, span: span, height: naturalH, col: currentCol });
+      var fixedH = HEIGHTS[slot.dataset.h] || 0;
+      var naturalH = fixedH || slot.offsetHeight;
+      currentRow.push({ slot: slot, span: span, height: naturalH, fixed: !!fixedH, col: currentCol });
       currentCol += span;
     });
     if (currentRow.length > 0) {
@@ -129,7 +137,7 @@
       row.forEach(function (p) {
         p.slot.style.left   = (p.col * (colW + GAP)) + "px";
         p.slot.style.top    = cumTop + "px";
-        p.slot.style.height = maxH + "px";
+        p.slot.style.height = (p.fixed ? p.height : maxH) + "px";
       });
       cumTop += maxH + GAP;
     });
@@ -289,6 +297,11 @@
       var c = findCard(id); if (!c) return;
       c.span = span; persist(); render();
     }
+    function setHeight(id, h) {
+      var c = findCard(id); if (!c) return;
+      if (h) c.h = h; else delete c.h;
+      persist(); render();
+    }
     function setHidden(id, h) {
       var c = findCard(id); if (!c) return;
       c.hidden = h; persist(); render();
@@ -326,7 +339,7 @@
         reset.addEventListener("click", function () {
           // Snapshot current layout, reset immediately, give the user an
           // 8 s undo window via the standard toast helper.
-          var snapshot = cards.map(function (c) { return { id:c.id, span:c.span, hidden:c.hidden }; });
+          var snapshot = cards.map(function (c) { return { id:c.id, span:c.span, h:c.h, hidden:c.hidden }; });
           resetLayout();
           if (typeof showUndoToast === "function") {
             showUndoToast(
@@ -366,6 +379,7 @@
         slot.className = "deck-slot";
         slot.dataset.id = card.id;
         slot.dataset.span = card.span;
+        if (HEIGHTS[card.h]) slot.dataset.h = card.h;
         slot.dataset.title = metaTitle(meta);
         var content = meta.render(card);
         if (typeof content === "string") slot.innerHTML = content;
@@ -457,8 +471,22 @@
         body.className = "thumb-body";
         body.innerHTML =
           (meta.icon ? '<span data-icon="' + esc(meta.icon) + '"></span>' : "") +
-          '<span class="thumb-title">' + esc(metaTitle(meta)) + '</span>' +
-          '<span class="thumb-span mono">' + card.span + '/12</span>';
+          '<span class="thumb-title">' + esc(metaTitle(meta)) + '</span>';
+        var heights = document.createElement("span");
+        heights.className = "edit-spans edit-heights";
+        heights.title = edT("editableDeck.height");
+        var curH = HEIGHTS[card.h] ? card.h : "";
+        HEIGHT_KEYS.forEach(function (k) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = "edit-span" + (curH === k ? " active" : "");
+          b.textContent = k || "A";
+          b.title = k ? edT("editableDeck.setHeightTo", { n: k, px: HEIGHTS[k] })
+                      : edT("editableDeck.autoHeight");
+          b.addEventListener("click", function () { setHeight(card.id, k); });
+          heights.appendChild(b);
+        });
+        body.appendChild(heights);
         slot.appendChild(body);
 
         attachPointerDrag(slot, grip, function (toId) { moveCard(card.id, toId); });

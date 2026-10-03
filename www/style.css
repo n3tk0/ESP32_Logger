@@ -269,16 +269,20 @@ button, a, [role="button"] { min-height: 24px; }
 .nav-item .ndot { margin-left:auto; width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 6px var(--accent); animation:pulse 1.5s ease-in-out infinite; }
 .sidebar-foot { margin-top:auto; padding:10px; border-top:1px solid var(--border); }
 .sidebar-stats {
-  display:grid; grid-template-columns:1fr 1fr;
+  /* minmax(0,…): a long value (RAM, storage) must not widen its column past
+     half the sidebar; it is cut with an ellipsis instead, and the chip's
+     title carries the full text. */
+  display:grid; grid-template-columns:repeat(2, minmax(0,1fr));
   gap:5px; margin-bottom:10px;
 }
 .sstat {
-  display:flex; align-items:center; gap:6px;
+  display:flex; align-items:center; gap:6px; min-width:0;
   font-family:var(--mono); font-size:11px; color:var(--text-3);
   padding:5px 7px; border:1px solid var(--border);
   border-radius:4px; background:var(--panel-2);
 }
 .sstat [data-lucide] { width:11px; height:11px; flex-shrink:0; }
+.sstat > span:not([data-icon]) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* Connection state tints the whole stats group (.ok/.err on .sidebar-stats),
    drawn as a halo (box-shadow) rather than padding so the chips keep their
    full width; the sidebar-foot's 10 px padding holds it. Each chip carries
@@ -1702,6 +1706,11 @@ body.cmd-palette-open, body.qsp-open { overflow: hidden; }
   flex-direction: column;
 }
 .deck.live > .deck-slot > .card > .card-body { flex: 1; }
+/* Fixed-height card (height chip S/M/L/XL): the slot keeps that height and
+   the card body scrolls whatever does not fit. */
+.deck.live > .deck-slot[data-h] > .card,
+.deck.live > .deck-slot[data-h] > .kpi { min-height: 0; overflow: hidden; }
+.deck.live > .deck-slot[data-h] > .card > .card-body { min-height: 0; overflow: auto; }
 /* Editing mode: thumbnails in a plain 12-col grid (no masonry). */
 .deck.editing { display: block; }
 .deck-edit-grid {
@@ -1730,6 +1739,8 @@ body.cmd-palette-open, body.qsp-open { overflow: hidden; }
 .thumb-body   { flex: 1; display: flex; align-items: center; gap: 10px; padding: 0 4px; min-width: 0; }
 .thumb-body [data-lucide] { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
 .thumb-title  { font-size: 13px; font-weight: 500; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edit-heights { flex-shrink: 0; }
+.edit-heights .edit-span { width: auto; min-width: 22px; padding: 0 4px; }
 .thumb-span   { font-size: 10px; font-weight: 700; color: var(--text-3); background: var(--panel); border: 1px solid var(--border); padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
 
 /* Tray (HIDDEN + ADD CARD library) */
