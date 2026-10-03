@@ -4181,7 +4181,11 @@ draw_zones() {
             draw_text_reg "$lcx" "$gy" "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
             if [ -n "$capa" ]; then
                 eval "ladv=\${Z_${z}_LADVW:-0}"
-                draw_arrow "$(( lcx + ${GRID_LAB_SZ:-10} * ladv / 1000 + ${GRID_LAB_SZ:-10} / 3 ))" \
+                # After the caption by its estimate and 15 % more, and half
+                # its size of air: the estimate is the browser's serif, and
+                # the Kindle's Bookerly sets a caption with a unit wider —
+                # by a third of its size the arrow touched "hPa".
+                draw_arrow "$(( lcx + ${GRID_LAB_SZ:-10} * ladv * 115 / 100000 + ${GRID_LAB_SZ:-10} / 2 ))" \
                            "$(( gy + ${GRID_LAB_SZ:-10} * ${BASELINE_MILLE:-848} / 1000 ))" \
                            "$(( ${GRID_LAB_SZ:-10} * 3 / 2 ))" "$capa" "${LAB_INK:-GRAY7}"
             fi

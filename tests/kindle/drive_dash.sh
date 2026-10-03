@@ -1376,6 +1376,15 @@ check "$?" "the wall page with four outdoor places: 2 x 2 on the left, the indoo
   reset_log
   draw_zones >/dev/null 2>&1
   grep -q -e "--${T}${lab} / hPa${T}" "$FBINK_LOG" || { echo "no '$lab / hPa'" >&2; exit 3; }
+  # A tendency arrow goes after it with air between: the caption's estimate
+  # and 15 % more, and half the caption's size. The arrow's first stroke
+  # starts there.
+  ladv=5550; eval "Z_${first}_ARROW='↘'; Z_${first}_LADVW=$ladv"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  ax=$(( COL_L_X + GRID_LAB_SZ * ladv * 115 / 100000 + GRID_LAB_SZ / 2 ))
+  grep -q -e "-k${T}top=[0-9]*,left=${ax}," "$FBINK_LOG" || \
+      { echo "no arrow at $ax (ladv $ladv)" >&2; exit 6; }
   [ "$SLASH_INK" = "BLACK" ] && [ "$LAB_INK" = "BLACK" ] || exit 4
   # The desk page keeps its grey slash.
   flow_payload "$WORK/ly.txt" res=600
