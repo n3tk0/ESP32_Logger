@@ -202,7 +202,7 @@ var kdGroups  = { out: "", in: "" };               // the reader's headings
 var kdGroupPh = { out: "OUTSIDE", in: "INSIDE" };  // what "" renders as
 // The place flags — KSLOTF_* in src/web/KindleSlots.h, which /api/kindle/slots
 // does not send.
-var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8, heavy: 16, inv: 32, bar: 64 };
+var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8, heavy: 16, inv: 32, bar: 64, line: 128 };
 var kdInks    = [];     // [{id, css}] from the firmware's own enum
 var kdAutoDec = 255;
 var kdOpen    = "hero"; // which row is expanded
@@ -1225,6 +1225,14 @@ function kdRenderPreview() {
           lx = x + Math.max(0, kdQ(cw - kdTw(cap, L.labSz), 2));
           x += Math.max(0, kdQ(cw - kdTw(v, vs) - kdTw(u, usz), 2));
         }
+        // The place's own 24 h line behind its figures — appendCell().
+        if (L.wall && (z.flags & kdFlags.line)) {
+          h += "<svg style='left:" + (X + i * cw) + "px;top:" + (gy + L.labSz + 4) + "px;width:" +
+               (cw - 14) + "px;height:" + vs + "px' viewBox='0 0 560 100'" +
+               " preserveAspectRatio='none' aria-hidden='true'><polyline points='0,60 90,70" +
+               " 180,40 280,50 370,24 460,36 560,30' fill='none' stroke='#c0c0c0'" +
+               " stroke-width='4' vector-effect='non-scaling-stroke'/></svg>";
+        }
         h += kdPvPlate(z, X + i * cw - 6, gy - 6, cw - 6, L.labSz + 4 + vs + 12);
         h += kdT(lx, gy, L.labSz, cap, { ink:capInk, bold:capB });
         h += kdT(x, gy + L.labSz + 6, vs, v,
@@ -1619,6 +1627,8 @@ function kdSlotEditor(key) {
       kdFlagBox(key, kdFlags.inv,   kdI18n("flagInv")) +
       (kdPvBarScore(z.metric, 50) >= 0 && key !== "hero" && key !== "big"
         ? kdFlagBox(key, kdFlags.bar, kdI18n("flagBar")) : "") +
+      // The wall grid draws it; any place's choice keeps its history.
+      (/^g\d$/.test(key) ? kdFlagBox(key, kdFlags.line, kdI18n("flagLine")) : "") +
     "</div></div>";
 }
 

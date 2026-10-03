@@ -467,6 +467,13 @@ with sync_playwright() as p:
         check("\u00b0" in head or "8" in head,
               "with the value badge redrawn for the new reading (%r)" % head.strip()[:40])
 
+    # The 24 h line: offered on a grid place (it is the wall grid that draws
+    # it), and not on the headline.
+    check(pg.locator(g1 + " .kd-flag", has_text="24 h line").count() == 1,
+          "a grid place offers its own 24 h line")
+    check(pg.locator("#kd-zone-hero .kd-flag", has_text="24 h line").count() == 0,
+          "and the headline does not")
+
     # ── "By hand…" stays open once it has been chosen ───────────────────────
     # kdCadenceName() reads the VALUES, and the custom fields start at whatever
     # the last named choice left in them — so every edit anywhere on the page

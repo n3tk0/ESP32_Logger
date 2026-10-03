@@ -841,7 +841,7 @@ void setup() {
             // series silently drops every reading that arrives before track() is
             // called, and route registration is far enough downstream to lose a
             // visible slice of the first hour.
-            kindleTrackTrends();
+            kindleTrackTrends(true);
             // AFTER the track()s, never before: the snapshot fills the series
             // this build decided to keep, and finds nothing to fill if they do
             // not exist yet. See TrendStore.h.
@@ -921,7 +921,7 @@ void setup() {
             // that feeds the ring exists. track() is idempotent, so a boot
             // that reaches both call sites costs nothing — and so is the load,
             // which merges the same bytes into the same series.
-            kindleTrackTrends();
+            kindleTrackTrends(true);
             trendStoreLoad();
 #endif
             _initPlatform();

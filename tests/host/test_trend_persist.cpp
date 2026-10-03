@@ -336,6 +336,27 @@ static void test_recent_keeps_five_minute_buckets() {
     CHECK(TrendRing::snapshotBytes() <= TrendRing::SNAP_MAX_BYTES);
 }
 
+// keepOnly(): what a places save calls before track()ing its choice. The
+// series named stay with their hours; the rest go, and their slot is free.
+static void test_keep_only_frees_the_rest_and_keeps_history() {
+    TrendRing t;
+    fill(t, T0, 24);
+    for (const char* m : {"pressure", "humidity", "dew_point"}) CHECK(t.track("out", m));
+    CHECK(!t.track("out", "pm25"));   // full
+
+    const char* ids[] = {"out", "out"};
+    const char* ms[]  = {"temperature", "pm25"};
+    t.keepOnly(ids, ms, 2);
+    TrendRing::Hour h[TrendRing::HOURS];
+    CHECK(t.series("out", "temperature", T0, h));
+    CHECK_EQ((int)h[TrendRing::HOURS - 1].count, 2);
+    CHECK(!t.series("out", "pressure", T0, h));
+    CHECK(t.track("out", "pm25"));
+    t.add(rd(T0, "out", "pm25", 7.0f));
+    CHECK(t.series("out", "pm25", T0, h));
+    CHECK(h[TrendRing::HOURS - 1].max == 7.0f);
+}
+
 int main() {
     RUN(test_a_snapshot_restores_the_same_chart);
     RUN(test_time_passing_needs_no_special_case);
@@ -346,5 +367,6 @@ int main() {
     RUN(test_every_tracked_series_travels);
     RUN(test_a_snapshot_cannot_squat_on_the_slots);
     RUN(test_recent_keeps_five_minute_buckets);
+    RUN(test_keep_only_frees_the_rest_and_keeps_history);
     return SUMMARY();
 }

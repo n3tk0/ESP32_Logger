@@ -104,6 +104,11 @@ case "$url" in
         echo "$url" >> "${WGET_LOG:-/dev/null}"
         if [ -n "${PKG_FILE:-}" ] && [ -n "$out" ]; then cp "$PKG_FILE" "$out"; exit 0; fi
         ;;
+    # The wall's lines behind a value: logged, and a stand-in image.
+    *"$WGET_OK_HOST"*/kindle/graph.bmp\?line=1*)
+        echo "$url" >> "${WGET_LOG:-/dev/null}"
+        [ -n "$out" ] && printf 'BM' > "$out"
+        exit 0 ;;
     # ?h= is the chart's height on the collector's layout.
     *"$WGET_OK_HOST"*/kindle/graph.bmp|*"$WGET_OK_HOST"*/kindle/graph.bmp\?h=*)
         echo "$url" >> "${WGET_LOG:-/dev/null}"
@@ -1470,6 +1475,43 @@ check "$?" "a place's own style: inverted, extra bold, the bar; the wall forecas
   grep -q -e "height=$(( cell + 4 ))\$" "$FBINK_LOG" && { echo "desk line down" >&2; exit 5; }
   exit 0 )
 check "$?" "the wall page draws hairlines between its outdoor places, the desk page none"
+
+# A WALL GRID PLACE'S OWN 24 h LINE (Z_<PLACE>_LINE): fetched for that place
+# alone, a cell wide less the gutter and as tall as its figures, and drawn
+# before the figures. A place that did not ask fetches nothing.
+( : > "$WORK/wget.log"; WGET_LOG="$WORK/wget.log"; export WGET_LOG
+  flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
+  load_kv "$DASH_TMP/data.txt" PAYLOAD
+  ly_load "$WORK/ly.txt"
+  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
+  load_layout
+  WGET_OK_HOST=10.9.9.42; HOST=10.9.9.42; export WGET_OK_HOST
+  set -- $GRID_ZONES; first="$1"; second="$2"
+  set -- $LY_GRID_ROWS
+  [ -n "$second" ] && [ "$1" = "2" ] || { echo "rows '$LY_GRID_ROWS'" >&2; exit 1; }
+  eval "Z_${first}_LINE=1"
+  rm -f "$TMP"/zline_*.bmp
+  fetch_zonelines >/dev/null 2>&1
+  lz=$(echo "$first" | tr 'A-Z' 'a-z')
+  grep -q "/kindle/graph.bmp?line=1&z=${lz}&w=$(( COL_L_W / 2 - 14 ))&h=${GRID_VAL_SZ}\$" \
+      "$WORK/wget.log" || { cat "$WORK/wget.log" >&2; exit 2; }
+  [ "$(grep -c 'line=1&z=' "$WORK/wget.log")" = "1" ] || exit 3
+  [ -s "$TMP/zline_${first}.bmp" ] || exit 4
+  eval "gval=\$Z_${first}_VALUE"
+  reset_log
+  draw_zones >/dev/null 2>&1
+  li=$(grep -n "zline_${first}.bmp" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  vi=$(grep -n -e "--${T}${gval}${T}" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  [ -n "$li" ] && [ -n "$vi" ] && [ "$li" -lt "$vi" ] || { echo "line $li value $vi" >&2; exit 5; }
+  grep "zline_${first}.bmp" "$FBINK_LOG" | grep -q "x=${COL_L_X},y=$(( GRID_Y + GRID_LAB_SZ + 4 ))" || exit 6
+  # Switched off, it is not drawn even with the file still there.
+  eval "Z_${first}_LINE="
+  reset_log
+  draw_zones >/dev/null 2>&1
+  grep -q "zline_" "$FBINK_LOG" && exit 7
+  rm -f "$TMP"/zline_*.bmp
+  exit 0 )
+check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind it"
 
 # AND IT REPAINTS BY ZONES, AS THE DESK PAGE DOES: the readings above the band,
 # the clock its own rectangle in the band every minute, the forecast beside it

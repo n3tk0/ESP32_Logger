@@ -37,6 +37,7 @@
 #include "FormArgs.h"                 // formArg / queryArg / formParam
 #include "KindleSlotStore.h"           // GET/POST /api/kindle/slots
 #include "KindlePkg.h"                 // /api/kindle/pkg*, docs/KINDLE_UPDATE.md
+#include "KindleDashboard.h"           // kindleTrackTrends() after a places save
 #include "../managers/ConfigManager.h" // saveConfig() after module update
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
@@ -1007,6 +1008,7 @@ static void handleKindleSlotsPost(AsyncWebServerRequest* req, uint8_t* data, siz
     // Only now. The renderers read this without a lock, so it is replaced once,
     // after the write that makes it survive a reboot.
     kdSlots() = fresh;
+    kindleTrackTrends();   // a place's "24 h line" may have changed
 
     JsonDocument res;
     res["ok"]      = true;

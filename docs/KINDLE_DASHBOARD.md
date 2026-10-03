@@ -819,6 +819,13 @@ across the headline's row. The panel fetches it as
 draws it before the figures; the browser page shows the same image,
 stretched over the row.
 
+**A grid place's own 24 h line** works the same way, for any reading: tick
+*24 h line on the wall* on the place (`KSLOTF_LINE`). The payload says
+`Z_<PLACE>_LINE=1`; the panel fetches `/kindle/graph.bmp?line=1&z=<place>&w=…&h=…`
+as wide as the cell less its gutter and as tall as the figures, and draws it
+behind them; the browser page puts the same image under the value. So PM2.5
+and PM10 can carry a line as the outdoor temperature does.
+
 The headline's row is as tall as the largest headline, whatever this one
 came out at, and the headline stands on its foot, so a reading that gains a
 figure does not move everything under it. The chart and the week strip are
@@ -1576,6 +1583,15 @@ a fixed grid of hourly aggregates instead:
 That is affordable on every target including the C3, which is what makes the
 headline feature work on the board you probably have rather than only on the
 one with PSRAM.
+
+**Which four is the reader's choice, not a fifth series.** `kindleTrackTrends()`
+keeps, while there is room: the outdoor temperature (the chart and the
+headline's line), then in place order every place ticked *24 h line* or
+showing a pressure tendency arrow, then the indoor temperature, the outdoor
+pressure and humidity. A places save applies it at once
+(`TrendRing::keepOnly()`): a series no longer chosen is dropped with its
+hours, a new one starts empty and fills an hour at a time, and the ones that
+stay keep their history.
 
 It stores **min / max / mean per hour**, not raw samples. A 6" panel cannot
 resolve more than a couple of hundred horizontal pixels of line anyway, and

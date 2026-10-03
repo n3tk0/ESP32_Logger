@@ -2896,8 +2896,34 @@ fetch_heroline() {
     return 0
 }
 
+# A wall grid place's own 24 h line (Z_<PLACE>_LINE): as wide as its cell
+# less the gutter and as tall as its figures, drawn before them. Fetched
+# after load_data(), so the places are the payload's.
+fetch_zonelines() {
+    [ "${WALL:-0}" = "1" ] && [ "${LAYOUT_FLOW:-0}" = "1" ] || return 0
+    local gcols gvsz gi z
+    set -- ${GRID_ZONES:-}
+    for gcols in ${LY_GRID_ROWS:-}; do
+        if [ "$gcols" -ge 3 ]; then gvsz="${GRID_VAL_SZ_3:-26}"; else gvsz="${GRID_VAL_SZ:-31}"; fi
+        gi=0
+        while [ "$gi" -lt "$gcols" ] && [ -n "${1:-}" ]; do
+            z="$1"; shift; gi=$((gi + 1))
+            eval "[ \"\${Z_${z}_LINE:-}\" = 1 ]" || continue
+            if wget -q -T 15 -O "$TMP/zline.new" \
+                 "$(host_url)/kindle/graph.bmp?line=1&z=$(echo "$z" | tr 'A-Z' 'a-z')&w=$(( ${COL_L_W:-270} / gcols - 14 ))&h=$gvsz" \
+                 2>/dev/null && [ -s "$TMP/zline.new" ]; then
+                mv "$TMP/zline.new" "$TMP/zline_$z.bmp"
+            else
+                rm -f "$TMP/zline.new"
+            fi
+        done
+    done
+    return 0
+}
+
 fetch_graph() {
     fetch_heroline
+    fetch_zonelines
     chart_wanted || return 1
     # Into a scratch file, and only into place once it is whole. wget -O
     # truncates its target the moment it opens it, so fetching straight onto
@@ -2943,7 +2969,7 @@ fetch_graph() {
 zones_forget() {
     local z s
     for z in ${GRID_ZONES:-} ${IN_ZONES:-} HERO BIG; do
-        for s in VALUE UNIT LABEL ARROW BOLD INK VADVW UADVW ADVW LADVW CAPUNIT HEAVY INV BAR; do
+        for s in VALUE UNIT LABEL ARROW BOLD INK VADVW UADVW ADVW LADVW CAPUNIT HEAVY INV BAR LINE; do
             unset "Z_${z}_${s}" 2>/dev/null
         done
     done
@@ -4174,6 +4200,11 @@ draw_zones() {
                     centre_in "$cx" "$gcw" "$FIELD_W"
                     vcx="$CENTRE_X"
                 fi
+            fi
+            # Its own 24 h line behind the figures, first, as the headline's.
+            if [ "${WALL:-0}" = "1" ] && [ -s "$TMP/zline_$z.bmp" ] &&
+               eval "[ \"\${Z_${z}_LINE:-}\" = 1 ]"; then
+                draw_image "$TMP/zline_$z.bmp" "$cx" "$(( gy + ${GRID_LAB_SZ:-10} + 4 ))"
             fi
             zone_style "$z"
             zone_plate "$(( cx - 6 ))" "$(( gy - 6 ))" "$(( gcw - 6 ))" \

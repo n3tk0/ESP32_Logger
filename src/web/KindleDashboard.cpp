@@ -957,7 +957,7 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
         const long v = arg->toInt();
         if (v > 0 && v < 4000) askW = (uint16_t)v;
     }
-    const uint16_t W = ChartBmp::clampW(askW, skin.fbinkResW);
+    uint16_t W = ChartBmp::clampW(askW, skin.fbinkResW);
     // As tall as the reader's layout left the chart, when it says — see
     // LY_GR_H in /kindle/data. A reader that does not say gets the fixed
     // image it has always been sent.
@@ -972,7 +972,11 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     // Its width is in the chart's range; its height is far less than the
     // chart's least, and the rows are streamed, so any height will do.
     const bool line = queryArg(req, "line") != nullptr;
-    if (line) H = askH < 16 ? 16 : askH;
+    // A grid place's line (&z=g1) is a cell wide, far under the chart's least.
+    if (line) { H = askH < 16 ? 16 : askH; if (askW) W = (askW < 64 ? 64 : askW > 1000 ? 1000 : askW) & ~7u; }
+    uint8_t zi = KZ_COUNT;
+    if (const String* arg = queryArg(req, "z")) zi = kdZoneFromKey(arg->c_str());
+    const KindleSlot* zs = zi < KZ_COUNT && kdSlots().z[zi].used() ? &kdSlots().z[zi] : nullptr;
 
     // A shared_ptr, AND THAT IS THE FIX, not a tidier spelling of the same
     // thing. The previous version held raw pointers and deleted them only on
@@ -987,10 +991,11 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     if (!st) { req->send(503, "text/plain", "out of memory"); return; }
 
     const uint32_t now = (uint32_t)time(nullptr);
-    st->ctx.haveOut = trendRing.series(outdoorSensorId(), "temperature", now, st->ctx.tOut);
+    st->ctx.haveOut = zs ? trendRing.series(zs->sensorId, zs->metric, now, st->ctx.tOut)
+                         : trendRing.series(outdoorSensorId(), "temperature", now, st->ctx.tOut);
     st->ctx.haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, st->ctx.tIn);
     // The same two hours in five minutes the payload's axis labels describe.
-    if (kdChartWantsFine(st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn))
+    if (!zs && kdChartWantsFine(st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn))
         kdChartUseFine(now, st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn);
     st->ctx.lineOnly = line;
     st->ctx.init(W, H);
@@ -1521,6 +1526,7 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
         // set, as the script forgets all three before each payload.
         if (zones.z[i].flags & KSLOTF_HEAVY) s->printf("Z_%s_HEAVY=1\n", up);
         if (zones.z[i].flags & KSLOTF_INV)   s->printf("Z_%s_INV=1\n", up);
+        if (zones.z[i].flags & KSLOTF_LINE)  s->printf("Z_%s_LINE=1\n", up);
         const int bar = kdZoneIsGrid((uint8_t)i) || kdZoneIsIndoor((uint8_t)i)
                         ? kdPlaceBar(zones.z[i], res[i]) : -1;
         if (bar >= 0) s->printf("Z_%s_BAR=%d\n", up, bar);
@@ -1653,7 +1659,8 @@ static void appendBar(String& p, const char* valueClass, int fill) {
 /// on the caption's line — see kdWallUnits().
 static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
                        const char* valueClass, bool caption = true,
-                       const char* capUnit = "", bool wall = false) {
+                       const char* capUnit = "", bool wall = false,
+                       const char* lineZone = nullptr) {
     const bool capArrow = wall && r.arrow && *r.arrow;
     const bool inv = sl.flags & KSLOTF_INV;
     if (inv) p += F("<div class=\"inv\">");
@@ -1669,6 +1676,11 @@ static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
         p += F("</div>");
     }
     p += F("<div class=\"cv\">");
+    // The place's own 24 h line behind its value (KSLOTF_LINE, wall grid).
+    if (lineZone && (sl.flags & KSLOTF_LINE)) {
+        p += F("<img class=\"cl\" src=\"/kindle/graph.bmp?line=1&amp;w=200&amp;h=64&amp;z=");
+        p += lineZone; p += F("\" alt=\"\">");
+    }
     appendValue(p, r, sl, valueClass, !capArrow);
     appendBar(p, valueClass, kdPlaceBar(sl, r));
     p += F("</div>");
@@ -1688,7 +1700,8 @@ static int appendGridRow(String& p, const KdRender& rd, const uint8_t* used, int
         p += (int)(100 / cols);
         p += F("%\">");
         appendCell(p, rd.res[used[at]], zones.z[used[at]], "gv", true,
-                   rd.capUnit[used[at] - KZ_G1], rd.flow.wall);
+                   rd.capUnit[used[at] - KZ_G1], rd.flow.wall,
+                   rd.flow.wall ? kdZoneKey(used[at]) : nullptr);
         p += F("</td>");
     }
     p += F("</tr></table>");
@@ -2807,6 +2820,7 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
            ".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}"
            ".wa.wr{height:0;overflow:visible}.wa.wv{width:0;overflow:visible}"
            ".foot{margin-top:0}.wl .fc-t{font-weight:700;margin:0}.wl .wfw{color:#444;line-height:1.33}.wfs{font-weight:700}"
+           ".wl .cv,.wl .gv{position:relative}.cl{position:absolute;left:0;top:0;width:100%;height:100%}"
            ".wl{position:relative;width:");
     p += kdPx(564);
     p += F("px}.wl .grid .lab{margin-bottom:"); p += kdPx(4);
@@ -3415,11 +3429,34 @@ static void handleKindle(AsyncWebServerRequest* req) {
     req->send(res);
 }
 
-void kindleTrackTrends() {
-    trendRing.track(outdoorSensorId(), "temperature");
-    trendRing.track(indoorSensorId(),  "temperature");
-    trendRing.track(outdoorSensorId(), "pressure");
-    trendRing.track(outdoorSensorId(), "humidity");
+// FOUR SERIES, AND THE READER CHOOSES THEM. The ring holds TrendRing::MAX_SERIES
+// and each costs RAM all day, so a place's "24 h line" (KSLOTF_LINE) picks
+// one rather than adding to them. In this order, while there is room: the
+// outdoor temperature (the chart, the wall's headline line), then in place
+// order the places that asked for a line or a pressure tendency arrow, then
+// what was always kept — the indoor temperature for the chart, the outdoor
+// pressure and humidity.
+struct KdWant { const char* id[TrendRing::MAX_SERIES]; const char* m[TrendRing::MAX_SERIES]; int n; };
+static void __attribute__((noinline)) kdWant(KdWant& w, const char* id, const char* m) {
+    if (w.n >= TrendRing::MAX_SERIES || !*id) return;
+    for (int i = 0; i < w.n; i++)
+        if (!strcmp(w.id[i], id) && !strcmp(w.m[i], m)) return;
+    w.id[w.n] = id; w.m[w.n++] = m;
+}
+
+void kindleTrackTrends(bool load) {
+    if (load && configFs()) kdSlotsBegin(*configFs(), outdoorSensorId(), indoorSensorId());
+    KdWant w; w.n = 0;
+    kdWant(w, outdoorSensorId(), "temperature");
+    for (const KindleSlot& sl : kdSlots().z)
+        if (sl.used() && ((sl.flags & KSLOTF_LINE) ||
+                          ((sl.flags & KSLOTF_TREND) && !strcmp(sl.metric, "pressure"))))
+            kdWant(w, sl.sensorId, sl.metric);
+    kdWant(w, indoorSensorId(), "temperature");
+    kdWant(w, outdoorSensorId(), "pressure");
+    kdWant(w, outdoorSensorId(), "humidity");
+    trendRing.keepOnly(w.id, w.m, w.n);
+    for (int i = 0; i < w.n; i++) trendRing.track(w.id[i], w.m[i]);
 }
 
 // ---------------------------------------------------------------------------
@@ -3444,20 +3481,15 @@ static void handleKindleProbe(AsyncWebServerRequest* req) {
     p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
            "<meta name=\"viewport\" content=\"width=");
     p += PAGE_W;
+    // Kept plain: every byte here is flash on a build with none to spare.
     p += F("\"><title>Kindle probe</title><style>"
-           "body{font-family:Bookerly,Georgia,serif;margin:0;padding:16px;"
-           "background:#fff;color:#000;-webkit-text-size-adjust:none}"
-           "h1{font-size:20px;margin:0 0 10px}"
-           "p,li{font-size:15px;line-height:1.5}"
-           "b{font-size:19px}"
-           ".bar{background:#d8d8d8;border-left:2px solid #000;margin-bottom:3px;"
-           "font-size:12px;padding:2px 4px;white-space:nowrap}"
-           "</style></head><body><h1>Layout probe</h1>");
+           "body{font:15px Georgia,serif;margin:16px}"
+           ".bar{background:#ddd;border-left:2px solid #000;margin-bottom:3px;"
+           "font-size:12px;white-space:nowrap}</style></head><body>");
 
-    p += F("<p>Without a Device setting or ?scr=, the page is <b>");
+    p += F("<p>Default width <b>");
     p += PAGE_W;
-    p += F(" px</b> wide.</p><p id=\"r\">If this line does not change, this browser "
-           "runs no JavaScript &mdash; use the ruler below instead.</p>"
+    p += F(" px</b>.</p><p id=\"r\">No JavaScript: use the bars below.</p>"
            "<script>document.getElementById('r').innerHTML="
            "'innerWidth <b>'+window.innerWidth+'</b> &middot; innerHeight <b>'"
            "+window.innerHeight+'</b><br>devicePixelRatio <b>'"
@@ -3481,8 +3513,7 @@ static void handleKindleProbe(AsyncWebServerRequest* req) {
 
     // 320 is below anything this layout supports and 1072 is the panel's own
     // pixel count; a bar that overflows tells you as much as one that fits.
-    p += F("<p>The first bar that reaches the right edge without overflowing is "
-           "the width to build with:</p>");
+    p += F("<p>Build with the widest bar that fits:</p>");
     static const int CANDIDATES[] = { 1072, 800, 768, 700, 600, 536, 480, 400 };
     for (unsigned i = 0; i < sizeof(CANDIDATES) / sizeof(CANDIDATES[0]); i++) {
         p += F("<div class=\"bar\" style=\"width:");
@@ -3492,7 +3523,7 @@ static void handleKindleProbe(AsyncWebServerRequest* req) {
         p += F("</div>");
     }
 
-    p += F("<p><a href=\"/kindle\">back to the dashboard</a></p></body></html>");
+    p += F("<p><a href=\"/kindle\">Dashboard</a></p></body></html>");
 
     AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
     res->addHeader("Cache-Control", "no-store");

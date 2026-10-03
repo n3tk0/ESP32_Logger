@@ -201,9 +201,11 @@ class AsyncWebServerRequest;
 //   KINDLE_CLOCK_SYNC_GUARD_SEC  never reload sooner than this after rendering
 #include "RefreshCadence.h"
 
-/// Registers the trend series this page draws. Call once from setup(),
-/// before ProcessingTask starts, so no readings are missed.
-void kindleTrackTrends();
+/// Registers the trend series this page draws — see the choice in
+/// KindleDashboard.cpp. From setup(), before ProcessingTask starts, so no
+/// readings are missed, with `load` to read the places first; again after
+/// the places change.
+void kindleTrackTrends(bool load = false);
 
 /// Registers GET /kindle and GET /kindle/probe on `server`.
 void registerKindleDashboard(AsyncWebServer& server);
