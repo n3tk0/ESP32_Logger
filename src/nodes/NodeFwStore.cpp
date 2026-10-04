@@ -75,13 +75,7 @@ static void setSt(Target& t, uint8_t st, const char* err) {
 // ============================================================================
 
 static bool readJson(const char* path, JsonDocument& doc) {
-    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-    if (fsMutex && !g.isLocked()) return false;
-    File f = sdFs()->open(path, "r");
-    if (!f) return false;
-    const bool ok = !deserializeJsonFile(doc, f);
-    f.close();
-    return ok;
+    return jsonFromFileLocked(*sdFs(), path, doc, fsMutex);
 }
 
 static bool writeJson(const char* path, const JsonDocument& doc) {

@@ -104,6 +104,7 @@ private:
 
     bool   _accepts(int idx, const char* sensorId) const;
     bool   _pending(int idx, const LatestSlot& s, uint32_t since) const;
+    uint32_t _sentByAll() const;
     SensorReading* _buildSnapshot(int idx, size_t& n);
     void   _parseSensorList(JsonVariantConst v, int list);
 

@@ -4,6 +4,7 @@
 #include "../utils/MutexGuard.h"
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "../utils/JsonIO.h"
 
 ExportManager exportManager;
@@ -85,10 +86,15 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 
         // Schedule. First time: after min(interval, EXPORT_FIRST_SEND_MS), so
         // the table has had time to collect every sensor and a long interval
-        // isn't an equally long silence after boot. On reload: keep the
-        // running schedule, but pull it in if the new interval is shorter.
+        // isn't an equally long silence after boot — but never sooner than
+        // the API's own floor: a restart (Save & Restart) right after a post
+        // must not let sensor.community see the next one 60 s later. On
+        // reload: keep the running schedule, but pull it in if the new
+        // interval is shorter.
         if (!_scheduled[i]) {
-            _nextDueMs[i] = now + (iv < EXPORT_FIRST_SEND_MS ? iv : EXPORT_FIRST_SEND_MS);
+            uint32_t first = iv < EXPORT_FIRST_SEND_MS ? iv : EXPORT_FIRST_SEND_MS;
+            if (first < exp->minIntervalMs()) first = exp->minIntervalMs();
+            _nextDueMs[i] = now + first;
             _scheduled[i] = true;
         } else if ((int32_t)(_nextDueMs[i] - (now + iv)) > 0) {
             _nextDueMs[i] = now + iv;
@@ -146,6 +152,16 @@ bool ExportManager::_pending(int idx, const LatestSlot& s, uint32_t since) const
     return s.seq > since && _accepts(idx, s.r.sensorId);
 }
 
+// The table sequence every enabled periodic exporter has sent up to.
+uint32_t ExportManager::_sentByAll() const {
+    uint32_t m = _seq;
+    for (int i = 0; i < _count; i++) {
+        const IExporter* e = _exporters[i];
+        if (e->isEnabled() && !e->isStreaming() && _sentSeq[i] < m) m = _sentSeq[i];
+    }
+    return m;
+}
+
 // ---------------------------------------------------------------------------
 // ingest — keep the latest value per sensor+metric; hand streaming exporters
 // the reading immediately. Runs on ExportTask only (as does tick()), so the
@@ -153,24 +169,40 @@ bool ExportManager::_pending(int idx, const LatestSlot& s, uint32_t since) const
 // ---------------------------------------------------------------------------
 void ExportManager::ingest(const SensorReading& r) {
     LatestSlot* const latest = _latest;   // null = no periodic exporter
-    int slot = -1, empty = -1, oldest = -1;
+    // Slots at or below `sentAll` have gone to every periodic exporter, so
+    // overwriting one loses nothing; anything above it someone still owes.
+    const uint32_t sentAll = _sentByAll();
+    int slot = -1, empty = -1, spare = -1, oldest = -1;
     for (int k = 0; latest && k < EXPORT_LATEST_SLOTS; k++) {
         const LatestSlot& s = latest[k];
         if (s.seq == 0) { if (empty < 0) empty = k; continue; }
         if (strcmp(s.r.sensorId, r.sensorId) == 0 &&
             strcmp(s.r.metric,   r.metric)   == 0) { slot = k; break; }
+        if (s.seq <= sentAll && (spare < 0 || s.seq < latest[spare].seq)) spare = k;
         if (oldest < 0 || s.seq < latest[oldest].seq) oldest = k;
     }
 
     bool store = latest != nullptr;
     if (slot >= 0) {
         // A backfilled reading (remote node catching up after an outage) that
-        // is older than the value already held is not "the latest".
+        // is older than the value already held is not "the latest". Only
+        // while the held one is believable, though: a value stamped ahead of
+        // the clock (a node's RTC wrong, then corrected) would otherwise make
+        // every later reading "older" and freeze this metric until a reboot.
+        // With no wall clock there is nothing to judge by, so take it.
         const SensorReading& cur = latest[slot].r;
-        if (r.timestamp && cur.timestamp && r.timestamp < cur.timestamp) store = false;
+        const uint32_t wall = (uint32_t)time(nullptr);
+        const bool curPlausible = wall >= 1000000000u && cur.timestamp <= wall + 60;
+        if (r.timestamp && cur.timestamp && curPlausible && r.timestamp < cur.timestamp)
+            store = false;
     } else {
-        // Table full: evict the least recently updated metric.
-        slot = (empty >= 0) ? empty : oldest;
+        // Table full: overwrite a value every exporter already has; only
+        // when every slot is still owed to someone, the least recently
+        // updated one (and say so — that value is lost).
+        slot = (empty >= 0) ? empty : (spare >= 0) ? spare : oldest;
+        if (empty < 0 && spare < 0 && slot >= 0)
+            Serial.printf("[Export] table full, dropped %s/%s\n",
+                          latest[slot].r.sensorId, latest[slot].r.metric);
     }
     if (store && slot >= 0) {
         latest[slot].r   = r;
@@ -291,6 +323,13 @@ void ExportManager::_spoolBatch(IExporter* exp,
     if (!_spoolFS->exists("/spool")) _spoolFS->mkdir("/spool");
 
     File f = _spoolFS->open(path, FILE_APPEND);
+    if (f && f.size() % sizeof(SensorReading)) {
+        // A torn tail (power lost mid-append): appending after it would
+        // misalign every record that follows, so start the file over.
+        f.close();
+        _spoolFS->remove(path);
+        f = _spoolFS->open(path, FILE_APPEND);
+    }
     if (!f) {
         Serial.printf("[ExportManager] Cannot open spool %s\n", path);
         return;
@@ -299,9 +338,20 @@ void ExportManager::_spoolBatch(IExporter* exp,
     if (f.size() >= MAX_SPOOL_BYTES) {
         Serial.printf("[ExportManager] Spool full for '%s' — dropping\n", exp->getName());
     } else {
-        f.write(reinterpret_cast<const uint8_t*>(r), n * sizeof(SensorReading));
-        Serial.printf("[ExportManager] Spooled %u readings for '%s'\n",
-                      (unsigned)n, exp->getName());
+        const size_t want = n * sizeof(SensorReading);
+        if (f.write(reinterpret_cast<const uint8_t*>(r), want) == want) {
+            Serial.printf("[ExportManager] Spooled %u readings for '%s'\n",
+                          (unsigned)n, exp->getName());
+        } else {
+            // A torn record would put every later append at the wrong offset,
+            // and the drain would read them all shifted: fixed-size records
+            // have no newline to resync on. File has no truncate, so drop
+            // the spool rather than keep a file that is wrong from here on.
+            f.close();
+            _spoolFS->remove(path);
+            Serial.printf("[Export] spool write short, dropped %s\n", path);
+            return;
+        }
     }
     f.close();
 }

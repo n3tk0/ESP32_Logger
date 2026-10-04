@@ -57,3 +57,9 @@ size_t jsonToBuf(JsonVariantConst v, char* buf, size_t cap);
 // same lambda in each of them was its own atomicWrite instantiation.
 bool jsonToFileAtomic(fs::FS& fs, const char* path, JsonVariantConst v,
                       SemaphoreHandle_t mx);
+
+// The read side of the same stores: `path` parsed into `doc` under `mx`
+// (when given, and not taken within 2 s: false). False also when the file
+// is missing or does not parse.
+bool jsonFromFileLocked(fs::FS& fs, const char* path, JsonDocument& doc,
+                        SemaphoreHandle_t mx);

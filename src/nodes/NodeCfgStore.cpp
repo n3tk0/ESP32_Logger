@@ -96,13 +96,7 @@ static Entry* alloc(bool espnow, const char* name, uint8_t id) {
 // ============================================================================
 
 static bool readJson(const char* path, JsonDocument& doc) {
-    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-    if (fsMutex && !g.isLocked()) return false;
-    File f = LittleFS.open(path, "r");
-    if (!f) return false;
-    const DeserializationError err = deserializeJsonFile(doc, f);
-    f.close();
-    return !err;
+    return jsonFromFileLocked(LittleFS, path, doc, fsMutex);
 }
 
 static bool writeJson(const char* path, const JsonDocument& doc) {
