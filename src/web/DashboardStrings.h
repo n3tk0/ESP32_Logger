@@ -61,7 +61,6 @@ enum KindleLang : uint8_t {
     KLANG_BG   = 2
 };
 
-#ifdef FEATURE_KINDLE_DASHBOARD
 
 // ---------------------------------------------------------------------------
 // Which language, and when it is decided
@@ -259,4 +258,4 @@ inline const char* kdWeekdayAhead(int wday, int daysAhead) {
     return kdLangIsBg() ? BG[i] : EN[i];
 }
 
-#endif  // FEATURE_KINDLE_DASHBOARD
+
