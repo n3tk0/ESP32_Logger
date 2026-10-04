@@ -13,7 +13,6 @@
 #include "../core/Globals.h"            // sdAvailable
 #include "../core/SdCompat.h"           // sdFs()
 #include "../pipeline/DataPipeline.h"   // fsMutex
-#include "../utils/AtomicWrite.h"
 #include "../utils/JsonIO.h"
 #include "../utils/MutexGuard.h"
 
@@ -69,9 +68,7 @@ static bool saveMeta() {
     d["md5"]      = (const char*)s_pkg.md5;
     d["uploaded"] = s_pkg.uploaded;
     d["offer"]    = s_pkg.offer;
-    return atomicWrite(*sdFs(), PKG_JSON,
-                       [&d](File& f) { return serializeJson(d, static_cast<Print&>(f)) > 0; },
-                       fsMutex);
+    return jsonToFileAtomic(*sdFs(), PKG_JSON, d.as<JsonVariantConst>(), fsMutex);
 }
 
 void kindlePkgBegin() {

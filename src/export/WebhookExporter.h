@@ -31,6 +31,10 @@ public:
     bool        send(const SensorReading* readings, size_t count) override;
     const char* getName()   const override { return "webhook"; }
     bool        isEnabled() const override { return _enabled; }
+    // Alerts are about "now": evaluate every reading as it arrives (not the
+    // periodic snapshot), and never replay a stale breach from the spool.
+    bool        isStreaming()    const override { return true; }
+    bool        spoolOnFailure() const override { return false; }
 
 private:
     struct Rule {

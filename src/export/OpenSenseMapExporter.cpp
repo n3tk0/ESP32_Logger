@@ -3,6 +3,9 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <math.h>          // isfinite
+#include <memory>          // std::unique_ptr
+#include <time.h>          // gmtime_r / strftime for createdAt
 
 bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;
@@ -12,23 +15,23 @@ bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     strncpy(_token, cfg["access_token"] | "", sizeof(_token)-1);
 
     _sensorIdCount = 0;
+    int over = 0;   // mappings past OSM_MAX_SENSORS: logged, not silently lost
     JsonObjectConst ids = cfg["sensor_ids"].as<JsonObjectConst>();
-    if (!ids.isNull()) {
-        for (auto kv : ids) {
-            if (_sensorIdCount >= 12) break;
-            strncpy(_sensorIds[_sensorIdCount].metric,
-                    kv.key().c_str(), sizeof(_sensorIds[0].metric)-1);
-            strncpy(_sensorIds[_sensorIdCount].sensorId,
-                    kv.value().as<const char*>() ?: "",
-                    sizeof(_sensorIds[0].sensorId)-1);
-            _sensorIdCount++;
-        }
+    for (auto kv : ids) {
+        const char* sid = kv.value().as<const char*>();
+        if (!sid || !*sid) continue;              // an empty field maps nothing
+        if (_sensorIdCount >= OSM_MAX_SENSORS) { over++; continue; }
+        SensorIdEntry& e = _sensorIds[_sensorIdCount++];
+        strlcpy(e.metric,   kv.key().c_str(), sizeof(e.metric));
+        strlcpy(e.sensorId, sid,              sizeof(e.sensorId));
     }
 
     char tokenMask[12] = "(none)";
     if (_token[0]) snprintf(tokenMask, sizeof(tokenMask), "%.6s...", _token);
     Serial.printf("[OSM] boxId=%s sensors=%d token=%s\n",
                   _boxId, _sensorIdCount, tokenMask);
+    if (over) Serial.printf("[OSM] %d sensor IDs past the limit of %d ignored\n",
+                            over, OSM_MAX_SENSORS);
     return true;
 }
 
@@ -41,13 +44,29 @@ const char* OpenSenseMapExporter::_lookupSensorId(const char* metric) const {
     return nullptr;
 }
 
+// A reading openSenseMap can take: mapped to one of the box's sensors, and a
+// real number. "%g" prints NaN/inf as "nan"/"inf", which the API answers with
+// 422 for the WHOLE array, so one bad value would have cost every good one.
+const char* OpenSenseMapExporter::_sendableId(const SensorReading& r) const {
+    if (r.quality == QUALITY_ERROR || !isfinite(r.value)) return nullptr;
+    const char* sid = _lookupSensorId(r.metric);
+    return (sid && sid[0]) ? sid : nullptr;
+}
+
 bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
     if (!_enabled || _boxId[0] == '\0' || count == 0) return true;
+
+    // Size the body by what will actually be sent, not by the batch: the
+    // latest-value snapshot carries every metric of every selected sensor,
+    // and most of them usually have no openSenseMap sensor behind them.
+    size_t mappedCount = 0;
+    for (size_t i = 0; i < count; i++) if (_sendableId(readings[i])) mappedCount++;
+    if (mappedCount == 0) return true;          // nothing for this box
     if (WiFi.status() != WL_CONNECTED) return false;
 
-    // Build JSON array: [{sensorId, value, createdAt}, ...]
-    // Only include readings that have a mapped sensorId
-    size_t bodyLen = count * 80 + 32;
+    // Build JSON array: [{sensor, value, createdAt}, ...]
+    // Worst entry: 24-char id + "%.6g" + createdAt ≈ 110 B; 128 keeps margin.
+    size_t bodyLen = mappedCount * 128 + 8;
     // nothrow: the check below is only a check under -fno-exceptions, which
     // is how this firmware builds. A plain new[] that cannot allocate
     // aborts the device instead of returning null, so an export during a
@@ -72,39 +91,72 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
 
     bool full = appendOk(snprintf(body + pos, bodyLen - pos, "["));
     for (size_t i = 0; full && i < count; i++) {
-        const char* sid = _lookupSensorId(readings[i].metric);
-        if (!sid || sid[0] == '\0') continue;
+        const char* sid = _sendableId(readings[i]);
+        if (!sid) continue;
 
-        if (mapped > 0) {
-            full = appendOk(snprintf(body + pos, bodyLen - pos, ","));
-            if (!full) break;
+        // createdAt = the reading's own time, so the value lands when it was
+        // measured — not when the (possibly much later, e.g. spooled) upload
+        // happened. Only with a real wall-clock timestamp; otherwise the
+        // server stamps arrival time.
+        char created[40] = "";
+        time_t ts = (time_t)readings[i].timestamp;
+        if (readings[i].timestamp >= 1000000000u) {
+            struct tm tmv;
+            gmtime_r(&ts, &tmv);
+            strftime(created, sizeof(created),
+                     ",\"createdAt\":\"%Y-%m-%dT%H:%M:%SZ\"", &tmv);
         }
         full = appendOk(snprintf(body + pos, bodyLen - pos,
-            "{\"sensor\":\"%s\",\"value\":\"%.4g\"}",
-            sid, readings[i].value));
-        mapped++;
+            "%s{\"sensor\":\"%s\",\"value\":\"%.6g\"%s}",
+            mapped ? "," : "", sid, readings[i].value, created));
+        if (full) mapped++;
     }
-    if (full) appendOk(snprintf(body + pos, bodyLen - pos, "]"));
+    // A body that did not fit is not valid JSON; never POST half of one.
+    if (!full || !appendOk(snprintf(body + pos, bodyLen - pos, "]"))) {
+        Serial.println("[OSM] body overflow — batch dropped");
+        delete[] body;
+        return true;   // retrying the same batch would overflow the same way
+    }
 
-    bool ok = true;
-    if (mapped > 0) {
-        char url[128];
-        snprintf(url, sizeof(url), "%s%s/data", API_BASE, _boxId);
+    char url[96];
+    snprintf(url, sizeof(url), "%s%s/data", OSM_API_BASE, _boxId);
 
-        HTTPClient http;
-        WiFiClientSecure secureClient;
-        // R15: no CA store bundled — setInsecure() until 19.x rollout
-        //       adds opt-in cert pinning in a follow-up phase
-        secureClient.setInsecure();
-        http.begin(secureClient, url);
+    // TLS or plain by OSM_API_BASE (see the header). The secure client is only
+    // constructed for https://, so the plain path never touches mbedTLS.
+    WiFiClient plain;
+    std::unique_ptr<WiFiClientSecure> secure;
+#if OSM_TLS
+    secure.reset(new (std::nothrow) WiFiClientSecure);
+    if (!secure) { delete[] body; return false; }
+    // R15: no CA store bundled — setInsecure() until opt-in cert pinning.
+    secure->setInsecure();
+#endif
+
+    HTTPClient http;   // declared after the clients: destroyed before them
+    bool ok = false;
+    if (http.begin(secure ? static_cast<WiFiClient&>(*secure) : plain, url)) {
+        // Bounded so four attempts plus backoff stay inside the ExportTask
+        // watchdog window (see ExportManager::_sendWithRetry).
+        http.setTimeout(5000);
         http.addHeader("Content-Type",  "application/json");
-        char authHeader[80];
-        snprintf(authHeader, sizeof(authHeader), "Bearer %s", _token);
-        http.addHeader("Authorization", authHeader);
+        if (_token[0]) {
+            char authHeader[80];
+            snprintf(authHeader, sizeof(authHeader), "Bearer %s", _token);
+            http.addHeader("Authorization", authHeader);
+        }
 
-        int code = http.POST(body);
+        int code = http.POST((uint8_t*)body, pos);
         ok = (code >= 200 && code < 300);
-        if (!ok) Serial.printf("[OSM] POST failed code=%d\n", code);
+        if (!ok && code >= 400 && code < 500 && code != 408 && code != 429) {
+            // Rejected, not lost: a wrong box id/token (401/403/404) or data
+            // the API refuses (422, e.g. a createdAt it deems in the future).
+            // Sending it again gets the same answer, and spooling it would
+            // replay the refusal in front of every later batch — so drop it.
+            Serial.printf("[OSM] POST rejected code=%d — batch dropped\n", code);
+            ok = true;
+        } else if (!ok) {
+            Serial.printf("[OSM] POST failed code=%d\n", code);
+        }
         http.end();
     }
 

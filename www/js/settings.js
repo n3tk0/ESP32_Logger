@@ -2857,7 +2857,8 @@ function hubStatusInit() {
       if (sensors) sensors.innerHTML = " " + _hubBadge("dim", t("settingsHub.sensorsCount", { n: (pc.sensors || []).length }));
 
       var exp = pc.export || {};
-      var enabled = ["mqtt", "http", "sensor_community", "opensensemap"].filter(function (k) {
+      var caps = (ST && ST.caps && ST.caps.exporters) || ["mqtt", "http", "sensor_community", "opensensemap"];
+      var enabled = caps.filter(function (k) {
         return exp[k] && exp[k].enabled;
       }).length;
       setEl2("hub-st-export", enabled
@@ -2992,3 +2993,4 @@ registerHandlers({
   closePopup: closePopup,
   modulesSelect: modulesSelect,
 });
+

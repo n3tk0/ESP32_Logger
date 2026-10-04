@@ -449,12 +449,39 @@ static_assert(
 #  define WEB_BASIC_AUTH_PASS "admin"
 #endif
 
-// Export pipeline batching (ExportTask)
+// Export scheduling (ExportManager / ExportTask)
+//
+// WHEN data is sent is configuration, not firmware: platform_config.json →
+// export.defaults.interval_ms (common) and export.<name>.interval_ms
+// (per-exporter override; absent/0 = use the common one). Same for WHICH
+// sensors: export.defaults.sensors / export.<name>.sensors (sensor ids;
+// empty = all). The values below are only fallbacks and capacity limits.
+//
+// EXPORT_BATCH_SIZE         — readings per send() when draining the spool
+// EXPORT_FLUSH_INTERVAL_MS  — common interval if the config has none
+// EXPORT_MIN_INTERVAL_MS    — hard floor for any configured interval
+// EXPORT_FIRST_SEND_MS      — first send after boot happens after
+//                             min(interval, this), so a 1 h interval
+//                             doesn't mean an hour of silence after a reboot
+// EXPORT_LATEST_SLOTS       — latest-value table: one slot per sensor+metric
+// EXPORT_MAX_SENSOR_FILTER  — max sensor ids in one selection list
 #ifndef EXPORT_BATCH_SIZE
 #  define EXPORT_BATCH_SIZE 20
 #endif
 #ifndef EXPORT_FLUSH_INTERVAL_MS
-#  define EXPORT_FLUSH_INTERVAL_MS 60000  // 1 min max wait
+#  define EXPORT_FLUSH_INTERVAL_MS 60000  // fallback common interval (1 min)
+#endif
+#ifndef EXPORT_MIN_INTERVAL_MS
+#  define EXPORT_MIN_INTERVAL_MS 5000
+#endif
+#ifndef EXPORT_FIRST_SEND_MS
+#  define EXPORT_FIRST_SEND_MS 60000
+#endif
+#ifndef EXPORT_LATEST_SLOTS
+#  define EXPORT_LATEST_SLOTS 48
+#endif
+#ifndef EXPORT_MAX_SENSOR_FILTER
+#  define EXPORT_MAX_SENSOR_FILTER 16
 #endif
 
 // Spool drain batching (ExportManager)

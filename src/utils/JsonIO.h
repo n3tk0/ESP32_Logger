@@ -27,6 +27,8 @@
 
 #include <ArduinoJson.h>
 #include <FS.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // Files larger than this are refused (NoMemory) instead of being buffered.
 constexpr size_t JSON_FILE_MAX = 32 * 1024;
@@ -48,3 +50,16 @@ size_t jsonToString(JsonVariantConst v, String& out);
 // the call it replaces, so callers that must not send a truncated document
 // still compare against measureJson() first.
 size_t jsonToBuf(JsonVariantConst v, char* buf, size_t cap);
+
+// serializeJson(v, file) through atomicWrite() (AtomicWrite.h): a .tmp
+// written in full, then renamed over `path`, under `mx` when given. One
+// out-of-line copy for the stores that save a document as it stands — the
+// same lambda in each of them was its own atomicWrite instantiation.
+bool jsonToFileAtomic(fs::FS& fs, const char* path, JsonVariantConst v,
+                      SemaphoreHandle_t mx);
+
+// The read side of the same stores: `path` parsed into `doc` under `mx`
+// (when given, and not taken within 2 s: false). False also when the file
+// is missing or does not parse.
+bool jsonFromFileLocked(fs::FS& fs, const char* path, JsonDocument& doc,
+                        SemaphoreHandle_t mx);

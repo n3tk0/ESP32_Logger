@@ -107,7 +107,7 @@
 /// question being asked.
 ///
 /// Returns 0..100, clamped at both ends.
-static inline uint8_t batteryPercent(uint16_t mv) {
+inline uint8_t batteryPercent(uint16_t mv) {
     // Descending by voltage. Second column is the percentage at that voltage.
     static const uint16_t CURVE[][2] = {
         {4200, 100}, {4060, 90}, {3980, 80}, {3920, 70}, {3870, 60},
@@ -168,7 +168,7 @@ struct BatteryHistory {
 /// timer. Readings with no usable clock are dropped rather than bucketed into
 /// day zero, and a clock that jumps backwards is ignored for the same reason —
 /// both would corrupt the day axis the slope is measured against.
-static inline void batteryHistoryAdd(BatteryHistory& h, uint32_t epoch, uint16_t mv) {
+inline void batteryHistoryAdd(BatteryHistory& h, uint32_t epoch, uint16_t mv) {
     if (epoch < BATT_MIN_REAL_TS || mv == 0) return;
 
     const uint32_t day = epoch / 86400u;
@@ -217,7 +217,7 @@ static inline void batteryHistoryAdd(BatteryHistory& h, uint32_t epoch, uint16_t
 /// Returns -1 when the answer would be invented rather than measured: too few
 /// days, or a slope that is flat or rising. A charged node reads as rising and
 /// gets -1, which is correct — it has no drain to extrapolate yet.
-static inline int16_t batteryDaysLeft(const BatteryHistory& h, uint16_t nowMv) {
+inline int16_t batteryDaysLeft(const BatteryHistory& h, uint16_t nowMv) {
     if (h.count < BATT_MIN_POINTS) return -1;
 
     // x counts days forward from the oldest slot, so a draining battery gives
@@ -252,6 +252,6 @@ static inline int16_t batteryDaysLeft(const BatteryHistory& h, uint16_t nowMv) {
 /// Either condition alone is enough. The percentage is the one that always
 /// works; the day count is the one that gives notice, and it is absent
 /// (`days < 0`) far more often than people expect — see batteryDaysLeft().
-static inline bool batteryShouldWarn(uint8_t pct, int16_t days) {
+inline bool batteryShouldWarn(uint8_t pct, int16_t days) {
     return pct <= BATT_WARN_PCT || (days >= 0 && days <= BATT_WARN_DAYS);
 }
