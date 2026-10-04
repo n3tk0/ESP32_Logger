@@ -7,9 +7,10 @@
 #include "../pipeline/DataPipeline.h"
 #include "../export/ExportManager.h"
 
-// EXPORT_EXPORT_BATCH_SIZE / EXPORT_FLUSH_INTERVAL_MS are configured in setup.h.
-// We accumulate readings into a local batch before dispatching to prevent
-// hammering the network with single-reading requests.
+// Every reading off exportQueue goes into ExportManager's latest-value table;
+// ExportManager::tick() sends to each exporter on its configured interval
+// (platform_config.json export.defaults / export.<name>), restricted to the
+// sensors selected for it. See ExportManager.h.
 
 // ---------------------------------------------------------------------------
 void exportTaskFunc(void* /*param*/) {
@@ -19,11 +20,6 @@ void exportTaskFunc(void* /*param*/) {
     // loop's priority so it wouldn't preempt today, but gating it keeps every
     // pipeline task consistent and safe if priorities are ever retuned.
     if (!TaskManager::waitForStart()) { Serial.println("[ExportTask] stopped"); vTaskDelete(nullptr); return; }
-
-    // EXPORT_BATCH_SIZE / EXPORT_FLUSH_INTERVAL_MS are configured in setup.h.
-    SensorReading batch[EXPORT_BATCH_SIZE];
-    size_t        batchCount  = 0;   // CM-4: match sendAll(…, size_t count)
-    uint32_t      lastFlushMs = millis();
 
     SensorReading r;
     while (TaskManager::running) {
@@ -49,19 +45,18 @@ void exportTaskFunc(void* /*param*/) {
 #endif
 
         // Short timeout so the task responds to running=false within 100ms.
-        bool got = xQueueReceive(exportQueue, &r,
-                                  pdMS_TO_TICKS(100)) == pdTRUE;
-        // Guard against overflow (batchCount should never reach EXPORT_BATCH_SIZE
-        // here, but be defensive).  (AUDIT 11.9: single decision-point)
-        if (got && batchCount < EXPORT_BATCH_SIZE) batch[batchCount++] = r;
-
-        if (batchCount > 0 &&
-            (batchCount >= EXPORT_BATCH_SIZE ||
-             millis() - lastFlushMs >= EXPORT_FLUSH_INTERVAL_MS)) {
-            exportManager.sendAll(batch, batchCount);
-            batchCount  = 0;
-            lastFlushMs = millis();
+        // Then drain whatever else is already queued without waiting, so a
+        // burst (remote node backfill) doesn't trickle in at one per 100 ms.
+        if (xQueueReceive(exportQueue, &r, pdMS_TO_TICKS(100)) == pdTRUE) {
+            int drained = 0;
+            do {
+                exportManager.ingest(r);
+            } while (++drained < 32 && xQueueReceive(exportQueue, &r, 0) == pdTRUE);
         }
+
+        // WHEN to send is configuration (export.defaults.interval_ms and the
+        // per-exporter overrides), resolved by ExportManager — not this task.
+        exportManager.tick();
     }
 
     // Skip flush-on-exit: sendAll blocks TLS HTTP inside the task-exit path and

@@ -1914,6 +1914,23 @@ void setupWebServer() {
         caps["flowmeter"] = false;
 #endif
         caps["platformMode"] = (int)g_platformMode;
+        
+        JsonArray exp = caps["exporters"].to<JsonArray>();
+#ifdef EXPORT_MQTT_ENABLED
+        exp.add("mqtt");
+#endif
+#ifdef EXPORT_HTTP_ENABLED
+        exp.add("http");
+#endif
+#ifdef EXPORT_SENSORCOMMUNITY_ENABLED
+        exp.add("sensor_community");
+#endif
+#ifdef EXPORT_OPENSENSEMAP_ENABLED
+        exp.add("opensensemap");
+#endif
+#ifdef EXPORT_WEBHOOK_ENABLED
+        exp.add("webhook");
+#endif
     };
 
     auto fillTheme = [](JsonObject o) {

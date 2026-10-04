@@ -3,8 +3,8 @@
 #include <freertos/task.h>
 
 // ============================================================================
-// ExportTask — batches readings from exportQueue and dispatches to all
-// registered exporters when batch is full or flush interval elapses.
+// ExportTask — feeds readings from exportQueue into ExportManager and runs
+// its scheduler, which sends to each exporter on its configured interval.
 // Priority: TASK_PRIO_EXPORT
 // ============================================================================
 void exportTaskFunc(void* param);

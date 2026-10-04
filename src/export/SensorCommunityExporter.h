@@ -19,14 +19,17 @@ public:
     bool        send(const SensorReading* readings, size_t count) override;
     const char* getName()   const override { return "sensor_community"; }
     bool        isEnabled() const override { return _enabled; }
+    // API requirement — ExportManager clamps the configured interval up to it.
+    uint32_t    minIntervalMs()  const override { return 145000; }
+    // The upload protocol has no timestamp field: a replayed spool would put
+    // old values at "now", so failed batches are dropped, not spooled.
+    bool        spoolOnFailure() const override { return false; }
 
 private:
     bool _postPin(const char* pin, const char* sensorName,
                   const char* body);
 
     char     _deviceId[13]  = {};
-    uint32_t _intervalMs    = 145000;
-    uint32_t _lastSendMs    = 0;
 
     static constexpr const char* API_URL =
         "https://api.sensor.community/v1/push-sensor-data/";

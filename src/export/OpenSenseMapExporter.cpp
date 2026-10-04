@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <time.h>          // gmtime_r / strftime for createdAt
 
 bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;
@@ -18,9 +19,12 @@ bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
             if (_sensorIdCount >= 12) break;
             strncpy(_sensorIds[_sensorIdCount].metric,
                     kv.key().c_str(), sizeof(_sensorIds[0].metric)-1);
+            _sensorIds[_sensorIdCount].metric[sizeof(_sensorIds[0].metric)-1] = '\0';
+            
             strncpy(_sensorIds[_sensorIdCount].sensorId,
                     kv.value().as<const char*>() ?: "",
                     sizeof(_sensorIds[0].sensorId)-1);
+            _sensorIds[_sensorIdCount].sensorId[sizeof(_sensorIds[0].sensorId)-1] = '\0';
             _sensorIdCount++;
         }
     }
@@ -45,9 +49,10 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
     if (!_enabled || _boxId[0] == '\0' || count == 0) return true;
     if (WiFi.status() != WL_CONNECTED) return false;
 
-    // Build JSON array: [{sensorId, value, createdAt}, ...]
-    // Only include readings that have a mapped sensorId
-    size_t bodyLen = count * 80 + 32;
+    // Build JSON array: [{sensor, value, createdAt}, ...]
+    // Only include readings that have a mapped sensorId.
+    // ~140 B per entry with createdAt; 160 keeps margin.
+    size_t bodyLen = count * 160 + 32;
     // nothrow: the check below is only a check under -fno-exceptions, which
     // is how this firmware builds. A plain new[] that cannot allocate
     // aborts the device instead of returning null, so an export during a
@@ -79,9 +84,21 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
             full = appendOk(snprintf(body + pos, bodyLen - pos, ","));
             if (!full) break;
         }
+        // createdAt = the reading's own time, so the value lands when it was
+        // measured — not when the (possibly much later, e.g. spooled) upload
+        // happened. Only with a real wall-clock timestamp; otherwise the
+        // server stamps arrival time.
+        char created[40] = "";
+        time_t ts = (time_t)readings[i].timestamp;
+        if (readings[i].timestamp >= 1000000000u) {
+            struct tm tmv;
+            gmtime_r(&ts, &tmv);
+            strftime(created, sizeof(created),
+                     ",\"createdAt\":\"%Y-%m-%dT%H:%M:%SZ\"", &tmv);
+        }
         full = appendOk(snprintf(body + pos, bodyLen - pos,
-            "{\"sensor\":\"%s\",\"value\":\"%.4g\"}",
-            sid, readings[i].value));
+            "{\"sensor\":\"%s\",\"value\":\"%.6g\"%s}",
+            sid, readings[i].value, created));
         mapped++;
     }
     if (full) appendOk(snprintf(body + pos, bodyLen - pos, "]"));
@@ -92,11 +109,11 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
         snprintf(url, sizeof(url), "%s%s/data", API_BASE, _boxId);
 
         HTTPClient http;
-        WiFiClientSecure secureClient;
+        WiFiClient client;
         // R15: no CA store bundled — setInsecure() until 19.x rollout
         //       adds opt-in cert pinning in a follow-up phase
-        secureClient.setInsecure();
-        http.begin(secureClient, url);
+        
+        http.begin(client, url);
         http.addHeader("Content-Type",  "application/json");
         char authHeader[80];
         snprintf(authHeader, sizeof(authHeader), "Bearer %s", _token);

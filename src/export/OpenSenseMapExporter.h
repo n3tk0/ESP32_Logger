@@ -30,5 +30,5 @@ private:
 
     const char* _lookupSensorId(const char* metric) const;
 
-    static constexpr const char* API_BASE = "https://api.opensensemap.org/boxes/";
+    static constexpr const char* API_BASE = "http://ingress.opensensemap.org/boxes/";
 };
