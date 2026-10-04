@@ -15,25 +15,23 @@ bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     strncpy(_token, cfg["access_token"] | "", sizeof(_token)-1);
 
     _sensorIdCount = 0;
+    int over = 0;   // mappings past OSM_MAX_SENSORS: logged, not silently lost
     JsonObjectConst ids = cfg["sensor_ids"].as<JsonObjectConst>();
-    if (!ids.isNull()) {
-        for (auto kv : ids) {
-            if (_sensorIdCount >= 12) break;
-            strncpy(_sensorIds[_sensorIdCount].metric,
-                    kv.key().c_str(), sizeof(_sensorIds[0].metric)-1);
-            _sensorIds[_sensorIdCount].metric[sizeof(_sensorIds[0].metric)-1] = '\0';
-            strncpy(_sensorIds[_sensorIdCount].sensorId,
-                    kv.value().as<const char*>() ?: "",
-                    sizeof(_sensorIds[0].sensorId)-1);
-            _sensorIds[_sensorIdCount].sensorId[sizeof(_sensorIds[0].sensorId)-1] = '\0';
-            _sensorIdCount++;
-        }
+    for (auto kv : ids) {
+        const char* sid = kv.value().as<const char*>();
+        if (!sid || !*sid) continue;              // an empty field maps nothing
+        if (_sensorIdCount >= OSM_MAX_SENSORS) { over++; continue; }
+        SensorIdEntry& e = _sensorIds[_sensorIdCount++];
+        strlcpy(e.metric,   kv.key().c_str(), sizeof(e.metric));
+        strlcpy(e.sensorId, sid,              sizeof(e.sensorId));
     }
 
     char tokenMask[12] = "(none)";
     if (_token[0]) snprintf(tokenMask, sizeof(tokenMask), "%.6s...", _token);
     Serial.printf("[OSM] boxId=%s sensors=%d token=%s\n",
                   _boxId, _sensorIdCount, tokenMask);
+    if (over) Serial.printf("[OSM] %d sensor IDs past the limit of %d ignored\n",
+                            over, OSM_MAX_SENSORS);
     return true;
 }
 

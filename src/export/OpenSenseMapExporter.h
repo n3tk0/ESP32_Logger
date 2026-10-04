@@ -43,12 +43,15 @@ private:
     char _boxId[33]  = {};
     char _token[65]  = {};
 
-    // Map metric names to openSenseMap sensor IDs (max 12 sensors)
+    // Map metric names to openSenseMap sensor IDs. 20 covers every metric the
+    // export page offers (14 built in, plus what the sensors report); it was
+    // 12, and the IDs past it were dropped without a word.
+    static constexpr int OSM_MAX_SENSORS = 20;
     struct SensorIdEntry {
         char metric[16];
         char sensorId[25];
     };
-    SensorIdEntry _sensorIds[12];
+    SensorIdEntry _sensorIds[OSM_MAX_SENSORS];
     int           _sensorIdCount = 0;
 
     const char* _lookupSensorId(const char* metric) const;
