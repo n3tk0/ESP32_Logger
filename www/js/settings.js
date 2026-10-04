@@ -2858,7 +2858,7 @@ function hubStatusInit() {
 
       var exp = pc.export || {};
       var caps = (ST && ST.caps && ST.caps.exporters) || ["mqtt", "http", "sensor_community", "opensensemap"];
-        var enabled = caps.filter(function (k) {
+      var enabled = caps.filter(function (k) {
         return exp[k] && exp[k].enabled;
       }).length;
       setEl2("hub-st-export", enabled
