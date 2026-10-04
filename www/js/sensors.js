@@ -1815,44 +1815,37 @@ function expLoad() {
 
     // OSM sensor IDs grid
     var ids = osm.sensor_ids || {};
-    var osmDiv = document.getElementById("exp-osm-ids");
-    if (osmDiv) {
-      var metrics = [
-          "temperature",
-          "humidity",
-          "pressure",
-          "pm25",
-          "pm10",
-          "tvoc",
-          "tvoc_est",
-          "eco2",
-          "iaq",
-          "gas_resistance",
-          "dew_point",
-          "flow_rate",
-          "rain_total",
-          "wind_speed"
-        ];
-      osmDiv.innerHTML =
-        '<div class="form-grid" style="flex-wrap:wrap">' +
-        metrics
-          .map(function (m) {
-            return (
-              '<div class="field" style="min-width:180px">' +
-              '<label class="field-label">' +
-              m +
-              "</label>" +
-              '<input type="text" id="osm-id-' +
-              m +
-              '" class="input" value="' +
-              esc(ids[m] || "") +
-              '" placeholder="' + esc(spT("osmSensorIdPh", "sensor ID…")) + '">' +
-              "</div>"
-            );
+      var osmDiv = document.getElementById("exp-osm-ids");
+      if (osmDiv) {
+        osmDiv.innerHTML = "<div class=\"text-muted\">Loading metrics...</div>";
+        (typeof getSensors === "function" ? getSensors({ maxAgeMs: 0 }) : Promise.resolve(null))
+          .then(function(d) {
+            var mSet = {};
+            [
+              "temperature", "humidity", "pressure", "pm25", "pm10",
+              "tvoc", "tvoc_est", "eco2", "iaq", "gas_resistance",
+              "dew_point", "flow_rate", "rain_total", "wind_speed"
+            ].forEach(function (m) { mSet[m] = true; });
+            if (d && d.sensors) {
+              d.sensors.forEach(function (s) {
+                if (s.metrics) s.metrics.forEach(function (m) { mSet[m.id] = true; });
+              });
+            }
+            Object.keys(ids).forEach(function(m) { mSet[m] = true; });
+            var metrics = Object.keys(mSet).sort();
+            osmDiv.innerHTML = "<div class=\"form-grid\" style=\"flex-wrap:wrap\">" +
+              metrics.map(function (m) {
+                return (
+                  "<div class=\"field\" style=\"min-width:180px\">" +
+                  "<label class=\"field-label\">" + m + "</label>" +
+                  "<input type=\"text\" class=\"input exp-osm-metric-input\" data-metric=\"" + m +
+                  "\" value=\"" + esc(ids[m] || "") + "\" placeholder=\"" + esc(spT("osmSensorIdPh", "sensor ID.")) + "\">" +
+                  "</div>"
+                );
+              }).join("") + "</div>";
           })
-          .join("") +
-        "</div>";
-    }
+          .catch(function() { osmDiv.innerHTML = "Error loading metrics."; });
+      }
 
     // Common schedule + sensor selection, and each exporter's override.
     var sensorIds = _expSensorIds(cfg);
@@ -2041,25 +2034,12 @@ function expSave() {
 
   // openSenseMap
   var ids = {};
-  [
-      "temperature",
-      "humidity",
-      "pressure",
-      "pm25",
-      "pm10",
-      "tvoc",
-      "tvoc_est",
-      "eco2",
-      "iaq",
-      "gas_resistance",
-      "dew_point",
-      "flow_rate",
-      "rain_total",
-      "wind_speed"
-    ].forEach(function (m) {
-    var v = ((document.getElementById("osm-id-" + m) || {}).value || "").trim();
-    if (v) ids[m] = v;
-  });
+    var inputs = document.querySelectorAll(".exp-osm-metric-input");
+    for (var i = 0; i < inputs.length; i++) {
+      var v = (inputs[i].value || "").trim();
+      var m = inputs[i].getAttribute("data-metric");
+      if (v && m) ids[m] = v;
+    }
   PCFG.export.opensensemap = _expReadScope("osm", merged("opensensemap", {
     enabled: !!(document.getElementById("exp-osm-en") || {}).checked,
     box_id: (document.getElementById("exp-osm-boxid") || {}).value || "",
@@ -2109,6 +2089,8 @@ registerHandlers({
   expLoad: expLoad,
   expSave: expSave,
 });
+
+
 
 
 
