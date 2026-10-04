@@ -40,6 +40,7 @@
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
+#include "../export/ExportManager.h"    // caps.exporters: what this build registered
 #include "../tasks/TaskManager.h"      // applyLoggerConfig after a data log save
 #include "../utils/MutexGuard.h"
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
@@ -1914,23 +1915,10 @@ void setupWebServer() {
         caps["flowmeter"] = false;
 #endif
         caps["platformMode"] = (int)g_platformMode;
-        
+        // The exporters this build registered (ESP_Logger.ino, by setup.h
+        // toggle): the export page hides the cards of the others.
         JsonArray exp = caps["exporters"].to<JsonArray>();
-#ifdef EXPORT_MQTT_ENABLED
-        exp.add("mqtt");
-#endif
-#ifdef EXPORT_HTTP_ENABLED
-        exp.add("http");
-#endif
-#ifdef EXPORT_SENSORCOMMUNITY_ENABLED
-        exp.add("sensor_community");
-#endif
-#ifdef EXPORT_OPENSENSEMAP_ENABLED
-        exp.add("opensensemap");
-#endif
-#ifdef EXPORT_WEBHOOK_ENABLED
-        exp.add("webhook");
-#endif
+        for (int i = 0; i < exportManager.count(); i++) exp.add(exportManager.nameAt(i));
     };
 
     auto fillTheme = [](JsonObject o) {

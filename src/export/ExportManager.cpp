@@ -2,6 +2,7 @@
 #include "../setup.h"
 #include "../pipeline/DataPipeline.h"
 #include "../utils/MutexGuard.h"
+#include <stdlib.h>
 #include <string.h>
 #include "../utils/JsonIO.h"
 
@@ -57,12 +58,10 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     if (defIv == 0)                     defIv = EXPORT_FLUSH_INTERVAL_MS;
     if (defIv < EXPORT_MIN_INTERVAL_MS) defIv = EXPORT_MIN_INTERVAL_MS;
     _defIntervalMs  = defIv;
-    _defSensorCount = _parseSensorList(defs["sensors"], _defSensors);
-    Serial.printf("[ExportManager] defaults: interval=%lus sensors=%s\n",
-                  (unsigned long)(_defIntervalMs / 1000),
-                  _defSensorCount ? "selected" : "all");
+    _parseSensorList(defs["sensors"], DEF_SEL);
 
     const uint32_t now = millis();
+    bool periodic = false;   // anything enabled that reads the latest-value table
     for (int i = 0; i < _count; i++) {
         IExporter*  exp  = _exporters[i];
         const char* name = exp->getName();
@@ -81,8 +80,8 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         // common list; no key at all means "use the common list".
         JsonVariantConst sel = ecfg["sensors"];
         bool ownSel = sel.is<JsonArrayConst>();
-        if (ownSel) _sensorCount[i] = _parseSensorList(sel, _sensors[i]);
-        _ownSensors[i] = ownSel;
+        if (ownSel) _parseSensorList(sel, i);
+        _selOf[i] = ownSel ? i : DEF_SEL;
 
         // Schedule. First time: after min(interval, EXPORT_FIRST_SEND_MS), so
         // the table has had time to collect every sensor and a long interval
@@ -95,43 +94,56 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
             _nextDueMs[i] = now + iv;
         }
 
-        uint8_t nSel = ownSel ? _sensorCount[i] : _defSensorCount;
-        Serial.printf("[ExportManager] '%s' enabled=%s interval=%lus%s sensors=%s%s\n",
-                      name, exp->isEnabled() ? "true" : "false",
-                      (unsigned long)(iv / 1000), own ? "" : " (common)",
-                      nSel ? "selected" : "all", ownSel ? "" : " (common)");
+        if (exp->isEnabled() && !exp->isStreaming()) periodic = true;
+        // sensors: the count selected, 0 = all; '*' = the common setting.
+        Serial.printf("[ExportManager] '%s' on=%d every %lus%s sensors=%u%s\n",
+                      name, (int)exp->isEnabled(), (unsigned long)(iv / 1000),
+                      own ? "" : "*", _sensorCount[_selOf[i]], ownSel ? "" : "*");
     }
+    // The latest-value table is only worth its RAM once something periodic
+    // will read it.
+    if (periodic && !_latest) {
+        // calloc, not new[]: all-zero is exactly an empty table (seq 0, and
+        // what SensorReading's own constructor would have memset), without
+        // a constructor loop in flash for it.
+        _latest = static_cast<LatestSlot*>(calloc(EXPORT_LATEST_SLOTS, sizeof(LatestSlot)));
+        if (!_latest) Serial.println("[ExportManager] no heap for the latest-value table");
+    }
+
     // Return true as long as the config parsed successfully — "no exporters
     // enabled" is a valid configuration (e.g. default platform_config.json).
     return true;
 }
 
 // ---------------------------------------------------------------------------
-uint8_t ExportManager::_parseSensorList(JsonVariantConst v, SensorIdList& out) {
-    JsonArrayConst arr = v.as<JsonArrayConst>();
-    if (arr.isNull()) return 0;
+// Copy a JSON array of sensor ids into selection list `list`. List first,
+// count last: see the note on reloads in loadAndInit().
+void ExportManager::_parseSensorList(JsonVariantConst v, int list) {
     uint8_t n = 0;
-    for (JsonVariantConst e : arr) {
-        if (n >= EXPORT_MAX_SENSOR_FILTER) break;
+    for (JsonVariantConst e : v.as<JsonArrayConst>()) {
         const char* id = e.as<const char*>();
         if (!id || !*id) continue;
-        strncpy(out[n], id, sizeof(out[n]) - 1);
-        out[n][sizeof(out[n]) - 1] = '\0';
-        n++;
+        if (n >= EXPORT_MAX_SENSOR_FILTER) break;
+        strlcpy(_sensors[list][n++], id, sizeof(_sensors[0][0]));
     }
-    return n;
+    _sensorCount[list] = n;
 }
 
 // ---------------------------------------------------------------------------
 bool ExportManager::_accepts(int idx, const char* sensorId) const {
-    const bool         own  = _ownSensors[idx];
-    const uint8_t      n    = own ? _sensorCount[idx] : _defSensorCount;
-    const SensorIdList& lst = own ? _sensors[idx]     : _defSensors;
+    const int     list = _selOf[idx];
+    const uint8_t n    = _sensorCount[list];
     if (n == 0) return true;                     // empty selection = all
     for (uint8_t k = 0; k < n && k < EXPORT_MAX_SENSOR_FILTER; k++) {
-        if (strcmp(lst[k], sensorId) == 0) return true;
+        if (strcmp(_sensors[list][k], sensorId) == 0) return true;
     }
     return false;
+}
+
+// A table slot exporter `idx` has yet to send: filled after `since`, by a
+// sensor selected for it.
+bool ExportManager::_pending(int idx, const LatestSlot& s, uint32_t since) const {
+    return s.seq > since && _accepts(idx, s.r.sensorId);
 }
 
 // ---------------------------------------------------------------------------
@@ -140,28 +152,29 @@ bool ExportManager::_accepts(int idx, const char* sensorId) const {
 // table needs no lock.
 // ---------------------------------------------------------------------------
 void ExportManager::ingest(const SensorReading& r) {
+    LatestSlot* const latest = _latest;   // null = no periodic exporter
     int slot = -1, empty = -1, oldest = -1;
-    for (int k = 0; k < EXPORT_LATEST_SLOTS; k++) {
-        const LatestSlot& s = _latest[k];
+    for (int k = 0; latest && k < EXPORT_LATEST_SLOTS; k++) {
+        const LatestSlot& s = latest[k];
         if (s.seq == 0) { if (empty < 0) empty = k; continue; }
         if (strcmp(s.r.sensorId, r.sensorId) == 0 &&
             strcmp(s.r.metric,   r.metric)   == 0) { slot = k; break; }
-        if (oldest < 0 || s.seq < _latest[oldest].seq) oldest = k;
+        if (oldest < 0 || s.seq < latest[oldest].seq) oldest = k;
     }
 
-    bool store = true;
+    bool store = latest != nullptr;
     if (slot >= 0) {
         // A backfilled reading (remote node catching up after an outage) that
         // is older than the value already held is not "the latest".
-        const SensorReading& cur = _latest[slot].r;
+        const SensorReading& cur = latest[slot].r;
         if (r.timestamp && cur.timestamp && r.timestamp < cur.timestamp) store = false;
     } else {
         // Table full: evict the least recently updated metric.
         slot = (empty >= 0) ? empty : oldest;
     }
     if (store && slot >= 0) {
-        _latest[slot].r   = r;
-        _latest[slot].seq = ++_seq;
+        latest[slot].r   = r;
+        latest[slot].seq = ++_seq;
     }
 
     for (int i = 0; i < _count; i++) {
@@ -173,17 +186,28 @@ void ExportManager::ingest(const SensorReading& r) {
 }
 
 // ---------------------------------------------------------------------------
-size_t ExportManager::_buildSnapshot(int idx) {
-    size_t   n     = 0;
-    uint32_t since = _sentSeq[idx];
-    for (int k = 0; k < EXPORT_LATEST_SLOTS; k++) {
-        const LatestSlot& s = _latest[k];
-        if (s.seq <= since) continue;               // empty or already sent
-        if (!_accepts(idx, s.r.sensorId)) continue; // not selected for this exporter
-        _snap[n++] = s.r;
+// What exporter `idx` has not been sent yet, of the sensors selected for it,
+// copied into a buffer the caller frees. Null with n = 0 when there is none
+// (or no heap for it, in which case the values stay unsent for next time).
+SensorReading* ExportManager::_buildSnapshot(int idx, size_t& n) {
+    LatestSlot* const latest = _latest;
+    const uint32_t    since  = _sentSeq[idx];
+    SensorReading*    out    = nullptr;
+    n = 0;
+    if (!latest) return nullptr;
+    for (int k = 0; k < EXPORT_LATEST_SLOTS; k++) n += _pending(idx, latest[k], since);
+    if (n && !(out = static_cast<SensorReading*>(malloc(n * sizeof(SensorReading))))) {
+        n = 0;                        // no heap: stays unsent, tried next time
+        return nullptr;
     }
+    // j < n: a reload on the web task may change the selection between the
+    // two passes, and this one must not write past what the first counted.
+    size_t j = 0;
+    for (int k = 0; j < n && k < EXPORT_LATEST_SLOTS; k++)
+        if (_pending(idx, latest[k], since)) memcpy(&out[j++], &latest[k].r, sizeof(SensorReading));
+    n = j;
     _sentSeq[idx] = _seq;
-    return n;
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +246,31 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
 }
 
 // ---------------------------------------------------------------------------
-// _spoolBatch — append failed batch to /spool/<name>.jsonl for later retry.
+// Spool — failed batches, kept on LittleFS for a later retry (#4.7).
+//
+// Records are SensorReading as it is in memory, not JSON lines: the JSON
+// spool stored the value as "%.4g" (101325 Pa came back as 101300) and paid
+// a JsonDocument per line to read it back, about 1.3 KB of flash on a C3
+// build that has none to spare. The record size is in the file name, so a
+// firmware whose SensorReading has another layout reads none of an old file
+// as its own; setSpoolFS() removes the .jsonl files of the old format.
+// ---------------------------------------------------------------------------
+static void spoolPath(char (&path)[48], const char* name) {
+    snprintf(path, sizeof(path), "/spool/%s.r%u", name, (unsigned)sizeof(SensorReading));
+}
+
+void ExportManager::setSpoolFS(fs::FS* fs) {
+    _spoolFS = fs;
+    if (!fs) return;
+    char path[48];
+    for (int i = 0; i < _count; i++) {
+        snprintf(path, sizeof(path), "/spool/%s.jsonl", _exporters[i]->getName());
+        if (fs->exists(path)) fs->remove(path);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// _spoolBatch — append a failed batch to the exporter's spool file.
 // Caps spool file at MAX_SPOOL_BYTES to protect flash from runaway growth.
 // ---------------------------------------------------------------------------
 void ExportManager::_spoolBatch(IExporter* exp,
@@ -237,38 +285,25 @@ void ExportManager::_spoolBatch(IExporter* exp,
     }
 
     char path[48];
-    snprintf(path, sizeof(path), "/spool/%s.jsonl", exp->getName());
+    spoolPath(path, exp->getName());
 
     // Ensure /spool directory exists
     if (!_spoolFS->exists("/spool")) _spoolFS->mkdir("/spool");
-
-    // Size guard: don't grow spool beyond MAX_SPOOL_BYTES
-    if (_spoolFS->exists(path)) {
-        File sz = _spoolFS->open(path, FILE_READ);
-        size_t fSize = sz ? sz.size() : 0;
-        if (sz) sz.close();
-        if (fSize >= MAX_SPOOL_BYTES) {
-            Serial.printf("[ExportManager] Spool full for '%s' (%zu B) — dropping\n",
-                          exp->getName(), fSize);
-            return;
-        }
-    }
 
     File f = _spoolFS->open(path, FILE_APPEND);
     if (!f) {
         Serial.printf("[ExportManager] Cannot open spool %s\n", path);
         return;
     }
-
-    char line[160];
-    for (size_t i = 0; i < n; i++) {
-        int len = r[i].toJsonLine(line, sizeof(line));
-        if (len > 0) { f.println(line); }
+    // Size guard: don't grow spool beyond MAX_SPOOL_BYTES
+    if (f.size() >= MAX_SPOOL_BYTES) {
+        Serial.printf("[ExportManager] Spool full for '%s' — dropping\n", exp->getName());
+    } else {
+        f.write(reinterpret_cast<const uint8_t*>(r), n * sizeof(SensorReading));
+        Serial.printf("[ExportManager] Spooled %u readings for '%s'\n",
+                      (unsigned)n, exp->getName());
     }
-    f.flush();
     f.close();
-    Serial.printf("[ExportManager] Spooled %zu readings for '%s'\n",
-                  n, exp->getName());
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +314,7 @@ bool ExportManager::_drainSpool(IExporter* exp) {
     if (!_spoolFS) return true;
 
     char path[48];
-    snprintf(path, sizeof(path), "/spool/%s.jsonl", exp->getName());
+    spoolPath(path, exp->getName());
     if (!_spoolFS->exists(path)) return true;
 
     File f = _spoolFS->open(path, FILE_READ);
@@ -288,44 +323,29 @@ bool ExportManager::_drainSpool(IExporter* exp) {
     // Read up to one batch at a time to bound memory use.
     // EXPORT_SPOOL_BATCH is configured in setup.h.
     SensorReading batch[EXPORT_SPOOL_BATCH];
-    int count = 0;
     bool allOk = true;
-    char lineBuf[160];
 
-    while (f.available()) {
-        int len = f.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
-        if (len <= 0) break;
-        lineBuf[len] = '\0';
-
-        JsonDocument doc;
-        if (deserializeJson(doc, (const char*)lineBuf, len) != DeserializationError::Ok) continue;
-
-        SensorReading& sr = batch[count];
-        sr.timestamp = doc["ts"] | 0;
-        strncpy(sr.sensorId,   doc["id"]     | "", sizeof(sr.sensorId)-1);
-        strncpy(sr.sensorType, doc["sensor"] | "", sizeof(sr.sensorType)-1);
-        strncpy(sr.metric,     doc["metric"] | "", sizeof(sr.metric)-1);
-        sr.value   = doc["value"] | 0.0f;
-        strncpy(sr.unit,       doc["unit"]   | "", sizeof(sr.unit)-1);
-        // CM-5: clamp untrusted spool-file value to a defined enumerator
-        // (0..QUALITY_ERROR) instead of blindly casting an arbitrary int.
-        int q = doc["q"] | 0;
-        if (q < 0 || q > QUALITY_ERROR) q = QUALITY_ERROR;
-        sr.quality = (SensorQuality)q;
-        count++;
-
-        if (count >= EXPORT_SPOOL_BATCH) {
-            // Same reason as _sendWithRetry: a spool backlog is many sends in
-            // one pass, each as slow as the network is, and the watchdog is
-            // counting.
-            g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
-            if (!exp->send(batch, count)) { allOk = false; break; }
-            count = 0;
+    for (;;) {
+        size_t got   = f.read(reinterpret_cast<uint8_t*>(batch), sizeof(batch));
+        size_t count = got / sizeof(SensorReading);   // a torn tail record is dropped
+        if (count == 0) break;
+        for (size_t i = 0; i < count; i++) {
+            // The file is storage, not a promise: terminate every string and
+            // clamp the quality to an enumerator (CM-5) before anyone reads it.
+            SensorReading& sr = batch[i];
+            sr.sensorId[sizeof(sr.sensorId) - 1]     = '\0';
+            sr.sensorType[sizeof(sr.sensorType) - 1] = '\0';
+            sr.metric[sizeof(sr.metric) - 1]         = '\0';
+            sr.unit[sizeof(sr.unit) - 1]             = '\0';
+            if (sr.quality > QUALITY_ERROR) sr.quality = QUALITY_ERROR;
         }
+        // Same reason as _sendWithRetry: a spool backlog is many sends in
+        // one pass, each as slow as the network is, and the watchdog is
+        // counting.
+        g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
+        if (!exp->send(batch, count)) { allOk = false; break; }
     }
     f.close();
-
-    if (count > 0 && allOk) allOk = exp->send(batch, count);
 
     if (allOk) {
         // We've already sent — failing to remove here means the next drain
@@ -377,12 +397,15 @@ void ExportManager::tick() {
         // however long each send takes. If we fell a whole interval behind
         // (long outage, breaker), restart the cadence from now instead of
         // firing a burst of catch-up sends.
-        const uint32_t iv = exp->intervalMs() ? exp->intervalMs() : _defIntervalMs;
+        // Set for every scheduled exporter by loadAndInit(), never below
+        // EXPORT_MIN_INTERVAL_MS.
+        const uint32_t iv = exp->intervalMs();
         _nextDueMs[i] += iv;
         if ((int32_t)(now - _nextDueMs[i]) >= 0) _nextDueMs[i] = now + iv;
 
-        size_t n = _buildSnapshot(i);
-        if (n == 0) continue;            // none of its sensors reported since last time
+        size_t n = 0;
+        SensorReading* snap = _buildSnapshot(i, n);
+        if (!snap) continue;             // none of its sensors reported since last time
 
         // R14 / AUDIT 11.8: refresh ExportTask heartbeat BEFORE each
         // exporter's network call. With 5 enabled exporters × ~30 s TLS
@@ -394,7 +417,8 @@ void ExportManager::tick() {
         // Drain any spooled backlog before sending new live data (#4.7)
         if (exp->spoolOnFailure()) _drainSpool(exp);
 
-        _sendWithRetry(exp, _snap, n);
+        _sendWithRetry(exp, snap, n);
+        free(snap);
     }
 }
 

@@ -60,10 +60,11 @@ public:
     bool reloadConfig(fs::FS& fs,
                       const char* cfgPath = "/platform_config.json");
 
-    // Set filesystem for spool files (call from _initPlatform) (#4.7)
-    void setSpoolFS(fs::FS* fs) { _spoolFS = fs; }
+    // Set filesystem for spool files (call after the exporters are added) (#4.7)
+    void setSpoolFS(fs::FS* fs);
 
     int count() const { return _count; }
+    const char* nameAt(int i) const { return _exporters[i]->getName(); }
 
 private:
     using SensorIdList = char[EXPORT_MAX_SENSOR_FILTER][17];
@@ -72,32 +73,39 @@ private:
     int        _count = 0;
 
     // ── Schedule & selection (per exporter + common defaults) ──────────────
-    uint32_t     _defIntervalMs   = EXPORT_FLUSH_INTERVAL_MS;
-    SensorIdList _defSensors      = {};
-    uint8_t      _defSensorCount  = 0;        // 0 = all sensors
+    // Zero until loadAndInit(): any non-zero initialiser here moves the
+    // whole object from .bss to .data, i.e. a copy of it into flash.
+    uint32_t     _defIntervalMs   = 0;
 
-    bool         _ownSensors[MAX_EXPORTERS]  = {};   // false = use defaults
-    SensorIdList _sensors[MAX_EXPORTERS]     = {};
-    uint8_t      _sensorCount[MAX_EXPORTERS] = {};   // 0 = all sensors
+    // Sensor selections: one list per exporter, and the common one in the
+    // last slot (DEF_SEL). _selOf[i] says which list exporter i uses.
+    static constexpr int DEF_SEL = MAX_EXPORTERS;
+    SensorIdList _sensors[MAX_EXPORTERS + 1]     = {};
+    uint8_t      _sensorCount[MAX_EXPORTERS + 1] = {};   // 0 = all sensors
+    uint8_t      _selOf[MAX_EXPORTERS]           = {};   // i or DEF_SEL
     uint32_t     _nextDueMs[MAX_EXPORTERS]   = {};
     bool         _scheduled[MAX_EXPORTERS]   = {};
     uint32_t     _sentSeq[MAX_EXPORTERS]     = {};   // last table seq sent
 
     // ── Latest value per sensor+metric ─────────────────────────────────────
+    // On the heap, allocated the first time a config enables a periodic
+    // exporter and never freed (ExportTask may be reading it while the web
+    // task reloads). As a member it was ~9.6 KB of static RAM on every
+    // device, most of which export nothing — a lot on a C3.
     struct LatestSlot {
         SensorReading r;
-        uint32_t      seq = 0;  // 0 = empty slot
+        uint32_t      seq;      // 0 = empty slot (calloc'd)
     };
-    LatestSlot    _latest[EXPORT_LATEST_SLOTS];
-    uint32_t      _seq = 0;
-    SensorReading _snap[EXPORT_LATEST_SLOTS];   // snapshot buffer for tick()
+    LatestSlot* volatile _latest = nullptr;   // EXPORT_LATEST_SLOTS entries
+    uint32_t             _seq    = 0;
 
     fs::FS*  _spoolFS  = nullptr;
     static constexpr uint32_t MAX_SPOOL_BYTES = 32768;  // 32 KB per exporter
 
     bool   _accepts(int idx, const char* sensorId) const;
-    size_t _buildSnapshot(int idx);
-    static uint8_t _parseSensorList(JsonVariantConst v, SensorIdList& out);
+    bool   _pending(int idx, const LatestSlot& s, uint32_t since) const;
+    SensorReading* _buildSnapshot(int idx, size_t& n);
+    void   _parseSensorList(JsonVariantConst v, int list);
 
     bool _sendWithRetry(IExporter* exp,
                         const SensorReading* readings, size_t count);
