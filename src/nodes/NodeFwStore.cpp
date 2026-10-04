@@ -11,7 +11,6 @@
 #include "../core/Globals.h"          // sdAvailable
 #include "../core/SdCompat.h"         // sdFs()
 #include "../pipeline/DataPipeline.h" // fsMutex
-#include "../utils/AtomicWrite.h"
 #include "../utils/MutexGuard.h"
 #include "../utils/JsonIO.h"
 
@@ -86,8 +85,7 @@ static bool readJson(const char* path, JsonDocument& doc) {
 }
 
 static bool writeJson(const char* path, const JsonDocument& doc) {
-    return atomicWrite(*sdFs(), path,
-                       [&doc](File& f) { return serializeJson(doc, static_cast<Print&>(f)) > 0; }, fsMutex);
+    return jsonToFileAtomic(*sdFs(), path, doc.as<JsonVariantConst>(), fsMutex);
 }
 
 static void removeFile(const char* path) {

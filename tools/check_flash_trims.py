@@ -13,6 +13,8 @@ ordinary-looking edit, and the only symptom is an image that grew:
      NOT zero. Initialise that spinlock in the member declaration again and
      the compiler emits the whole object as initialised data — stored in the
      image and copied to RAM at boot. For remoteIngest alone that is 5.8 KB.
+     exportManager is the same with any non-zero member initialiser (a
+     default interval was one): 2.6 KB.
 
   2. LOGGER_TERSE_TLS_ERRORS: src/core/IdfTrims.c defines mbedtls_strerror so
      that mbedTLS's error.c, and its ~15 KB of sentences, is never linked.
@@ -48,7 +50,8 @@ save nothing — without an error.
      local (one copy, however many files include it) or in a .cpp.
 
 So this reads the linked ELF, not the source:
-  * remoteIngest / trendRing / readingCache, where linked, are .bss symbols
+  * remoteIngest / trendRing / readingCache / exportManager, where linked,
+    are .bss symbols
   * with LOGGER_TERSE_TLS_ERRORS in the env's flags, mbedtls_high_level_strerr
     (error.c's table walker) is absent
   * with LOGGER_NO_COREDUMP, esp_core_dump_write_elf (libespcoredump) is absent
@@ -77,7 +80,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from pio_envs import _build_flags, _sections, chip_for  # noqa: E402
 
-BSS_GLOBALS = ("remoteIngest", "trendRing", "readingCache")
+BSS_GLOBALS = ("remoteIngest", "trendRing", "readingCache", "exportManager")
 
 # flag -> (a symbol only the replaced archive member defines, what it costs)
 TRIMS = {

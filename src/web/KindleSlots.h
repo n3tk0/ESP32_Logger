@@ -115,7 +115,7 @@ static const int KZ_GRID_COLS = 3;
 /// the API, and in the shell renderer's variable names. A NUMBER would have
 /// been shorter and would also mean that inserting a place one day silently
 /// moved everybody's configuration one place along.
-static inline const char* kdZoneKey(uint8_t z) {
+inline const char* kdZoneKey(uint8_t z) {
     switch (z) {
         case KZ_HERO: return "hero";
         case KZ_BIG:  return "big";
@@ -135,7 +135,7 @@ static inline const char* kdZoneKey(uint8_t z) {
 /// The reverse, for reading a file or a form. KZ_COUNT means "no such place",
 /// which is a value the caller must check — a key that does not resolve is a
 /// field from a future build, not something to guess at.
-static inline uint8_t kdZoneFromKey(const char* key) {
+inline uint8_t kdZoneFromKey(const char* key) {
     if (!key || !*key) return KZ_COUNT;
     for (uint8_t z = 0; z < KZ_COUNT; z++)
         if (strcmp(kdZoneKey(z), key) == 0) return z;
@@ -144,8 +144,8 @@ static inline uint8_t kdZoneFromKey(const char* key) {
 
 /// Which of the two groups a place belongs to. The group is what carries the
 /// heading above it and, on the shell renderer, which column it is drawn in.
-static inline bool kdZoneIsIndoor(uint8_t z) { return z >= KZ_IN1 && z <= KZ_IN3; }
-static inline bool kdZoneIsGrid(uint8_t z)   { return z >= KZ_G1  && z <= KZ_G6;  }
+inline bool kdZoneIsIndoor(uint8_t z) { return z >= KZ_IN1 && z <= KZ_IN3; }
+inline bool kdZoneIsGrid(uint8_t z)   { return z >= KZ_G1  && z <= KZ_G6;  }
 
 // ---------------------------------------------------------------------------
 // Per-place options
@@ -184,7 +184,7 @@ enum KindleInk : uint8_t {
 };
 
 /// The CSS colour for a level. Also the order the settings form lists them in.
-static inline const char* kdInkCss(uint8_t ink) {
+inline const char* kdInkCss(uint8_t ink) {
     switch (ink) {
         case KINK_DARK:  return "#444";
         case KINK_MID:   return "#777";
@@ -195,7 +195,7 @@ static inline const char* kdInkCss(uint8_t ink) {
 
 /// What FBInk calls the same level. The shell renderer takes a colour NAME, and
 /// these four are the ones the rest of update_dash.sh already uses.
-static inline const char* kdInkFbink(uint8_t ink) {
+inline const char* kdInkFbink(uint8_t ink) {
     switch (ink) {
         case KINK_DARK:  return "GRAY4";     // .ink-d #444
         case KINK_MID:   return "GRAY7";     // .ink-m #777
@@ -304,7 +304,7 @@ inline const KdMetricStyle* kdMetricStyles(int& count) {
     return rows;
 }
 
-static inline const KdMetricStyle* kdMetricStyle(const char* metric) {
+inline const KdMetricStyle* kdMetricStyle(const char* metric) {
     if (!metric || !*metric) return nullptr;
     int n;
     const KdMetricStyle* t = kdMetricStyles(n);
@@ -316,7 +316,7 @@ static inline const KdMetricStyle* kdMetricStyle(const char* metric) {
 /// The label to draw: the place's own if set, else the metric's, else the
 /// metric name itself — which is not pretty for something unlisted, but it is
 /// honest, and a table that quietly rendered nothing would be worse.
-static inline const char* kdSlotLabel(const KindleSlot& s) {
+inline const char* kdSlotLabel(const KindleSlot& s) {
     if (s.label[0]) return s.label;
     const KdMetricStyle* st = kdMetricStyle(s.metric);
     return st ? st->label() : s.metric;
@@ -324,13 +324,13 @@ static inline const char* kdSlotLabel(const KindleSlot& s) {
 
 /// What to print after the value. The table's choice when it has one, else the
 /// unit the sensor reported, else nothing.
-static inline const char* kdSlotUnit(const KindleSlot& s, const char* readingUnit) {
+inline const char* kdSlotUnit(const KindleSlot& s, const char* readingUnit) {
     const KdMetricStyle* st = kdMetricStyle(s.metric);
     if (st && st->unit) return st->unit;
     return readingUnit ? readingUnit : "";
 }
 
-static inline uint8_t kdSlotDecimals(const KindleSlot& s) {
+inline uint8_t kdSlotDecimals(const KindleSlot& s) {
     if (s.decimals != KSLOT_DECIMALS_AUTO) return s.decimals > 3 ? 3 : s.decimals;
     const KdMetricStyle* st = kdMetricStyle(s.metric);
     return st ? st->decimals : 1;
@@ -385,10 +385,10 @@ struct KindleZones {
 };
 
 /// The heading above the outdoor block, and above the indoor one.
-static inline const char* kdGroupOutLabel(const KindleZones& k) {
+inline const char* kdGroupOutLabel(const KindleZones& k) {
     return k.groupOut[0] ? k.groupOut : KD_T("OUTSIDE", "НАВЪН");
 }
-static inline const char* kdGroupInLabel(const KindleZones& k) {
+inline const char* kdGroupInLabel(const KindleZones& k) {
     return k.groupIn[0] ? k.groupIn : KD_T("INSIDE", "ВЪТРЕ");
 }
 
@@ -397,7 +397,7 @@ static inline const char* kdGroupInLabel(const KindleZones& k) {
 /// Applied on the way IN, not at the point of use, for the reason kdSkinClamp()
 /// exists: a renderer should never have to wonder whether the byte it was
 /// handed is one of the values it knows about.
-static inline void kdZonesClamp(KindleZones& k) {
+inline void kdZonesClamp(KindleZones& k) {
     for (int i = 0; i < KZ_COUNT; i++) {
         KindleSlot& s = k.z[i];
         s.sensorId[sizeof(s.sensorId) - 1] = '\0';
@@ -427,7 +427,7 @@ static inline void kdZonesClamp(KindleZones& k) {
 /// gap. What happens instead is that the survivors move UP into the places in
 /// front of them: three configured grid cells with the second one quiet are
 /// drawn top-left, top-right, bottom-left.
-static inline int kdZonesUsed(const KindleZones& k, const bool* visible,
+inline int kdZonesUsed(const KindleZones& k, const bool* visible,
                               uint8_t first, int count, uint8_t* out) {
     if (!out || count <= 0) return 0;
     int n = 0;
@@ -442,7 +442,7 @@ static inline int kdZonesUsed(const KindleZones& k, const bool* visible,
 }
 
 /// The grid's survivors, in reading order. At most KZ_GRID_COUNT.
-static inline int kdGridUsed(const KindleZones& k, const bool* visible, uint8_t* out) {
+inline int kdGridUsed(const KindleZones& k, const bool* visible, uint8_t* out) {
     return kdZonesUsed(k, visible, KZ_G1, KZ_GRID_COUNT, out);
 }
 
@@ -464,7 +464,7 @@ static inline int kdGridUsed(const KindleZones& k, const bool* visible, uint8_t*
 ///
 /// Writes the per-row counts into `rows` (at most 2 for a six-place grid) and
 /// returns how many rows there are.
-static inline int kdGridRowSplit(int n, int* rows, int maxRows) {
+inline int kdGridRowSplit(int n, int* rows, int maxRows) {
     if (!rows || maxRows <= 0 || n <= 0) return 0;
     int nRows = (n + KZ_GRID_COLS - 1) / KZ_GRID_COLS;
     if (nRows > maxRows) nRows = maxRows;
@@ -481,7 +481,7 @@ static inline int kdGridRowSplit(int n, int* rows, int maxRows) {
 /// The indoor row's survivors. At most KZ_INDOOR_COUNT — and this is what makes
 /// "three fields, or two" a setting rather than a mode: leave IN3 empty and two
 /// come back.
-static inline int kdIndoorUsed(const KindleZones& k, const bool* visible, uint8_t* out) {
+inline int kdIndoorUsed(const KindleZones& k, const bool* visible, uint8_t* out) {
     return kdZonesUsed(k, visible, KZ_IN1, KZ_INDOOR_COUNT, out);
 }
 
@@ -498,7 +498,7 @@ static inline int kdIndoorUsed(const KindleZones& k, const bool* visible, uint8_
 /// something plausible. A dashboard that arrives showing a metric the hardware
 /// does not have would be showing a dash, which is the fault this whole design
 /// was built to remove; an empty place is an invitation to put something in it.
-static inline void kdZonesDefault(KindleZones& k,
+inline void kdZonesDefault(KindleZones& k,
                                   const char* outdoorId, const char* indoorId) {
     k.clear();
     if (!outdoorId || !*outdoorId) outdoorId = "outdoor";

@@ -9,7 +9,6 @@
 
 #include "../nodecfg/NodeConfigJson.h"
 #include "../pipeline/DataPipeline.h"   // fsMutex
-#include "../utils/AtomicWrite.h"
 #include "../utils/MutexGuard.h"
 #include "../sensors/RemoteIngest.h"   // the handover's WiFi node list
 #include "../web/IngestHandler.h"       // REMOTE_STATUS_STALE_MS
@@ -107,8 +106,7 @@ static bool readJson(const char* path, JsonDocument& doc) {
 }
 
 static bool writeJson(const char* path, const JsonDocument& doc) {
-    return atomicWrite(LittleFS, path,
-                       [&doc](File& f) { return serializeJson(doc, static_cast<Print&>(f)) > 0; }, fsMutex);
+    return jsonToFileAtomic(LittleFS, path, doc.as<JsonVariantConst>(), fsMutex);
 }
 
 static void removeFile(const char* path) {
