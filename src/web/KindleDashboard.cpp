@@ -458,6 +458,63 @@ static bool seriesHasData(const TrendRing::Hour* h) {
 // third hour on it is the 24-hour chart it always was.
 static constexpr int KD_CHART_FINE_HOURS = 2;
 
+// ── Which two lines the desk chart draws ─────────────────────────────────
+//
+// THE READER CHOOSES THEM, FROM THE PLACES ON THE PAGE (KindleConfig::chartA
+// and chartB): the solid line with its low-to-high band, and the dashed one.
+// Left at 0 they are what the chart always drew — the outdoor sensor's
+// temperature and the indoor sensor's — and a place that is chosen but holds
+// nothing falls back the same way, so emptying a place never empties the
+// chart. Still two lines and no more: each costs a series in the trend ring.
+//
+// Two different metrics share no axis — a temperature and a pressure drawn
+// to one scale is one flat line and one curve — so then the dashed line is
+// drawn to a scale of its own, with its values down the right (`own`).
+static_assert(KCHART_PLACES == KZ_COUNT, "KindleConfig::chartA/B count the places");
+
+struct KdChartPick {
+    const char* id[2];
+    const char* metric[2];
+    const char* label[2];   ///< the key's words; nullptr: the old two
+    bool        on[2];
+    bool        own;        ///< the second line on its own scale
+    uint8_t     pressUnit;  ///< KPRESS_*, for a pressure's axis
+};
+
+static void kdChartPick(const KindleConfig& skin, KdChartPick& p) {
+    for (int s = 0; s < 2; s++) {
+        const uint8_t v = s ? skin.chartB : skin.chartA;
+        p.id[s]     = s ? indoorSensorId() : outdoorSensorId();
+        p.metric[s] = "temperature";
+        p.label[s]  = nullptr;
+        p.on[s]     = !(s && v == KCHART_NONE);
+        if (v >= 1 && v <= KZ_COUNT && kdSlots().z[v - 1].used()) {
+            const KindleSlot& sl = kdSlots().z[v - 1];
+            p.id[s] = sl.sensorId; p.metric[s] = sl.metric; p.label[s] = kdSlotLabel(sl);
+        }
+    }
+    p.own = p.on[1] && strcmp(p.metric[0], p.metric[1]) != 0;
+    p.pressUnit = skin.pressureUnit;
+}
+
+/// The two lines' hours, as the ring holds them. haveB is false for none.
+static void kdChartSeries(const KdChartPick& p, uint32_t now,
+                          TrendRing::Hour* a, TrendRing::Hour* b, bool& haveA, bool& haveB) {
+    haveA = trendRing.series(p.id[0], p.metric[0], now, a);
+    haveB = p.on[1] && trendRing.series(p.id[1], p.metric[1], now, b);
+}
+
+/// A value on the chart's axis, in the units the page prints the metric in:
+/// a pressure is converted as its reading is, with a decimal fewer.
+static void kdChartAxisLabel(char* buf, size_t n, float v, const KdChartPick& pk, int s) {
+    if (strcmp(pk.metric[s], "pressure") == 0) {
+        const int d = kdPressureDecimals(pk.pressUnit) - 1;
+        snprintf(buf, n, "%.*f", d > 0 ? d : 0, (double)kdPressureValue(v, pk.pressUnit));
+        return;
+    }
+    fmtInt(buf, n, v);
+}
+
 static bool kdChartWantsFine(const TrendRing::Hour* tOut, const TrendRing::Hour* tIn,
                              bool haveOut, bool haveIn) {
     int n = 0;
@@ -470,10 +527,11 @@ static bool kdChartWantsFine(const TrendRing::Hour* tOut, const TrendRing::Hour*
 /// them. A single point draws nothing — no segment, no band — so until a
 /// second bucket has a reading the chart is the empty one, with its note:
 /// which is five minutes after the first reading.
-static void kdChartUseFine(uint32_t now, TrendRing::Hour* tOut, TrendRing::Hour* tIn,
+static void kdChartUseFine(uint32_t now, const KdChartPick& pk,
+                           TrendRing::Hour* tOut, TrendRing::Hour* tIn,
                            bool haveOut, bool haveIn) {
-    if (haveOut) trendRing.recent(outdoorSensorId(), "temperature", now, tOut);
-    if (haveIn)  trendRing.recent(indoorSensorId(),  "temperature", now, tIn);
+    if (haveOut) trendRing.recent(pk.id[0], pk.metric[0], now, tOut);
+    if (haveIn)  trendRing.recent(pk.id[1], pk.metric[1], now, tIn);
     int most = 0;
     for (int s = 0; s < 2; s++) {
         const TrendRing::Hour* h = s ? tIn : tOut;
@@ -504,32 +562,34 @@ static void kdSvgLine(String& out, const char* cls, int x1, int y1, int x2, int 
 
 static void appendChart(String& out,
                         const TrendRing::Hour* a, const TrendRing::Hour* b,
-                        bool haveA, bool haveB, int CHART_H, int chartW = CHART_W,
-                        bool fine = false) {
-    float lo =  1e9f, hi = -1e9f;
-    for (int i = 0; i < TrendRing::HOURS; i++) {
-        if (haveA && a[i].count) { if (a[i].min < lo) lo = a[i].min; if (a[i].max > hi) hi = a[i].max; }
-        if (haveB && b[i].count) { if (b[i].min < lo) lo = b[i].min; if (b[i].max > hi) hi = b[i].max; }
-    }
+                        bool haveA, bool haveB, int CHART_H, int chartW,
+                        bool fine, const KdChartPick& pk) {
+    // The second line on its own scale only when it has one to show.
+    const bool own = pk.own && haveB;
+    float lo = 1e9f, hi = -1e9f, span, loB = 1e9f, hiB = -1e9f, spanB;
+    chartRange(a, haveA, lo, hi);
+    chartRange(b, haveB, loB, hiB);
+    if (!own) chartRange(b, haveB, lo, hi);
     // NOTHING RECORDED YET STILL GETS A CHART: the grid and the hour axis,
     // with no scale down the side and the sentence inside the plot. The
     // section used to collapse to a line of text, so the page changed shape
     // the first hour a reading arrived; now it is the same page, filling in.
-    const bool empty = (lo > hi);
-    if (empty) { lo = 0.0f; hi = 1.0f; }
-    float pad = (hi - lo) * 0.06f;
-    if (pad < 0.4f) pad = 0.4f;
-    lo -= pad; hi += pad;
-    const float span = hi - lo;
+    const bool emptyA = lo > hi;   // both lines' range, when they share one
+    const bool empty  = emptyA && loB > hiB;
+    const bool emptyB = !own || loB > hiB;
+    chartScale(lo, hi, span);
+    chartScale(loB, hiB, spanB);
+    if (!own) { loB = lo; hiB = hi; spanB = span; }
     if (empty) haveA = haveB = false;
 
-    const int L = kdPx(40), R = chartW - kdPx(4), T = kdPx(10), B = CHART_H - kdPx(26);
+    const int L = kdPx(40), R = chartW - kdPx(own ? 40 : 4), T = kdPx(10), B = CHART_H - kdPx(26);
     const float dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
 
     // Local lambdas would be tidier, but this file targets a toolchain shared
     // with the 4 MB C3 build and plain helpers keep the generated code small.
     #define KD_X(i)   (L + (int)(dx * (float)(i)))
     #define KD_Y(v)   (T + (int)((hi - (v)) / span * (float)(B - T)))
+    #define KD_YB(v)  (T + (int)((hiB - (v)) / spanB * (float)(B - T)))
 
     out += F("<svg class=\"chart\" width=\""); out += chartW;
     out += F("\" height=\""); out += CHART_H;
@@ -554,8 +614,16 @@ static void appendChart(String& out,
         const float v = hi - span * (float)k / 4.0f;
         const int   y = T + (int)((float)(B - T) * (float)k / 4.0f);
         kdSvgLine(out, k == 4 ? "base" : "grid", L, y, R, y);
-        if (empty) continue;
-        char lbl[12]; fmtInt(lbl, sizeof(lbl), v);
+        char lbl[12];
+        // The second line's own values down the right, in its grey.
+        if (!emptyB) {
+            kdChartAxisLabel(lbl, sizeof(lbl), hiB - spanB * (float)k / 4.0f, pk, 1);
+            out += F("<text class=\"ax\" x=\""); out += R + kdPx(7);
+            out += F("\" y=\""); out += y + kdPx(4);
+            out += F("\">"); out += lbl; out += F("</text>");
+        }
+        if (emptyA) continue;
+        kdChartAxisLabel(lbl, sizeof(lbl), v, pk, 0);
         out += F("<text class=\"ax\" x=\""); out += L - kdPx(7);
         out += F("\" y=\""); out += y + kdPx(4);
         out += F("\" text-anchor=\"end\">"); out += lbl; out += F("</text>");
@@ -593,7 +661,8 @@ static void appendChart(String& out,
         for (int i = 0; i < TrendRing::HOURS; i++) {
             if (h[i].count == 0) { pen = false; continue; }
             d += pen ? 'L' : 'M';
-            d += KD_X(i); d += ' '; d += KD_Y(h[i].sum / h[i].count); d += ' ';
+            const float m = h[i].sum / h[i].count;
+            d += KD_X(i); d += ' '; d += sIdx ? KD_YB(m) : KD_Y(m); d += ' ';
             pen = true;
         }
         if (d.length()) {
@@ -629,6 +698,7 @@ static void appendChart(String& out,
 
     #undef KD_X
     #undef KD_Y
+    #undef KD_YB
     out += F("</svg>");
 }
 
@@ -991,12 +1061,21 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     if (!st) { req->send(503, "text/plain", "out of memory"); return; }
 
     const uint32_t now = (uint32_t)time(nullptr);
-    st->ctx.haveOut = zs ? trendRing.series(zs->sensorId, zs->metric, now, st->ctx.tOut)
-                         : trendRing.series(outdoorSensorId(), "temperature", now, st->ctx.tOut);
-    st->ctx.haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, st->ctx.tIn);
+    // The desk chart's two lines, as /kindle/data labels them; a line alone
+    // is one series — a grid place's own, or the wall's headline line, which
+    // is the outdoor temperature whatever the desk chart draws.
+    KdChartPick pick;
+    kdChartPick(skin, pick);
+    if (line) {
+        pick.on[1] = false;
+        pick.id[0] = zs ? zs->sensorId : outdoorSensorId();
+        pick.metric[0] = zs ? zs->metric : "temperature";
+    }
+    kdChartSeries(pick, now, st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn);
+    st->ctx.ownB = pick.own && st->ctx.haveIn;
     // The same two hours in five minutes the payload's axis labels describe.
     if (!zs && kdChartWantsFine(st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn))
-        kdChartUseFine(now, st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn);
+        kdChartUseFine(now, pick, st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn);
     st->ctx.lineOnly = line;
     st->ctx.lineInv  = line && queryArg(req, "inv");
     st->ctx.init(W, H);
@@ -1365,6 +1444,7 @@ struct KdRender {
     char       sub[64];
     KdFlow     flow;
     bool       chartFine = false;   ///< the first two hours — kdChartWantsFine()
+    KdChartPick chart;              ///< the chart's two lines — kdChartPick()
     /// The wall page's grid units, moved off the value onto its caption —
     /// see kdWallUnits(). Empty for a place whose unit stayed.
     char       capUnit[KZ_GRID_COUNT][sizeof(KdResolved::unit)] = {};
@@ -1881,15 +1961,13 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     const Latest inA  = latestOf(indoorSensorId(),  "aqi");
     const uint32_t now = (uint32_t)time(nullptr);
 
+    // tOut is the outdoor temperature for OUT_RANGE, and then — refilled —
+    // the chart's first line; tIn is its second. See kdChartPick().
     TrendRing::Hour tOut[TrendRing::HOURS];
     TrendRing::Hour tIn [TrendRing::HOURS];
     TrendRing::Hour tPress[TrendRing::HOURS];
     const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
-    const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
     const bool haveP   = trendRing.series(outdoorSensorId(), "pressure",    now, tPress);
-    // Decided here, applied at the chart below: OUT_RANGE is the whole
-    // record's, and is read from the hourly buckets before they are swapped.
-    const bool chartFine = kdChartWantsFine(tOut, tIn, haveOut, haveIn);
 
     KindleConfig skin = config.kindle;
     kdSkinClamp(skin);
@@ -1962,6 +2040,14 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     } else {
         s->print("OUT_RANGE_LO=\"\"\nOUT_RANGE_HI=\"\"\n");
     }
+
+    // The chart's two lines, now that OUT_RANGE has read the outdoor hours.
+    // Decided here, applied at the chart below.
+    KdChartPick pick;
+    kdChartPick(skin, pick);
+    bool haveA, haveB;
+    kdChartSeries(pick, now, tOut, tIn, haveA, haveB);
+    const bool chartFine = kdChartWantsFine(tOut, tIn, haveA, haveB);
 
     if (outT.ok && outT.ts && now > outT.ts) {
         kdShellUint(s, "OUT_AGE_MIN", (unsigned)((now - outT.ts) / 60));
@@ -2235,15 +2321,23 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // the first label; the panel draws it as one line for the same reason it
     // draws everything as one line — there is no inline markup on a
     // framebuffer — so it arrives without the leading comma the HTML needs.
-    kdShellVar(s, "LBL_KEY_OUT",  KD_T("outside mean", "средно навън"));
+    // A place chosen for a line is named by its caption.
+    const char* keyOut = pick.label[0] ? pick.label[0] : KD_T("outside mean", "средно навън");
+    kdShellVar(s, "LBL_KEY_OUT",  keyOut);
     kdShellVar(s, "LBL_KEY_BAND", KD_T("shaded band = hourly low to high",
                                        "сивото е час. мин–макс"));
-    kdShellVar(s, "LBL_KEY_IN",   KD_T("inside", "вътре"));
+    {
+        char keyIn[48];
+        snprintf(keyIn, sizeof(keyIn), "%s%s",
+                 pick.label[1] ? pick.label[1] : KD_T("inside", "вътре"),
+                 pick.own && haveB ? KD_T(" (right)", " (вдясно)") : "");
+        kdShellVar(s, "LBL_KEY_IN", keyIn);
+    }
     // The page sets the first label at #444 and the band clause after it at
     // #777, in one line of markup. On a framebuffer that is two draws at two
     // greys, and the second one starts where the first ended — which FBInk
     // will not say. Measured here, like every other width the reader needs.
-    kdShellUint(s, "KEY_OUT_ADVW", kdAdvanceMille(KD_T("outside mean", "средно навън")));
+    kdShellUint(s, "KEY_OUT_ADVW", kdAdvanceMille(keyOut));
 
     // ── The eleven places ──
     //
@@ -2350,9 +2444,9 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // under it is drawn — the same test the page makes before drawing its own.
     // A key naming two lines over an empty grid describes a chart that is not
     // there.
-    if (chartFine) kdChartUseFine(now, tOut, tIn, haveOut, haveIn);
-    kdShellInt(s, "CHART_OUT", (haveOut && seriesHasData(tOut)) ? 1 : 0);
-    kdShellInt(s, "CHART_IN", (haveIn  && seriesHasData(tIn))  ? 1 : 0);
+    if (chartFine) kdChartUseFine(now, pick, tOut, tIn, haveA, haveB);
+    kdShellInt(s, "CHART_OUT", (haveA && seriesHasData(tOut)) ? 1 : 0);
+    kdShellInt(s, "CHART_IN", (haveB && seriesHasData(tIn))  ? 1 : 0);
 
     // ── The chart's axis, which the image itself cannot carry ───────────────
     //
@@ -2368,37 +2462,29 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // THE SAME lo/hi THE IMAGE USES, computed the same way — the 6 % padding
     // with a 0.4° floor, from appendChart() and ChartBmpCtx::init() alike. A
     // second opinion here would label the image with somebody else's scale.
+    //
+    // CH_Z0..CH_Z4, the second line's own values down the right, when it is a
+    // different metric from the first (KdChartPick::own) — always sent, empty
+    // otherwise, so a reader never keeps a scale from an earlier payload.
+    const bool chartOwn = pick.own && haveB;
+    bool haveAny = false;
+    for (int side = 0; side < 2; side++) {
+        float clo = 1e9f, chi = -1e9f, cspan;
+        if (side == 0) chartRange(tOut, haveA, clo, chi);
+        if (side == 1 || !chartOwn) chartRange(tIn, haveB, clo, chi);
+        const bool have = (side == 0 || chartOwn) && clo <= chi;
+        if (side == 0 || chartOwn) haveAny = haveAny || clo <= chi;
+        chartScale(clo, chi, cspan);
+        for (int k = 0; k <= 4; k++) {
+            char lbl[12] = "";
+            if (have) kdChartAxisLabel(lbl, sizeof(lbl), chi - cspan * (float)k / 4.0f, pick, side);
+            char key[16];
+            snprintf(key, sizeof(key), side ? "CH_Z%d" : "CH_Y%d", k);
+            kdShellVar(s, key, lbl);
+            s->printf(side ? "CH_Z%dW=%u\n" : "CH_Y%dW=%u\n", k, have ? kdAdvanceMille(lbl) : 0u);
+        }
+    }
     {
-        float clo = 1e9f, chi = -1e9f;
-        for (int i = 0; i < TrendRing::HOURS; i++) {
-            if (haveOut && tOut[i].count) {
-                if (tOut[i].min < clo) clo = tOut[i].min;
-                if (tOut[i].max > chi) chi = tOut[i].max;
-            }
-            if (haveIn && tIn[i].count) {
-                if (tIn[i].min < clo) clo = tIn[i].min;
-                if (tIn[i].max > chi) chi = tIn[i].max;
-            }
-        }
-        const bool haveAny = (clo <= chi);
-        if (haveAny) {
-            float pad = (chi - clo) * 0.06f;
-            if (pad < 0.4f) pad = 0.4f;
-            clo -= pad; chi += pad;
-            const float cspan = (chi - clo) > 0.001f ? (chi - clo) : 1.0f;
-            for (int k = 0; k <= 4; k++) {
-                char lbl[12];
-                fmtInt(lbl, sizeof(lbl), chi - cspan * (float)k / 4.0f);
-                char key[16];
-                snprintf(key, sizeof(key), "CH_Y%d", k);
-                kdShellVar(s, key, lbl);
-                s->printf("CH_Y%dW=%u\n", k, kdAdvanceMille(lbl));
-            }
-        } else {
-            for (int k = 0; k <= 4; k++)
-                s->printf("CH_Y%d=\"\"\nCH_Y%dW=0\n", k, k);
-        }
-
         // The hour axis: -23h, -17h, -11h, -5h and "now". Fixed strings, so
         // the reader could hold them — but then "now" would be English on a
         // Bulgarian panel, and the stride would be written down twice.
@@ -2421,7 +2507,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
         const uint16_t cw = ChartBmp::imageW(skin.fbinkResW);
         const uint16_t ch = ChartBmp::imageH(skin.fbinkResW);
         s->printf("CH_L=%d\nCH_R=%d\nCH_T=%d\nCH_B=%d\n",
-                  ChartBmp::marginL(cw), ChartBmp::marginR(cw),
+                  ChartBmp::marginL(cw), ChartBmp::marginR(cw, chartOwn),
                   ChartBmp::marginT(ch), ChartBmp::marginB(ch));
         // And the same for the image a reader that follows the layout asks for
         // — /kindle/graph.bmp?h=LY_GR_H — which is as tall as the layout left
@@ -2439,7 +2525,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
                                    skin.fbinkResW)
                 : cw;
             s->printf("LY_CH_L=%d\nLY_CH_R=%d\n",
-                      ChartBmp::marginL(fw), ChartBmp::marginR(fw));
+                      ChartBmp::marginL(fw), ChartBmp::marginR(fw, chartOwn));
         }
 
         // What the page prints inside the empty chart. A bare grid reads as
@@ -2519,7 +2605,7 @@ static void appendChartSection(String& p, const KdRender& rd,
                       : kdT("Last 24 hours", "Последните 24 часа");
     p += F("</div>");
     appendChart(p, tOut, tIn, haveOut, haveIn, kdPx(kdFlowHtmlChartH(rd.flow)),
-                kdPx(rd.flow.grW), rd.chartFine);
+                kdPx(rd.flow.grW), rd.chartFine, rd.chart);
     // The key names the lines the chart DREW, which is what appendChart's
     // own lo > hi test turns on — not the series the ring is tracking.
     const bool drewOut = haveOut && seriesHasData(tOut);
@@ -2531,7 +2617,8 @@ static void appendChartSection(String& p, const KdRender& rd,
         p += F("<table class=\"key\"><tr><td>");
         appendKeySwatch(p, "#000", 3, false);
         p += ' ';
-        p += kdT("outside mean", "средно навън");
+        if (rd.chart.label[0]) appendEscaped(p, rd.chart.label[0]);
+        else                   p += kdT("outside mean", "средно навън");
         // Only where there is room for it: the landscape chart is narrower.
         if (rd.flow.keyBand) {
             p += F("<span class=\"dim\">");
@@ -2540,9 +2627,14 @@ static void appendChartSection(String& p, const KdRender& rd,
             p += F("</span>");
         }
         p += F("</td><td style=\"text-align:right\">");
-        appendKeySwatch(p, "#777", 2, true);
-        p += ' ';
-        p += kdT("inside", "вътре");
+        if (drewIn) {
+            appendKeySwatch(p, "#777", 2, true);
+            p += ' ';
+            if (rd.chart.label[1]) appendEscaped(p, rd.chart.label[1]);
+            else                   p += kdT("inside", "вътре");
+            // On its own scale: say which side its values are on.
+            if (rd.chart.own) p += kdT(" (right)", " (вдясно)");
+        }
         p += F("</td></tr></table>");
     }
 }
@@ -2881,19 +2973,22 @@ static void handleKindle(AsyncWebServerRequest* req) {
 
     const uint32_t now = (uint32_t)time(nullptr);
 
-    TrendRing::Hour tOut[TrendRing::HOURS];
-    TrendRing::Hour tIn [TrendRing::HOURS];
-    const bool haveOut = trendRing.series(outdoorSensorId(), "temperature", now, tOut);
-    const bool haveIn  = trendRing.series(indoorSensorId(),  "temperature", now, tIn);
-    const bool chartFine = kdChartWantsFine(tOut, tIn, haveOut, haveIn);
-    if (chartFine) kdChartUseFine(now, tOut, tIn, haveOut, haveIn);
-
     // A clamped COPY, not a reference into the live config. The page reads
     // this a dozen times while it builds; taking the values once means a save
     // landing mid-render cannot produce a page whose stylesheet and markup
     // disagree about which clock is being drawn.
     KindleConfig skin = config.kindle;
     kdSkinClamp(skin);
+
+    // The chart's two lines, the ones the reader chose — see kdChartPick().
+    TrendRing::Hour tOut[TrendRing::HOURS];
+    TrendRing::Hour tIn [TrendRing::HOURS];
+    KdChartPick pick;
+    kdChartPick(skin, pick);
+    bool haveOut, haveIn;
+    kdChartSeries(pick, now, tOut, tIn, haveOut, haveIn);
+    const bool chartFine = kdChartWantsFine(tOut, tIn, haveOut, haveIn);
+    if (chartFine) kdChartUseFine(now, pick, tOut, tIn, haveOut, haveIn);
 
     // The reader's own width, before the first size is taken — kdPx() reads
     // it from here until this function returns. See kdPageFor().
@@ -2910,6 +3005,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     kdRenderBegin(rd, skin, now, kdStandalone(), true, kdRotLandscape(rot), true, wall);
     rd.heroLine = heroLine;
     rd.chartFine = chartFine;
+    rd.chart = pick;
 
     String p;
     p.reserve(7000);
@@ -3430,14 +3526,16 @@ static void handleKindle(AsyncWebServerRequest* req) {
 // FOUR SERIES, AND THE READER CHOOSES THEM. The ring holds TrendRing::MAX_SERIES
 // and each costs RAM all day, so a place's "24 h line" (KSLOTF_LINE) picks
 // one rather than adding to them. In this order, while there is room: the
-// outdoor and indoor temperatures (the chart's two lines; the outdoor one is
-// also the wall's headline line), the headline's own reading (its 24 h
-// low-to-high), then in place order the places that asked for a line or a
-// pressure tendency arrow, then the outdoor pressure and humidity.
+// desk chart's two lines (kdChartPick() — the outdoor and indoor temperatures
+// unless the reader chose places), the outdoor temperature (the wall's
+// headline line), the headline's own reading (its 24 h low-to-high), then in
+// place order the places that asked for a line or a pressure tendency arrow,
+// then the outdoor pressure and humidity.
 //
-// THE INDOOR TEMPERATURE IS SECOND, NOT AFTER THE PLACES. Behind the headline
-// and two places with a line it was the fifth series, never tracked, and the
-// desk page's chart lost its indoor line with no word as to why.
+// THE CHART'S LINES COME FIRST, NOT AFTER THE PLACES. Behind the headline and
+// two places with a line the indoor temperature was the fifth series, never
+// tracked, and the desk page's chart lost its second line with no word as to
+// why.
 struct KdWant { const char* id[TrendRing::MAX_SERIES]; const char* m[TrendRing::MAX_SERIES]; int n; };
 static void __attribute__((noinline)) kdWant(KdWant& w, const char* id, const char* m) {
     if (w.n >= TrendRing::MAX_SERIES || !*id) return;
@@ -3454,8 +3552,12 @@ void kindleTrackTrends(bool load) {
         s_slotsLoaded = true;
     }
     KdWant w; w.n = 0;
+    KindleConfig skin = config.kindle;
+    kdSkinClamp(skin);
+    KdChartPick pick;
+    kdChartPick(skin, pick);
+    for (int s = 0; s < 2; s++) if (pick.on[s]) kdWant(w, pick.id[s], pick.metric[s]);
     kdWant(w, outdoorSensorId(), "temperature");
-    kdWant(w, indoorSensorId(), "temperature");
     if (kdSlots().z[KZ_HERO].used()) kdWant(w, kdSlots().z[KZ_HERO].sensorId, kdSlots().z[KZ_HERO].metric);
     for (const KindleSlot& sl : kdSlots().z)
         if (sl.used() && ((sl.flags & KSLOTF_LINE) ||

@@ -394,6 +394,26 @@
                   Which reading stands in which place is chosen zone by zone in the Zones tab.
                 </p>
 
+                <div class="kd-row" style="margin-top:14px">
+                  <div class="field" style="flex:1 1 160px">
+                    <label class="field-label" for="kd-cha" data-i18n="kindle.chartA">Chart — the solid line, with its band</label>
+                    <select id="kd-cha" class="input" data-change="kindleTouched">
+                      <option value="0">Outdoor temperature</option>
+                    </select>
+                  </div>
+                  <div class="field" style="flex:1 1 160px">
+                    <label class="field-label" for="kd-chb" data-i18n="kindle.chartB">Chart — the dashed line</label>
+                    <select id="kd-chb" class="input" data-change="kindleTouched">
+                      <option value="0">Indoor temperature</option>
+                    </select>
+                  </div>
+                </div>
+                <p class="hint" data-i18n="kindle.chartHint">
+                  The desk page's chart keeps two lines; each can follow one of the places.
+                  A place with nothing in it draws the default instead. Two different metrics
+                  are drawn to two scales, the dashed line's values down the right.
+                </p>
+
                 <div class="field" style="margin-top:14px">
                   <label class="field-label" for="kd-layout" data-i18n="kindle.pageShape">The page's shape</label>
                   <select id="kd-layout" class="input" data-change="kindleTouched">

@@ -1321,7 +1321,11 @@ function kdRenderPreview() {
          " fill='none' stroke='#111111' stroke-width='3'/>" +
          "<polyline points='0,60 70,62 140,58 210,64 280,60 350,56 420,62 490,58 560,60'" +
          " fill='none' stroke='#777777' stroke-width='2' stroke-dasharray='7 5'/></svg>";
-    h += kdT(L.grX, L.grY + L.grH + 2, 15, "outside mean", { ink:"#444444" });
+    // The key names the line the reader chose, as /kindle/data does.
+    var ca = +kdVal("kd-cha", "0"), cz = kdZones[KD_CHART_PLACES[ca - 1]] || {};
+    h += kdT(L.grX, L.grY + L.grH + 2, 15,
+             (ca && cz.sensor && cz.metric) ? (cz.label || cz.shown || cz.metric) : "outside mean",
+             { ink:"#444444" });
   }
 
   // ── The forecast, on the page that has one ──
@@ -1665,7 +1669,37 @@ function kdFlagBox(key, bit, label) {
          kdEsc(label) + "</label>";
 }
 
+// The chart's two lines (chart_a/chart_b): the default, each of the eleven
+// places — numbered as the collector stores them, KZ_HERO..KZ_IN3 plus one —
+// with what is in it now, and for the dashed line none. Built here rather
+// than as data-i18n markup because the text follows the places, so it is
+// redrawn with them and on a language switch; the selection is kept.
+var KD_CHART_PLACES = ["hero","big","g1","g2","g3","g4","g5","g6","in1","in2","in3"];
+function kdChartOpts() {
+  [["kd-cha", "chartDefA", false], ["kd-chb", "chartDefB", true]].forEach(function (c) {
+    var sel = document.getElementById(c[0]);
+    if (!sel) return;
+    var keep = sel.value || "0";
+    var o = [[0, kdI18n(c[1])]];
+    KD_CHART_PLACES.forEach(function (k, i) {
+      var z = kdZones[k] || {};
+      var what = (z.sensor && z.metric) ? (z.label || z.shown || z.metric) : kdI18n("chartEmpty");
+      o.push([i + 1, kdI18n("chPlace_" + k) + " — " + what]);
+    });
+    if (c[2]) o.push([255, kdI18n("chartNone")]);
+    sel.innerHTML = "";
+    o.forEach(function (x) {
+      var el = document.createElement("option");
+      el.value = String(x[0]); el.textContent = x[1];
+      sel.appendChild(el);
+    });
+    sel.value = keep;
+    if (sel.value !== keep) sel.value = "0";
+  });
+}
+
 function kdRenderZones() {
+  kdChartOpts();
   var box = document.getElementById("kd-zones");
   if (!box) return;
   var show = kdLoaded ? kdMaskOf(KD_SHOW, "kd-s-") : kdShowInit;
@@ -1818,7 +1852,7 @@ function kdSnapshot() {
     press:kdVal("kd-press","0"), dec:kdVal("kd-dec","1"),
     refresh:kdVal("kd-refresh",""), follow:kdVal("kd-follow","1"),
     pin:kdVal("kd-clockpin","1"), res:kdVal("kd-fbink-res","0"),
-    layout:kdVal("kd-layout","0"), page:kdVal("kd-page","0"), wpage:kdVal("kd-wpage","0"), sband:kdVal("kd-sband","0"), sink:kdVal("kd-sink","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
+    layout:kdVal("kd-layout","0"), page:kdVal("kd-page","0"), wpage:kdVal("kd-wpage","0"), sband:kdVal("kd-sband","0"), sink:kdVal("kd-sink","0"), cha:kdVal("kd-cha","0"), chb:kdVal("kd-chb","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
     bdev:kdVal("kd-bdev","0"), bbar:kdVal("kd-bbar","0"),
     wkfc:kdVal("kd-wkfc","0"), wkst:kdVal("kd-wkst","0"),
     rulew:kdVal("kd-rulew","0"), rulei:kdVal("kd-rulei","0"), rules:kdVal("kd-rules","0"),
@@ -2115,6 +2149,9 @@ function kindleRender(d) {
   kdSet("kd-page",      d.page_style || 0);
   kdSet("kd-sband",     d.sub_band || 0);
   kdSet("kd-sink",      d.sub_ink || 0);
+  kdChartOpts();
+  kdSet("kd-cha",       d.chart_a || 0);
+  kdSet("kd-chb",       d.chart_b == null ? 0 : d.chart_b);
   kdSet("kd-wpage",     d.web_style || 0);
   kdSet("kd-rot",       d.rotation || 0);
   // -1 is "the same as the panel", and what a collector too old to send the
@@ -2258,6 +2295,8 @@ function kdConfigBody() {
   body.set("web_style",     kdVal("kd-wpage", "0"));
   body.set("sub_band",      kdVal("kd-sband", "0"));
   body.set("sub_ink",       kdVal("kd-sink", "0"));
+  body.set("chart_a",       kdVal("kd-cha", "0"));
+  body.set("chart_b",       kdVal("kd-chb", "0"));
   body.set("outdoor_sensor", (document.getElementById("kd-outdoor-sensor") || {}).value || "");
   body.set("indoor_sensor",  (document.getElementById("kd-indoor-sensor") || {}).value || "");
   return body;
