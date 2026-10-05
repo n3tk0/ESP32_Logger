@@ -891,7 +891,7 @@ class DeployerGUI:
             "LittleFS image and over WiFi in the HTTP upload alike. "
             "\"Compressed only\" is what fits a 4 MB C3: the whole tree is "
             "about 970 KB with both copies and about 270 KB with one, out of "
-            "a 1088 KB partition that also holds the logs. The firmware "
+            "a 960 KB partition that also holds the logs. The firmware "
             "serves a compressed-only tree; every browser since 2010 asks "
             "for gzip.")
         self._filter_labels = {v: k for k, v in _UPLOAD_FILTER_LABELS.items()}

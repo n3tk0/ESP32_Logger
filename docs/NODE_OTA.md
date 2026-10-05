@@ -16,7 +16,7 @@ it, and when they disagree this document wins.
    per node kind on its SD card (§2). The user chooses which nodes of that
    kind should run it: one node, or all of them with one button.
 3. **SD card only.** Images are ~0.5 MB (ESP8266) and ~1 MB (C3); LittleFS
-   (1088 KB, shared with logs) is not a place for them. Without a mounted card
+   (960 KB, shared with logs) is not a place for them. Without a mounted card
    the upload is refused with `409 {"error":"no_sd"}` and the page says so.
 4. **Checked twice.** The collector refuses anything that is not a node image
    of a known kind (§1) before it is offered to a node; the node checks again

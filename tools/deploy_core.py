@@ -1088,7 +1088,7 @@ class DeployManager:
         # images the directory as it finds it. Filtering only in step 8's own
         # upload loop meant the setting worked over HTTP and did nothing at
         # all over USB: the LittleFS image got both copies of every page,
-        # about 970 KB of a C3's 1088 KB partition, before a single log row.
+        # about 970 KB, more than a C3's 960 KB partition, before a single log row.
         uf = self.cfg.get("upload_filter", "all")
         self._log(f"Keeping: {_UPLOAD_FILTER_LABELS.get(uf, uf)}")
         rc = self._run_cmd([_python(), str(script),
