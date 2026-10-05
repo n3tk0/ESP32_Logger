@@ -1529,6 +1529,29 @@ own: the same 6 % padding with a 0.4° floor that `appendChart()` and
 `ChartBmpCtx::init()` both apply, because a second opinion here would label the
 image with somebody else's scale.
 
+### Which two lines the chart draws
+
+The desk page's chart has two lines — the solid one with its hourly low-to-high
+band, and the dashed one — and the reader chooses what each follows, under
+Settings → E-ink dashboard → Reader: `chart_a` and `chart_b` in
+`/api/kindle/config`, `KindleConfig::chartA` and `chartB`. 0 is the chart as
+it always was, the outdoor sensor's temperature and the indoor sensor's; 1..11
+is a place (`hero`, `big`, `g1`..`g6`, `in1`..`in3`, in that order), and the
+line follows whatever reading stands there; `chart_b` 255 is no second line.
+A place with nothing in it draws the default, so emptying a place never
+empties the chart. Still two lines and no more: each is a series in the trend
+ring, and the chart's two come first in it (`kindleTrackTrends()`), ahead of
+the places' own 24 h lines.
+
+Two different metrics share no axis — a temperature and a pressure on one
+scale are one flat line and one curve — so then the dashed line is drawn to a
+scale of its own. Its values go down the right, in a margin as wide as the
+left one (`ChartBmp::marginR(w, true)`, `kdPx(40)` on the page); the panel
+gets them as `CH_Z0`..`CH_Z4` with their widths, always sent and empty when
+the two lines share a scale. A pressure's values are in the unit the page
+prints it in. The key under the chart names a chosen place by its caption, the
+dashed one with "(right)" when it has its own scale.
+
 ### What keeps them together now
 
 `tools/check_kindle_parity.py` reads the stylesheet out of the firmware — the

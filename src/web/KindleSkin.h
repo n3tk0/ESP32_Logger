@@ -580,6 +580,12 @@ inline bool kdRotLandscape(uint8_t rot) { return rot == KROT_90 || rot == KROT_2
 // that wrote a field this one has since narrowed, and a stylesheet built from
 // an out-of-range enum is a page that renders wrong rather than an error
 // somebody sees.
+// The desk chart's lines (KindleConfig::chartA/B): 0 as before, a place
+// plus one — KZ_HERO..KZ_IN3 are 0..10 in KindleSlots.h, which this header
+// does not include — or, for the second line only, none.
+constexpr uint8_t KCHART_PLACES = 11;
+constexpr uint8_t KCHART_NONE   = 0xFF;
+
 inline void kdSkinClamp(KindleConfig& k) {
     if (k.face > KFACE_CUSTOM)          k.face = KFACE_BOOKERLY;
     if (k.clockStyle > KCLOCK_DATED)    k.clockStyle = KCLOCK_PLAIN;
@@ -599,6 +605,8 @@ inline void kdSkinClamp(KindleConfig& k) {
     if (k.webStyle > KPAGE_WALL)        k.webStyle = KPAGE_DESK;
     if (k.subBand > 4)                  k.subBand = 0;
     if (k.subInk > 5)                   k.subInk = 0;
+    if (k.chartA > KCHART_PLACES)       k.chartA = 0;
+    if (k.chartB > KCHART_PLACES && k.chartB != KCHART_NONE) k.chartB = 0;
     // Upright is both what an older config holds and the one answer that is
     // always drawable, so a byte nobody recognises lands there.
     if (k.rotation > KROT_270)          k.rotation = KROT_0;

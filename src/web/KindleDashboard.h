@@ -204,7 +204,7 @@ class AsyncWebServerRequest;
 /// Registers the trend series this page draws — see the choice in
 /// KindleDashboard.cpp. From setup(), before ProcessingTask starts, so no
 /// readings are missed, with `load` to read the places first; again after
-/// the places change.
+/// the places or the reader's settings (the chart's lines) change.
 void kindleTrackTrends(bool load = false);
 
 /// Registers GET /kindle and GET /kindle/probe on `server`.

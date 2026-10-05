@@ -278,7 +278,7 @@ jobs:
           SIZE=$(stat -c%s "out/$NAME")
 
           # The limit comes from the partition table THIS env builds with, not
-          # from a number typed into a workflow — 1,472 KB on the 4 MB C3s,
+          # from a number typed into a workflow — 1,536 KB on the 4 MB C3s,
           # 6,400 KB on the 16 MB S3 — resolved the way PlatformIO resolves it:
           # board_build.partitions names either a file in the project or one of
           # the Arduino core's own, and app_slot.py looks in both.

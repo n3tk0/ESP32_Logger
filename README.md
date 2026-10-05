@@ -164,24 +164,42 @@ Toggled via `#ifdef EXPORT_*_ENABLED` in `src/setup.h`. All five are enabled by 
 
 ### Flash budget
 
-The 4 MB C3 targets get a **1472 KB app partition** (×2, OTA-capable). That is
-`app0` in `partitions_balanced.csv`, `0x170000` = **1,507,328 bytes**, and the
-number that has to fit inside it is `firmware.bin`.
+The 4 MB C3 targets get a **1536 KB app partition** (×2, OTA-capable). That is
+`app0` in `partitions_balanced.csv`, `0x180000` = **1,572,864 bytes**, and the
+number that has to fit inside it is `firmware.bin`. LittleFS has the other
+960 KB.
+
+> **Moving a C3 from the old table (1472 KB app, 1088 KB LittleFS) takes one
+> USB flash; it cannot arrive by OTA.** An OTA update writes the new app into
+> the other slot and leaves the partition table at 0x8000 as it was, and a
+> device still on the old table refuses an image over 1472 KB with "not enough
+> space". The table has to move `app1` and LittleFS, so rewriting it from the
+> running firmware would mean the app overwriting the slot it may be running
+> from — one power cut away from a board that needs USB anyway. So:
+>
+> 1. Settings → Backup on the device, and keep the file.
+> 2. Flash over USB: `python3 tools/flash_clean.py --with-fs` (erases the chip,
+>    then writes bootloader, the new table, the firmware and LittleFS), or
+>    `pio run -e <env> -t upload` followed by `-t uploadfs`.
+> 3. Restore the backup. LittleFS is formatted by the move, so settings and
+>    logs on it are gone until then.
+>
+> From then on, OTA works as before.
 
 > **Measure `firmware.bin`, not PlatformIO's "used flash".** The size line
 > PlatformIO prints excludes `.eh_frame`, which is nonetheless flashed — with
 > exceptions enabled that was 88,892 bytes of difference. Until the
 > `-fno-exceptions` fix below, CI compounded the error from the other side: it
-> compared against `0x180000`, which is app1's *offset*, not app0's *size*.
+> compared against `0x180000`, which was app1's *offset*, not app0's *size*.
 > Between them the all-features build was reported as "98% used, 26 KB free"
 > while actually overflowing the partition by 37,952 bytes.
 
 Current, `xiao_esp32c3`, `firmware.bin`:
 
-| build | image | free of 1,507,328 |
+| build | image | free of 1,572,864 |
 |---|---:|---:|
-| default `src/setup.h` | 1,278,688 | 228,640 (84.8 %) |
-| every optional feature on | 1,472,048 | 35,280 (97.7 %) |
+| default `src/setup.h` | 1,285,968 | 286,896 (81.8 % used) |
+| every optional feature on | 1,508,528 | 64,336 (95.9 % used) |
 
 Levers, all measured as `firmware.bin` deltas on `xiao_esp32c3`:
 

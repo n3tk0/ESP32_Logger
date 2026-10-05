@@ -871,7 +871,10 @@ static void handleKindleConfigPost(AsyncWebServerRequest* req) {
         return;
     }
     // No reload of anything: the dashboard reads config.kindle each time it
-    // renders, so the next repaint on the reader is the new page.
+    // renders, so the next repaint on the reader is the new page. Only the
+    // series the trend ring keeps follow: the chart's lines and the two
+    // sensors are chosen here.
+    kindleTrackTrends();
     req->send(200, "application/json", "{\"ok\":true}");
 }
 

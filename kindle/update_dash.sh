@@ -338,8 +338,10 @@ payload_key_ok() {
         # used — see rule_pen().
         WK_STYLE|WK_FC|WF_NOW|WF[0-9]_*|RULE_PX|RULE_INK|RULE_SOFT|RULE_STYLE) return 0 ;;
         # The chart's axis: the five values, the five hours, their widths, and
-        # where the image's plot area is inside the image.
-        CH_Y[0-9]|CH_Y[0-9]W|CH_H[0-9]|CH_H[0-9]W|CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
+        # where the image's plot area is inside the image. CH_Z* are the
+        # second line's values down the right, when it has a scale of its own.
+        CH_Y[0-9]|CH_Y[0-9]W|CH_Z[0-9]|CH_Z[0-9]W|CH_H[0-9]|CH_H[0-9]W) return 0 ;;
+        CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
         # A newer copy of these scripts, on offer from the collector — see
         # pkg_check(). Each one is checked again where it is used.
         PKG_VER|PKG_MD5|PKG_SIZE) return 0 ;;
@@ -4651,11 +4653,15 @@ draw_chart_axis() {
     k=0
     while [ "$k" -le 4 ]; do
         eval "lab=\${CH_Y${k}:-}; w=\${CH_Y${k}W:-0}"
+        y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * ${BASELINE_MILLE:-848} / 1000 ))
         if [ -n "$lab" ]; then
-            y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * ${BASELINE_MILLE:-848} / 1000 ))
             x=$(( GR_X + CH_L - gap - sz * w / 1000 ))
             draw_text_reg "$x" "$y" "$sz" "GRAY7" "$lab"
         fi
+        # The second line's own value on the same rule, left-aligned right
+        # of the plot — sent only when it has a scale of its own (CH_Z*).
+        eval "lab=\${CH_Z${k}:-}"
+        [ -n "$lab" ] && draw_text_reg "$(( GR_X + CH_R + gap ))" "$y" "$sz" "GRAY7" "$lab"
         k=$((k + 1))
     done
 

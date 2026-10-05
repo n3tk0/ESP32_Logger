@@ -3739,6 +3739,27 @@ reset_log
   exit 0 )
 check "$?" "the chart's axis is labelled, the way the page labels it"
 
+# A second line on a scale of its own (CH_Z*): its values down the right,
+# left-aligned AX_GAP clear of the plot — and none at all when it shares the
+# first's, which is every payload that does not send them.
+( reset_log
+  CH_Z0="1016" CH_Z1="1013" CH_Z2="1010" CH_Z3="1007" CH_Z4="1004" draw_chart_body || exit 1
+  for v in 1016 1013 1010 1007 1004; do
+      grep -q -- "	--	$v	" "$FBINK_LOG" || exit 2
+  done
+  grep -q -- "left=$(( GR_X + CH_R + AX_GAP ))," "$FBINK_LOG" || exit 3
+  # On the same rules as the left-hand values: "33" and "1016" share a top.
+  t33=$(grep -- "	--	33	" "$FBINK_LOG" | grep -o 'top=[0-9]*' | head -1)
+  t16=$(grep -- "	--	1016	" "$FBINK_LOG" | grep -o 'top=[0-9]*' | head -1)
+  [ -n "$t33" ] && [ "$t33" = "$t16" ] || exit 4
+  exit 0 )
+check "$?" "a second line on its own scale has its values down the right"
+( reset_log
+  draw_chart_body || exit 1
+  grep -q -- "left=$(( GR_X + CH_R + AX_GAP ))," "$FBINK_LOG" && exit 2
+  exit 0 )
+check "$?" "  and one sharing the first's scale has none there"
+
 # An empty record is still a chart: the grid, the hour axis, no scale down the
 # side, and the sentence inside the plot. No key — there are no lines to name.
 ( reset_log

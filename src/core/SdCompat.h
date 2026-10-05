@@ -8,7 +8,7 @@
 // (libfatfs.a: ff.c, diskio.c, ffsystem.c) plus the SD/SPI driver on top.
 // Measured, not estimated: two full builds of xiao_esp32c3 differ by 34,576
 // bytes of flashed image (firmware.bin 1,333,408 with, 1,298,832 without).
-// That is real money on a 1472 KB app partition, and it is spent whether or
+// That is real money on a 1536 KB app partition, and it is spent whether or
 // not an SD card is ever fitted.
 //
 // So the include is behind FEATURE_SD_STORAGE (src/setup.h, ON by default so

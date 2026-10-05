@@ -47,8 +47,8 @@ print("Reading a partition table:")
 
 # The project's own, and the number the workflows have had typed into them by
 # hand since before this file existed.
-check(app_slot_bytes(ROOT / "partitions_balanced.csv") == 1507328,
-      "partitions_balanced.csv -> 1507328 bytes (0x170000, app0)")
+check(app_slot_bytes(ROOT / "partitions_balanced.csv") == 1572864,
+      "partitions_balanced.csv -> 1572864 bytes (0x180000, app0)")
 
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
@@ -97,7 +97,7 @@ for env in ("xiao_esp32c3", "esp32c3_supermini", "lolin_c3_pico"):
     check(found is not None and found.name == "partitions_balanced.csv",
           f"{env} -> {found.name if found else None}")
     if found:
-        check(app_slot_bytes(found) == 1507328, f"  and that is 1472 KB of app slot")
+        check(app_slot_bytes(found) == 1572864, f"  and that is 1536 KB of app slot")
 
 # ...and the S3 ones use tables that ship with the Arduino core, which live
 # under the PlatformIO core directory rather than in the project. That path is

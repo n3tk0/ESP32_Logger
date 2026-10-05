@@ -1,9 +1,20 @@
 # Custom partition table for 4MB flash
-# 1472 KB app x2 (OTA-capable) + 1088 KB LittleFS = 4096 KB
-# Sized for firmware ~1.34 MB (headroom to ~1.44 MB before OTA slot is tight)
+# 1536 KB app x2 (OTA-capable) + 960 KB LittleFS = 4096 KB
+#
+# Grown from 1472 KB app / 1088 KB LittleFS in October 2026, when the image
+# with every optional feature on no longer fitted 1472 KB. The web UI is about
+# 440 KB as stored (gzip only), which leaves LittleFS ~520 KB for settings and
+# logs.
+#
+# A CHANGED TABLE DOES NOT ARRIVE BY OTA. An OTA update writes the app into
+# the other slot and nothing else; the table at 0x8000 stays as it was, and a
+# device still on the old one refuses an image over 1472 KB. Moving to this
+# table is one USB flash (pio run -t upload, then uploadfs — or
+# tools/flash_clean.py --with-fs), and it re-formats LittleFS: back the
+# settings up first. See README.md, "Flash budget".
 # Name,   Type, SubType, Offset,   Size,    Flags
 nvs,      data, nvs,     0x9000,   0x5000,
 otadata,  data, ota,     0xe000,   0x2000,
-app0,     app,  ota_0,   0x10000,  0x170000,
-app1,     app,  ota_1,   0x180000, 0x170000,
-spiffs,   data, spiffs,  0x2F0000, 0x110000,
+app0,     app,  ota_0,   0x10000,  0x180000,
+app1,     app,  ota_1,   0x190000, 0x180000,
+spiffs,   data, spiffs,  0x310000, 0xF0000,

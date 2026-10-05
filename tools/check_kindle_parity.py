@@ -397,16 +397,28 @@ def main():
         problems.append('parity: no KDF_CHART_MIN in KindleFlow.h — '
                         'the layout no longer states the chart\'s design height')
 
-    svg = re.search(r'const int L = kdPx\((\d+)\), R = (?:CHART_W|chartW) - kdPx\((\d+)\), '
+    # The right-hand margin has two widths: the plain one, and one as wide as
+    # the left for a second line on its own scale, whose values go down the
+    # right (`own` on the page, `right` in ChartBmp::marginR). Both pairs are
+    # checked.
+    svg = re.search(r'const int L = kdPx\((\d+)\), R = (?:CHART_W|chartW) - '
+                    r'kdPx\(own \? (\d+) : (\d+)\), '
                     r'T = kdPx\((\d+)\), B = CHART_H - kdPx\((\d+)\);',
                     open(CPP, encoding='utf-8').read())
-    mar = re.findall(r'inline int margin([LRTB])\(uint16_t \w\) '
+    mar = re.findall(r'inline int margin([LTB])\(uint16_t \w\) '
                      r'\{ return (?:\w - )?\w \* (\d+) / (\d+); \}', bmp)
-    if not svg or len(mar) != 4:
+    marR = re.search(r'inline int marginR\(uint16_t \w, bool (\w+) = false\) \{\s*'
+                     r'return \w - \w \* \(\1 \? (\d+) : (\d+)\) / (\d+);\s*\}', bmp)
+    if not svg or len(mar) != 3 or not marR:
         problems.append('parity: the chart margins are no longer stated as '
                         'kdPx() on the page and marginL/R/T/B on the panel')
     else:
-        want = dict(zip('LRTB', (int(g) for g in svg.groups())))
+        g = [int(x) for x in svg.groups()]
+        want = {'L': g[0], 'R': g[2], 'T': g[3], 'B': g[4]}
+        if int(marR.group(2)) != g[1]:
+            problems.append('parity: marginR insets %s px for a second scale but '
+                            'the page insets its SVG by %d' % (marR.group(2), g[1]))
+        mar.append(('R', marR.group(3), marR.group(4)))
         # The horizontal pair scales by the design's width, the vertical by its
         # height. Both are the number the page builds its own box from.
         design = {'L': loW_design, 'R': loW_design, 'T': design_h, 'B': design_h}

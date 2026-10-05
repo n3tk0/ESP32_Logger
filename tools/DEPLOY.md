@@ -373,7 +373,7 @@ values you pinned survive the switch.
   than flashing one built under the old setting — in **either** direction:
   `gz` → `all` leaves the plain files missing just as `all` → `gz` leaves them
   present, and both are a tree that does not match what was asked for. `gz` is what fits a 4 MB
-  board: about 270 KB against about 970 KB for both copies, out of a 1088 KB
+  board: about 270 KB against about 970 KB for both copies, out of a 960 KB
   LittleFS partition that also holds the logs.
 - **wipe_before_upload** — Delete /www before uploading (safety)
 - **ui_scale**, **ui_theme**, **steps_panel_open** — GUI only: interface scale
