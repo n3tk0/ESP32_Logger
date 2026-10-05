@@ -3430,10 +3430,14 @@ static void handleKindle(AsyncWebServerRequest* req) {
 // FOUR SERIES, AND THE READER CHOOSES THEM. The ring holds TrendRing::MAX_SERIES
 // and each costs RAM all day, so a place's "24 h line" (KSLOTF_LINE) picks
 // one rather than adding to them. In this order, while there is room: the
-// outdoor temperature (the chart, the wall's headline line), the headline's
-// own reading (its 24 h low-to-high), then in place order the places that
-// asked for a line or a pressure tendency arrow, then what was always kept —
-// the indoor temperature for the chart, the outdoor pressure and humidity.
+// outdoor and indoor temperatures (the chart's two lines; the outdoor one is
+// also the wall's headline line), the headline's own reading (its 24 h
+// low-to-high), then in place order the places that asked for a line or a
+// pressure tendency arrow, then the outdoor pressure and humidity.
+//
+// THE INDOOR TEMPERATURE IS SECOND, NOT AFTER THE PLACES. Behind the headline
+// and two places with a line it was the fifth series, never tracked, and the
+// desk page's chart lost its indoor line with no word as to why.
 struct KdWant { const char* id[TrendRing::MAX_SERIES]; const char* m[TrendRing::MAX_SERIES]; int n; };
 static void __attribute__((noinline)) kdWant(KdWant& w, const char* id, const char* m) {
     if (w.n >= TrendRing::MAX_SERIES || !*id) return;
@@ -3451,12 +3455,12 @@ void kindleTrackTrends(bool load) {
     }
     KdWant w; w.n = 0;
     kdWant(w, outdoorSensorId(), "temperature");
+    kdWant(w, indoorSensorId(), "temperature");
     if (kdSlots().z[KZ_HERO].used()) kdWant(w, kdSlots().z[KZ_HERO].sensorId, kdSlots().z[KZ_HERO].metric);
     for (const KindleSlot& sl : kdSlots().z)
         if (sl.used() && ((sl.flags & KSLOTF_LINE) ||
                           ((sl.flags & KSLOTF_TREND) && !strcmp(sl.metric, "pressure"))))
             kdWant(w, sl.sensorId, sl.metric);
-    kdWant(w, indoorSensorId(), "temperature");
     kdWant(w, outdoorSensorId(), "pressure");
     kdWant(w, outdoorSensorId(), "humidity");
     trendRing.keepOnly(w.id, w.m, w.n);
