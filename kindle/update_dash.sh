@@ -327,9 +327,6 @@ payload_key_ok() {
         # allowed here. They reach one drawn string and nothing else.
         CACHED_AT|CACHED_ON) return 0 ;;
         SHOW_CHART|SHOW_WEEK|CHART_OUT|CHART_IN|KEY_OUT_ADVW|HERO_LINE) return 0 ;;
-        # The wall page's band under the headline and the ink on it — pens,
-        # checked where they are drawn (sub_band()).
-        SUB_BAND|SUB_INK) return 0 ;;
         # The face chosen on the collector, KFACE_* 0..5 — see face_files().
         FONT_FACE) return 0 ;;
         # The week strip's look and, when it holds the forecast, its seven
@@ -2916,19 +2913,10 @@ draw_line() {
     return 0
 }
 
-# The headline's line stops where its plate does: 8 px short of the band, so
-# the white between the two stays white under an inverted headline too.
-hero_line_h() {
-    LINE_H=$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))
-    sub_band && LINE_H=$(( LINE_H - 8 ))
-    return 0
-}
-
 fetch_lines() {
     if [ "${LAYOUT_FLOW:-0}" != "1" ]; then rm -f "$TMP"/line_*.bmp; return 0; fi
     if [ "${HERO_LINE:-0}" = "1" ]; then
-        hero_line_h
-        fetch_line HERO "" "${HEAD_W:-564}" "$LINE_H"
+        fetch_line HERO "" "${HEAD_W:-564}" "$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))"
     else
         rm -f "$TMP"/line_HERO_*.bmp
     fi
@@ -3018,7 +3006,7 @@ zones_forget() {
     # AND THE SHAPE OF THE PAGE, for the same reason: a collector downgraded to
     # a firmware that does not send it would otherwise leave the panel drawing
     # the standalone layout for ever, because load_kv only ever assigns.
-    unset PAGE_MODE SUB_BAND SUB_INK 2>/dev/null
+    unset PAGE_MODE 2>/dev/null
     # And which way up, and whether there is a clock: a collector that no
     # longer says lays out the upright page with one.
     unset PAGE_ROT SHOW_CLOCK FC3_LABEL FC4_LABEL 2>/dev/null
@@ -3475,10 +3463,6 @@ draw_text() {
     # Inside a place set white on black (zone_plate), every string is.
     if [ -n "$7" ] || [ -n "${DRAW_INV:-}" ]; then
         fb -q -b -h -C BLACK -B WHITE -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$txt"
-    elif [ -n "${8:-}" ]; then
-        # $8, a ground the box is filled with — the band's own shade, so the
-        # box does not show. See draw_text_on().
-        fb -q -b -C "$5" -B "$8" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$txt"
     else
         fb -q -b -O -C "$5" -t regular="$4",px="$TX_PX",left="$1",top="$TX_TOP" -- "$txt"
     fi
@@ -3492,26 +3476,6 @@ draw_text_reg()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "$4" "$5"; }
 draw_text_bold_inv() { draw_text "$1" "$2" "$3" "$FONT_BOLD" "" "$4" INV; }
 draw_text_reg_inv()  { draw_text "$1" "$2" "$3" "$FONT_REG"  "" "$4" INV; }
 
-# On a ground of a shade of its own ($4 ink on $5): FBInk fills the text's
-# box with the ground's pen, so the box is the band and does not show. White
-# on black is the knocked-out pair above, for the reason draw_text() gives;
-# black on white is the ordinary bgless call.
-draw_text_on() {
-    # $1=x $2=y $3=px $4=ink $5=ground $6=text
-    if [ "$4" = WHITE ] && [ "$5" = BLACK ]; then draw_text_reg_inv "$1" "$2" "$3" "$6"
-    elif [ "$5" = WHITE ]; then draw_text_reg "$1" "$2" "$3" "$4" "$6"
-    else draw_text "$1" "$2" "$3" "$FONT_REG" "$4" "$6" "" "$5"
-    fi
-}
-
-# The wall page's band under the headline (SUB_BAND, SUB_INK), when the
-# collector sent one and there is a 24 h range to put on it: a pen name, or
-# nothing — anything else is not drawn rather than handed to FBInk.
-sub_band() {
-    [ "${WALL:-0}" = "1" ] && [ -n "${Z_SUB:-}" ] || return 1
-    case "${SUB_BAND:-}" in BLACK|WHITE|GRAY[1-9A-E]) ;; *) return 1 ;; esac
-    case "${SUB_INK:-}" in BLACK|WHITE|GRAY[1-9A-E]) ;; *) return 1 ;; esac
-}
 fill_rect() {
     # $1=x $2=y $3=w $4=h $5=colour
     #
@@ -4221,15 +4185,13 @@ draw_zones() {
     # White on black, when the headline asked for it: the whole of its row,
     # heading and the line under it included.
     zone_style HERO
-    local hb=$(( ${SUB_Y:-128} + ${SUB_SZ:-14} + 6 )) band=""
+    local hb=$(( ${SUB_Y:-128} + ${SUB_SZ:-14} + 6 ))
     [ "${HEAD_RULE_Y:-0}" -gt 0 ] 2>/dev/null && hb=$(( HEAD_RULE_Y - 4 ))
-    # Down to the band under it, when there is one, with white between.
-    sub_band && band=1 && hb=$(( ${SUB_Y:-128} - 8 ))
     zone_plate "$(( lx - 6 ))" "$(( ${TOP_Y:-20} - 6 ))" \
                "$(( ${HEAD_W:-${COL_L_W:-270}} + 12 ))" "$(( hb - ${TOP_Y:-20} + 6 ))"
     # The outdoor line behind it, on the plate, so the figures are drawn over it.
-    [ "${HERO_LINE:-0}" = "1" ] && hero_line_h && \
-        draw_line HERO "$lx" "${HERO_Y:-38}" "${HEAD_W:-564}" "$LINE_H"
+    [ "${HERO_LINE:-0}" = "1" ] && \
+        draw_line HERO "$lx" "${HERO_Y:-38}" "${HEAD_W:-564}" "$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))"
     draw_text_reg "$lx" "${TOP_Y:-20}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_OUT"
 
     local hero_sz="${HERO_SZ:-84}" hero_y="${HERO_Y:-38}" hx="$lx" sx0="$lx"
@@ -4279,20 +4241,13 @@ draw_zones() {
 
     # The 24 h low-to-high and the age, composed by the collector so that the
     # wording, the unit and the rounding are the page's and not this script's.
-    [ -n "${Z_SUB:-}" ] && [ -z "$band" ] && \
+    [ -n "${Z_SUB:-}" ] && \
         draw_text_reg "$sx0" "${SUB_Y:-128}" "${SUB_SZ:-14}" "${LAB_INK:-GRAY7}" "$Z_SUB"
     zone_done
-    if [ -n "$band" ]; then
-        # On the wall page's band instead: across the page in its shade, the
-        # range centred on it — which is the line under the headline's row.
-        fill_rect "$lx" "$(( ${SUB_Y:-128} - 6 ))" "${HEAD_W:-564}" "$(( ${SUB_SZ:-14} + 12 ))" "$SUB_BAND"
-        centre_in "$lx" "${HEAD_W:-564}" "$(( ${SUB_SZ:-14} * ${Z_SUB_ADVW:-0} / 1000 ))"
-        draw_text_on "$CENTRE_X" "${SUB_Y:-128}" "${SUB_SZ:-14}" "$SUB_INK" "$SUB_BAND" "$Z_SUB"
     # The wall page's rule under the headline's row, which runs the width of
     # the page: the grid and the indoor readings are under it, side by side.
-    elif [ "${HEAD_RULE_Y:-0}" -gt 0 ] 2>/dev/null; then
+    [ "${HEAD_RULE_Y:-0}" -gt 0 ] 2>/dev/null && \
         draw_hline "$lx" "$HEAD_RULE_Y" "${HEAD_W:-564}" "GRAYA"
-    fi
 
     # ── Left column: the grid ───────────────────────────────────────────────
     # GRID_ROWS says how many cells are on each row; each row then divides its

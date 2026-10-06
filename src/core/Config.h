@@ -517,12 +517,6 @@ struct KindleConfig {
     // holds there.
     uint8_t  pageStyle;
     uint8_t  webStyle;
-    // The wall page's band under the headline, behind its 24 h range:
-    // subBand 0 = none (white, the rule under the row as before), 1..4 =
-    // light, mid, dark, black; subInk 0 = whichever reads on the band, 1..5 =
-    // black, dark, mid, light, white. Formerly reserved[0] and [1].
-    uint8_t  subBand;
-    uint8_t  subInk;
     // The desk page's chart: which place each of its two lines is drawn from.
     // chartA is the solid line with the low-to-high band, chartB the dashed
     // one. 0 = as before (the outdoor sensor's temperature, the indoor
@@ -531,7 +525,7 @@ struct KindleConfig {
     // kdChartPick() in KindleDashboard.cpp.
     uint8_t  chartA;
     uint8_t  chartB;
-    uint8_t  reserved[8];
+    uint8_t  reserved[10];
 };
 
 struct DeviceConfig {

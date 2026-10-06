@@ -816,30 +816,6 @@ with sync_playwright() as p:
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(got.get("browser_dev") == 0 and got.get("browser_bar") == 0, "and back to auto")
 
-    # The wall page's band under the headline: its shade and its ink reach
-    # the device, come back on the re-read, and go back to none.
-    pg.select_option("#kd-sband", "3")
-    pg.select_option("#kd-sink", "5")
-    pg.click('[data-click="kindleSave"]')
-    pg.wait_for_timeout(1400)
-    got = pg.evaluate(
-        "fetch('/api/kindle/config').then(function(r){return r.json()})")
-    check(got.get("sub_band") == 3 and got.get("sub_ink") == 5,
-          "the band and its ink reach the device (%r, %r)"
-          % (got.get("sub_band"), got.get("sub_ink")))
-    pg.reload()
-    pg.wait_for_timeout(1500)
-    tab(pg, "reader")
-    check(pg.input_value("#kd-sband") == "3" and pg.input_value("#kd-sink") == "5",
-          "and they come back on the re-read")
-    pg.select_option("#kd-sband", "0")
-    pg.select_option("#kd-sink", "0")
-    pg.click('[data-click="kindleSave"]')
-    pg.wait_for_timeout(1400)
-    got = pg.evaluate(
-        "fetch('/api/kindle/config').then(function(r){return r.json()})")
-    check(got.get("sub_band") == 0 and got.get("sub_ink") == 0, "and back to none")
-
     # The desk chart's two lines: a place each (Grid 1 is 3, the headline 1)
     # or none, sent as the numbers the collector stores, back on the re-read,
     # and the places' names in the choices.

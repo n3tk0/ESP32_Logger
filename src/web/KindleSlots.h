@@ -184,9 +184,8 @@ enum KindleInk : uint8_t {
     KINK_COUNT
 };
 
-/// The CSS colour and FBInk's name for a level, and a fifth for white, which
-/// only the wall page's band (kdSubBandShade()) uses. The levels are also the
-/// order the settings form lists them in.
+/// The CSS colour and FBInk's name for a level. The levels are also the order
+/// the settings form lists them in.
 ///
 /// .ink-l IS #aaa, AND FBINK'S NAME FOR IT IS GRAYA. This said GRAY10, which
 /// is not a colour FBInk has: its scale runs GRAY1..GRAY9 and then
@@ -195,25 +194,11 @@ enum KindleInk : uint8_t {
 /// reader sends fbink's stderr to /dev/null. The browser page showed the value
 /// in pale grey and the Kindle showed nothing at all, which reads as a dead
 /// sensor.
-static const char* const KD_SHADES[5][2] = {
-    { "#000", "BLACK" }, { "#444", "GRAY4" }, { "#777", "GRAY7" },
-    { "#aaa", "GRAYA" }, { "#fff", "WHITE" },
+static const char* const KD_SHADES[KINK_COUNT][2] = {
+    { "#000", "BLACK" }, { "#444", "GRAY4" }, { "#777", "GRAY7" }, { "#aaa", "GRAYA" },
 };
-static inline const char* kdShadeCss(uint8_t s)   { return KD_SHADES[s < 5 ? s : 0][0]; }
-static inline const char* kdShadeFbink(uint8_t s) { return KD_SHADES[s < 5 ? s : 0][1]; }
-/// A place's ink: one of the four levels, never white.
-static inline const char* kdInkCss(uint8_t ink)   { return kdShadeCss(ink < KINK_COUNT ? ink : 0); }
-static inline const char* kdInkFbink(uint8_t ink) { return kdShadeFbink(ink < KINK_COUNT ? ink : 0); }
-
-/// The wall page's band under the headline (KindleConfig::subBand: 0 none,
-/// 1..4 light..black) and the 24 h range on it (subInk: 0 whichever reads on
-/// the band, 1..5 black..white), each as a shade of KD_SHADES.
-static inline uint8_t kdSubBandShade(uint8_t band) {
-    return band ? (uint8_t)(4 - band) : 4;
-}
-static inline uint8_t kdSubInkShade(uint8_t band, uint8_t ink) {
-    return ink ? (uint8_t)(ink - 1) : (band >= 3 ? 4 : KINK_BLACK);
-}
+static inline const char* kdInkCss(uint8_t ink)   { return KD_SHADES[ink < KINK_COUNT ? ink : 0][0]; }
+static inline const char* kdInkFbink(uint8_t ink) { return KD_SHADES[ink < KINK_COUNT ? ink : 0][1]; }
 
 // ---------------------------------------------------------------------------
 // One place's contents

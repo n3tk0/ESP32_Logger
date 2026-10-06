@@ -840,20 +840,12 @@ captions and the line under the headline are black, every value is bold,
 the value beside the headline is black rather than #444, and the rules are
 the heaviest black ones unless they have been set.
 
-**The band under the headline** carries the outdoor 24 h low-to-high on a
-strip of its own that parts the headline from everything under it:
-`sub_band` 0..4 (none, light, mid and dark grey, black) and `sub_ink` 0..5
-(auto, then black, dark, mid and light grey, white; auto is white on dark grey
-and black, black on the others). `sub_band` 0 is the page as it was: no
-strip, the line under the headline. Any other value draws the strip in place
-of that line, the range centred on it. They live in `KindleConfig::subBand`
-and `subInk`; the panel gets `SUB_BAND` and `SUB_INK` as FBInk colour names,
-and only on the wall page.
-
 **The readings sit in the middle of their cells**: the grid's figures and
 captions, the indoor heading, captions and values, and the forecast's
 condition word. The panel centres by the widths the collector sends
 (`Z_<zone>_VADVW`, `_UADVW` and `_LADVW`, `Z_GROUP_IN_ADVW`, `FC_SUMMARY_ADVW`).
+On the wall page the panel centres a caption at 115 % of the collector's
+estimate, Bookerly's width, as the grid's arrow has always been placed.
 
 **The footer shows the WiFi signal**, on the panel only: five bars filled by
 strength (the link level in `/proc/net/wireless`, as dBm or as percent; −55
@@ -862,9 +854,6 @@ ten type sizes left of the status and cut, by letters, to the room before it.
 The name comes from the Kindle's own `com.lab126.wifid`, else `wpa_cli`; the
 collector is not asked. On a collector's own access point it is not drawn:
 the footer's note already names that network, and is long enough to meet it.
-Over a band, the headline's line stops 8 px short of it, as its plate does.
-On the wall page the panel centres a caption at 115 % of the collector's
-estimate, Bookerly's width, as the grid's arrow has always been placed.
 
 Upright only: turned to 90° or 270°, the page is the desk one on its side.
 The FBInk script asks for it with `?wall=1`, and only a script that does gets

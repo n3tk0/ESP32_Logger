@@ -1115,18 +1115,14 @@ function kdRenderPreview() {
   var valB = !!L.wall;
 
   // ── Left column: the headline, its line, its grid ──
-  // The wall page's band under the headline, behind its 24 h range: a shade
-  // of its own (kd-sband, 0 = none), which takes the rule's place.
-  var sband = L.wall && (show & 0x0008) ? +kdVal("kd-sband", "0") : 0;
   z = kdSlot("hero");
   h += kdPvPlate(z, X - 6, L.groupY - 6, HW + 12,
-                 (sband ? L.subY - 8 : L.headRuleY ? L.headRuleY - 4 : L.subY + L.subSz + 6) -
-                 L.groupY + 6);
+                 (L.headRuleY ? L.headRuleY - 4 : L.subY + L.subSz + 6) - L.groupY + 6);
   // The wall page's outdoor line behind the headline, on its plate: the
   // chart's switch on a page with no chart — appendHeroLine() and
   // graph.bmp?line=1.
   if (L.wall && (show & 0x0020)) {
-    h += kdPvLine(X, L.heroY, HW, L.subY - L.heroY - (sband ? 8 : 0), 5);
+    h += kdPvLine(X, L.heroY, HW, L.subY - L.heroY, 5);
   }
   h += kdT(X, L.groupY, L.labSz, kdGroups.out || kdGroupPh.out, { ink:capInk, bold:capB });
   v = kdPvValue(z);
@@ -1163,24 +1159,13 @@ function kdRenderPreview() {
     }
   }
   var sub = "-2.4 to 15.3°  ·  3 min";
-  if ((show & 0x0008) && !sband) {
+  if (show & 0x0008) {
     h += kdT(lone ? X + Math.max(0, kdQ(HW - kdTw(sub, L.subSz), 2)) : X,
              L.subY, L.subSz, sub, { ink:capInk });
   }
   kdPvPlateEnd();
-  if (sband) {
-    // KD_SHADES in KindleSlots.h: the band 1..4 light..black, its ink 0 =
-    // whichever reads on it, 1..5 black..white.
-    var shades = ["#000000", "#444444", "#777777", "#aaaaaa", "#ffffff"];
-    var sink = +kdVal("kd-sink", "0");
-    h += "<u style='left:18px;top:" + (L.subY - 6) + "px;width:" + RW + "px;height:" +
-         (L.subSz + 12) + "px;background:" + shades[4 - sband] + "'></u>";
-    h += kdT(18 + Math.max(0, kdQ(RW - kdTw(sub, L.subSz), 2)), L.subY, L.subSz, sub,
-             { ink:shades[sink ? sink - 1 : (sband >= 3 ? 4 : 0)] });
-  } else if (L.headRuleY) {
-    // The wall page's rule under the headline's row, across the page.
-    h += kdRl(18, L.headRuleY, RW, 1);
-  }
+  // The wall page's rule under the headline's row, across the page.
+  if (L.headRuleY) h += kdRl(18, L.headRuleY, RW, 1);
 
   if (L.grid.length) {
     // The rows the layout chose — two side by side or one under the other,
@@ -1852,7 +1837,7 @@ function kdSnapshot() {
     press:kdVal("kd-press","0"), dec:kdVal("kd-dec","1"),
     refresh:kdVal("kd-refresh",""), follow:kdVal("kd-follow","1"),
     pin:kdVal("kd-clockpin","1"), res:kdVal("kd-fbink-res","0"),
-    layout:kdVal("kd-layout","0"), page:kdVal("kd-page","0"), wpage:kdVal("kd-wpage","0"), sband:kdVal("kd-sband","0"), sink:kdVal("kd-sink","0"), cha:kdVal("kd-cha","0"), chb:kdVal("kd-chb","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
+    layout:kdVal("kd-layout","0"), page:kdVal("kd-page","0"), wpage:kdVal("kd-wpage","0"), cha:kdVal("kd-cha","0"), chb:kdVal("kd-chb","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
     bdev:kdVal("kd-bdev","0"), bbar:kdVal("kd-bbar","0"),
     wkfc:kdVal("kd-wkfc","0"), wkst:kdVal("kd-wkst","0"),
     rulew:kdVal("kd-rulew","0"), rulei:kdVal("kd-rulei","0"), rules:kdVal("kd-rules","0"),
@@ -2147,8 +2132,6 @@ function kindleRender(d) {
   kdSet("kd-fbink-res", d.fbink_res_w || 0);
   kdSet("kd-layout",    d.layout_mode || 0);
   kdSet("kd-page",      d.page_style || 0);
-  kdSet("kd-sband",     d.sub_band || 0);
-  kdSet("kd-sink",      d.sub_ink || 0);
   kdChartOpts();
   kdSet("kd-cha",       d.chart_a || 0);
   kdSet("kd-chb",       d.chart_b == null ? 0 : d.chart_b);
@@ -2293,8 +2276,6 @@ function kdConfigBody() {
   body.set("layout_mode",   kdVal("kd-layout", "0"));
   body.set("page_style",    kdVal("kd-page", "0"));
   body.set("web_style",     kdVal("kd-wpage", "0"));
-  body.set("sub_band",      kdVal("kd-sband", "0"));
-  body.set("sub_ink",       kdVal("kd-sink", "0"));
   body.set("chart_a",       kdVal("kd-cha", "0"));
   body.set("chart_b",       kdVal("kd-chb", "0"));
   body.set("outdoor_sensor", (document.getElementById("kd-outdoor-sensor") || {}).value || "");
@@ -2419,8 +2400,6 @@ function kindleDefaults() {
   kdSet("kd-layout", "0");
   kdSet("kd-page", "0");
   kdSet("kd-wpage", "0");
-  kdSet("kd-sband", "0");
-  kdSet("kd-sink", "0");
   kdSet("kd-rot", "0");
   kdSet("kd-prot", "-1");
   kdSet("kd-bdev", "0");

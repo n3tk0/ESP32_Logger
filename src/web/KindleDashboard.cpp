@@ -1987,10 +1987,6 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     AsyncResponseStream* s = req->beginResponseStream("text/plain");
     // The line behind the headline, fetched as /kindle/graph.bmp?line=1.
     kdShellInt(s, "HERO_LINE", heroLine ? 1 : 0);
-    // The band behind the headline's 24 h range, when the wall page has one.
-    if (wall && skin.subBand)
-        s->printf("SUB_BAND=%s\nSUB_INK=%s\n", kdShadeFbink(kdSubBandShade(skin.subBand)),
-                  kdShadeFbink(kdSubInkShade(skin.subBand, skin.subInk)));
 
     // ── Outdoor ──
     fmtTemp(buf, sizeof(buf), outT.value, skin.tempDecimals);
@@ -2704,9 +2700,8 @@ static void kdWallAt(String& p, const char* cls, int x, int y, int w = 0, int h 
 /// The outdoor mean of the last 24 hours behind the wall page's headline, light
 /// grey and thick, edge to edge of its row: the panel's own graph.bmp?line=1,
 /// which the browser stretches over the row as an image.
-static void appendHeroLine(String& p, const KdFlow& f, bool inv, bool band) {
-    // Short of a band by the white between it and the headline's plate.
-    const int H = f.subY - f.heroY - (band ? 8 : 0);
+static void appendHeroLine(String& p, const KdFlow& f, bool inv) {
+    const int H = f.subY - f.heroY;
     kdWallAt(p, "", f.colLX, f.heroY, f.headW, H);
     p += F("<img src=\"/kindle/graph.bmp?line=1&amp;w=");
     p += f.headW;
@@ -2786,16 +2781,12 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
     p += F("px\">");
 
     // ── The headline, across the page ──
-    // White on black when it asked to be: a plate under its whole row — down
-    // to the band under it, when there is one, with white between the two.
+    // White on black when it asked to be: a plate under its whole row.
     const bool hInv = zones.z[KZ_HERO].flags & KSLOTF_INV;
-    const bool band = skin.subBand && rd.sub[0];
-    if (hInv) {
-        kdWallPlate(p, f.colLX - 6, f.groupY - 6, f.headW + 12,
-                    (band ? f.subY - 8 : f.headRuleY - 4) - (f.groupY - 6));
-    }
+    if (hInv)
+        kdWallPlate(p, f.colLX - 6, f.groupY - 6, f.headW + 12, f.headRuleY - 4 - (f.groupY - 6));
     // The outdoor line behind the figures, on the plate.
-    if (rd.heroLine) appendHeroLine(p, f, hInv, band);
+    if (rd.heroLine) appendHeroLine(p, f, hInv);
     kdWallAt(p, "lab", f.colLX, f.groupY, f.headW);
     appendEscaped(p, kdGroupOutLabel(zones));
     if ((skin.showFlags & KSHOW_BATTERY) && batteryWarningActive())
@@ -2810,18 +2801,13 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
         appendValue(p, res[KZ_BIG], zones.z[KZ_BIG], "v2");
     }
     p += F("</div>");
-    if (hInv && band) p += F("</div>");
-    // The 24 h range: on a band across the page in its own shades, centred,
-    // which is the line between the headline and the rest — or under the
-    // headline as on the desk page, with the rule.
-    if (band) kdWallAt(p, "sub ctr wb", 18, f.subY - 6, 564, f.subSz + 12);
-    else if (rd.sub[0]) kdWallAt(p, big ? "sub" : "sub ctr", f.colLX, f.subY, f.headW);
     if (rd.sub[0]) {
+        kdWallAt(p, big ? "sub" : "sub ctr", f.colLX, f.subY, f.headW);
         appendEscaped(p, rd.sub);
         p += F("</div>");
     }
-    if (hInv && !band) p += F("</div>");
-    if (!band) kdWallRule(p, 18, f.headRuleY, 564, 0);
+    if (hInv) p += F("</div>");
+    kdWallRule(p, 18, f.headRuleY, 564, 0);
 
     // ── The grid, on the left ──
     if (f.gridNRows) {
@@ -2920,8 +2906,6 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
     p += st; p += ' '; p += ink;
     p += F("}.wv{border-left:"); p += w; p += F("px ");
     p += st; p += ' '; p += ink;
-    p += F("}.wl .wb{padding-top:.35em;background:"); p += kdShadeCss(kdSubBandShade(skin.subBand));
-    p += F(";color:"); p += kdShadeCss(kdSubInkShade(skin.subBand, skin.subInk));
     p += F("}.wl .fc-t{font-size:"); p += kdPx(f.fcTempSz);
     p += F("px}.wfw{font-size:"); p += kdPx(f.fcWindSz); p += F("px}");
 }

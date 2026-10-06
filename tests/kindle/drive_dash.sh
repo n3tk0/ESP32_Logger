@@ -1444,14 +1444,6 @@ check "$?" "the wall page sets a unit by its caption and the slash in black"
   reset_log
   draw_zones >/dev/null 2>&1
   head -1 "$FBINK_LOG" | grep -q "line_HERO_" || { echo "line not first" >&2; exit 9; }
-  rm -f "$hl"
-  # Over a band it stops 8 px short, where the headline's plate does.
-  Z_SUB="${Z_SUB:-1 to 9°}"; SUB_BAND=GRAY4; SUB_INK=WHITE
-  hl="$TMP/line_HERO_${HEAD_W}x$(( SUB_Y - HERO_Y - 8 ))_0.bmp"; printf 'BM' > "$hl"
-  reset_log
-  draw_zones >/dev/null 2>&1
-  grep -q "line_HERO_${HEAD_W}x$(( SUB_Y - HERO_Y - 8 ))_0" "$FBINK_LOG" || { echo "line not short of the band" >&2; exit 10; }
-  unset SUB_BAND SUB_INK
   # Lines nothing asks for any more, and the files of before, are cleared.
   : > "$TMP/heroline.bmp"; : > "$TMP/zline_G1.bmp"; : > "$TMP/line_G9_10x10_0.bmp"
   LAYOUT_FLOW=1; WALL=0
@@ -1546,37 +1538,6 @@ check "$?" "the wall page draws hairlines between its outdoor places, the desk p
   rm -f "$TMP"/line_*.bmp
   exit 0 )
 check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind it, on its plate"
-
-# THE BAND UNDER THE HEADLINE (SUB_BAND, SUB_INK): across the page in its
-# shade, the 24 h range centred on it, and no rule under the row. White on
-# black is the knocked-out pair; any other is drawn on a ground of the band's
-# own pen. A pen the script does not know is no band at all.
-( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
-  load_kv "$DASH_TMP/data.txt" PAYLOAD
-  ly_load "$WORK/ly.txt"
-  LAYOUT=auto; unset PAGE_MODE; RES_W=600 RES_H=800
-  load_layout
-  Z_SUB="-2 to 15° · 3 min"; Z_SUB_ADVW=6000
-  SUB_BAND=BLACK; SUB_INK=WHITE
-  reset_log
-  draw_zones >/dev/null 2>&1
-  grep -q -e "-B${T}BLACK${T}-k${T}top=$(( SUB_Y - 6 )),left=${COL_L_X},width=${HEAD_W},height=$(( SUB_SZ + 12 ))" \
-      "$FBINK_LOG" || { echo "no band" >&2; exit 1; }
-  sx=$(( COL_L_X + (HEAD_W - SUB_SZ * 6) / 2 ))
-  grep -e "--${T}${Z_SUB}${T}" "$FBINK_LOG" | grep -q -e "${T}-h${T}.*left=${sx}," || \
-      { grep -e "${Z_SUB}" "$FBINK_LOG" >&2; exit 2; }
-  grep -q -e "top=${HEAD_RULE_Y},left=${COL_L_X},width=${HEAD_W}," "$FBINK_LOG" && exit 3
-  SUB_BAND=GRAY7; SUB_INK=BLACK
-  reset_log
-  draw_zones >/dev/null 2>&1
-  grep -e "--${T}${Z_SUB}${T}" "$FBINK_LOG" | grep -q -e "-C${T}BLACK${T}-B${T}GRAY7${T}" || exit 4
-  SUB_BAND="red"
-  reset_log
-  draw_zones >/dev/null 2>&1
-  grep -q -e "top=$(( SUB_Y - 6 )),left=${COL_L_X},width=${HEAD_W}," "$FBINK_LOG" && exit 5
-  grep -q -e "top=${HEAD_RULE_Y},left=${COL_L_X}," "$FBINK_LOG" || { echo "no rule" >&2; exit 6; }
-  exit 0 )
-check "$?" "the wall page's band under the headline, in its shades, instead of the rule"
 
 # CENTRED ON THE WALL PAGE: a grid cell's caption and value in the cell, the
 # indoor heading, captions and values in their column.

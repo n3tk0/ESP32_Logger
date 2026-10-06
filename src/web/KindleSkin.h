@@ -603,8 +603,6 @@ inline void kdSkinClamp(KindleConfig& k) {
     if (k.layoutMode > KLAYOUT_STANDALONE) k.layoutMode = KLAYOUT_AUTO;
     if (k.pageStyle > KPAGE_WALL)       k.pageStyle = KPAGE_DESK;
     if (k.webStyle > KPAGE_WALL)        k.webStyle = KPAGE_DESK;
-    if (k.subBand > 4)                  k.subBand = 0;
-    if (k.subInk > 5)                   k.subInk = 0;
     if (k.chartA > KCHART_PLACES)       k.chartA = 0;
     if (k.chartB > KCHART_PLACES && k.chartB != KCHART_NONE) k.chartB = 0;
     // Upright is both what an older config holds and the one answer that is

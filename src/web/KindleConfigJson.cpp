@@ -51,8 +51,6 @@ const KdField KD_FIELDS[] = {
     KF("browser_bar",       "browserBar",      browserBar,      KF_U8),
     KF("page_style",        "pageStyle",       pageStyle,       KF_U8),
     KF("web_style",         "webStyle",        webStyle,        KF_U8),
-    KF("sub_band",          "subBand",         subBand,         KF_U8),
-    KF("sub_ink",           "subInk",          subInk,          KF_U8),
     KF("chart_a",           "chartA",          chartA,          KF_U8),
     KF("chart_b",           "chartB",          chartB,          KF_U8),
 };
