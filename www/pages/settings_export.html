@@ -8,8 +8,30 @@
 
     <div id="exp-msg"></div>
 
-    <!-- MQTT -->
+    <!-- Common schedule + sensor selection (export.defaults) -->
     <div class="card">
+      <div class="card-head">
+        <div class="card-title"><span data-icon="clock"></span> <span data-i18n="exportPage.commonTitle">Common settings</span></div>
+      </div>
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:.75rem" data-i18n="exportPage.commonHint">
+          Used by every exporter below unless it sets its own. Each send carries the latest value of every selected sensor that reported since the previous send.
+        </p>
+        <div class="field">
+          <label class="field-label" for="exp-def-interval" data-i18n="exportPage.intervalSecLabel">Send interval (seconds)</label>
+          <input type="number" id="exp-def-interval" class="input" value="60" min="5" step="1">
+          <p class="hint" data-i18n="exportPage.intervalSecHint">Minimum 5 s. Examples: 60 = every minute, 300 = every 5 min, 3600 = hourly.</p>
+        </div>
+        <div class="field">
+          <label class="field-label" data-i18n="exportPage.sensorsLabel">Sensors to send</label>
+          <div id="exp-def-sensors"></div>
+          <p class="hint" data-i18n="exportPage.sensorsHint">None ticked = all sensors.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MQTT -->
+    <div class="card" id="card-mqtt">
       <div class="card-head">
         <div class="card-title"><span data-icon="link"></span> <span data-i18n="exportPage.mqttTitle">MQTT</span></div>
         <label class="switch"><input type="checkbox" id="exp-mqtt-en"><span></span></label>
@@ -50,11 +72,6 @@
           </div>
         </div>
         <div class="form-grid">
-          <div class="field">
-            <label class="field-label" for="exp-mqtt-interval" data-i18n="exportPage.sendIntervalLabel">Send Interval (ms)</label>
-            <input type="number" id="exp-mqtt-interval" class="input" value="60000" step="1000">
-            <p class="hint" data-i18n="exportPage.mqttIntervalHint">How often to flush batched readings. Default 60 000 ms.</p>
-          </div>
           <div class="field" style="justify-content:flex-end">
             <label class="check"><input type="checkbox" id="exp-mqtt-retain"><span data-i18n="exportPage.mqttRetainLabel">Retain messages</span></label>
           </div>
@@ -67,11 +84,12 @@
           </select>
           <p class="hint" data-i18n-html="exportPage.mqttTlsHint">TLS uses <code>WiFiClientSecure</code> with no cert verification (no CA bundle on device). Use for cloud brokers where encryption matters; plaintext is fine for local LAN.</p>
         </div>
+        <div class="exp-scope" id="exp-mqtt-scope"></div>
       </div>
     </div>
 
     <!-- HTTP POST -->
-    <div class="card">
+    <div class="card" id="card-http">
       <div class="card-head">
         <div class="card-title"><span data-icon="globe"></span> <span data-i18n="exportPage.httpTitle">HTTP POST</span></div>
         <label class="switch"><input type="checkbox" id="exp-http-en"><span></span></label>
@@ -99,15 +117,12 @@
             title="Header value: alphanumeric, dash, underscore, space only. Newlines/colons not allowed (CRLF injection risk).">
           <p class="hint" data-i18n-html="exportPage.httpAuthHint">Sent as <code>Authorization: …</code>. Most APIs use <code>Bearer &lt;token&gt;</code> or <code>Basic &lt;base64&gt;</code>. CRLF characters are rejected client-side; backend double-checks (HttpExporter).</p>
         </div>
-        <div class="field">
-          <label class="field-label" for="exp-http-interval" data-i18n="exportPage.sendIntervalLabel">Send Interval (ms)</label>
-          <input type="number" id="exp-http-interval" class="input" value="60000" step="1000">
-        </div>
+        <div class="exp-scope" id="exp-http-scope"></div>
       </div>
     </div>
 
     <!-- Sensor.Community -->
-    <div class="card">
+    <div class="card" id="card-sc">
       <div class="card-head">
         <div class="card-title"><span data-icon="cloud-fog"></span> <span data-i18n="exportPage.scTitle">Sensor.Community</span></div>
         <label class="switch"><input type="checkbox" id="exp-sc-en"><span></span></label>
@@ -120,15 +135,12 @@
           The device ID is your ESP32 MAC-derived ID (shown in Device settings).
           Send interval must be ≥ 145 seconds (API requirement).
         </p>
-        <div class="field" style="margin-top:.75rem">
-          <label class="field-label" for="exp-sc-interval" data-i18n="exportPage.sendIntervalLabel">Send Interval (ms)</label>
-          <input type="number" id="exp-sc-interval" class="input" value="145000" min="145000">
-        </div>
+        <div class="exp-scope" id="exp-sc-scope" data-min-sec="145"></div>
       </div>
     </div>
 
     <!-- openSenseMap -->
-    <div class="card">
+    <div class="card" id="card-osm">
       <div class="card-head">
         <div class="card-title"><span data-icon="globe"></span> <span data-i18n="exportPage.osmTitle">openSenseMap</span></div>
         <label class="switch"><input type="checkbox" id="exp-osm-en"><span></span></label>
@@ -157,6 +169,7 @@
         <div id="exp-osm-ids">
           <!-- Populated by expLoad() -->
         </div>
+        <div class="exp-scope" id="exp-osm-scope"></div>
       </div>
     </div>
 
@@ -165,3 +178,4 @@
       <button class="btn" data-click="expLoad"><span data-icon="refresh-cw"></span> <span data-i18n="common.reload">Reload</span></button>
     </div>
   </section>
+

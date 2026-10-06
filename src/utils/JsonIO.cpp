@@ -1,6 +1,8 @@
 // src/utils/JsonIO.cpp — see JsonIO.h for why these go through one input and
 // one output type.
 #include "JsonIO.h"
+#include "AtomicWrite.h"
+#include "MutexGuard.h"
 
 #include <stdlib.h>
 
@@ -108,4 +110,22 @@ size_t jsonToBuf(JsonVariantConst v, char* buf, size_t cap) {
     serializeJson(v, static_cast<Print&>(p));
     buf[p.n] = '\0';
     return p.n;
+}
+
+bool jsonToFileAtomic(fs::FS& fs, const char* path, JsonVariantConst v,
+                      SemaphoreHandle_t mx) {
+    return atomicWrite(fs, path,
+                       [v](File& f) { return serializeJson(v, static_cast<Print&>(f)) > 0; },
+                       mx);
+}
+
+bool jsonFromFileLocked(fs::FS& fs, const char* path, JsonDocument& doc,
+                        SemaphoreHandle_t mx) {
+    MutexGuard g(mx, pdMS_TO_TICKS(2000));
+    if (mx && !g.isLocked()) return false;
+    File f = fs.open(path, "r");
+    if (!f) return false;
+    const bool ok = !deserializeJsonFile(doc, f);
+    f.close();
+    return ok;
 }

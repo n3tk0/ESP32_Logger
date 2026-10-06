@@ -6,10 +6,11 @@
 
 bool SensorCommunityExporter::init(JsonObjectConst cfg) {
     _enabled    = cfg["enabled"]      | false;
-    _intervalMs = cfg["interval_ms"]  | 145000;
     strncpy(_deviceId, config.deviceId, sizeof(_deviceId)-1);
-    Serial.printf("[SC] deviceId=%s interval=%lus\n",
-                  _deviceId, _intervalMs/1000);
+    // The send interval is resolved and applied by ExportManager after init()
+    // (own interval_ms, else export.defaults.interval_ms, never below
+    // minIntervalMs()) — there is deliberately no second clock in here.
+    Serial.printf("[SC] deviceId=%s\n", _deviceId);
     return true;
 }
 
@@ -43,7 +44,8 @@ bool SensorCommunityExporter::_postPin(const char* pin,
 
 bool SensorCommunityExporter::send(const SensorReading* readings, size_t count) {
     if (!_enabled) return true;
-    if (millis() - _lastSendMs < _intervalMs) return true; // rate-limit
+    // No rate limit here: ExportManager only calls send() when the interval
+    // (clamped to minIntervalMs()) has elapsed.
     if (WiFi.status() != WL_CONNECTED) return false;
 
     // Extract values from batch
@@ -87,6 +89,5 @@ bool SensorCommunityExporter::send(const SensorReading* readings, size_t count) 
         ok &= _postPin("11", "BME280", body);
     }
 
-    if (ok) _lastSendMs = millis();
     return ok;
 }

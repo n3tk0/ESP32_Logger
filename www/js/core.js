@@ -46,11 +46,18 @@ window.fetchWithTimeout = fetchWithTimeout;
 var _connOnline = null;
 var _ramText = "";
 // "a/b KB" or "a/b MB": short enough for a half-width chip.
+// Compact "used/total UNIT" for the half-width sidebar chips: one decimal
+// only below 10, no space before the unit ("1.2/120MB", "184/250KB"), so
+// both chips of a row keep their half of the sidebar.
+function _fmtNum(v) { return v < 10 ? v.toFixed(1) : String(Math.round(v)); }
 function _fmtPair(a, total) {
   if (total < 1048576) {
-    return Math.round(a / 1024) + "/" + Math.round(total / 1024) + " KB";
+    return Math.round(a / 1024) + "/" + Math.round(total / 1024) + "KB";
   }
-  return (a / 1048576).toFixed(1) + "/" + (total / 1048576).toFixed(1) + " MB";
+  if (total < 1073741824) {
+    return _fmtNum(a / 1048576) + "/" + _fmtNum(total / 1048576) + "MB";
+  }
+  return _fmtNum(a / 1073741824) + "/" + _fmtNum(total / 1073741824) + "GB";
 }
 function _connLabelSync() {
   var label = document.getElementById("sstat-conn-label");

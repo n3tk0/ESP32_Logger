@@ -40,6 +40,7 @@
 #include "CsrfToken.h"                 // Pass 7 CSRF on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../pipeline/DataPipeline.h"   // fsMutex (FS1)
+#include "../export/ExportManager.h"    // caps.exporters: what this build registered
 #include "../tasks/TaskManager.h"      // applyLoggerConfig after a data log save
 #include "../utils/MutexGuard.h"
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
@@ -1045,25 +1046,19 @@ static void h_post_api_datalog_create(AsyncWebServerRequest* r) {
     if (incDeviceId && strlen(config.deviceId) > 0)
         newFile += "_" + String(config.deviceId);
     if (timestampFn) {
-        // A zeroed RtcDateTime would render "_00000000_000000", which looks
-        // like a date and is not one. The millis() form below is the existing
-        // answer for "no clock to name this with", so a busy bus takes it too.
-        bool haveClock = false;
+        // The clock the log's rows and archive names use (pipelineNowEpoch():
+        // the system clock, then the DS1302), in local time. Reading the
+        // DS1302 alone named a file on a board without one by millis() even
+        // with NTP time ("datalog_271281.txt"); millis() is still the answer
+        // when no clock is set.
         char buf[20];
-        if (Rtc) {
-            MutexGuard rg(rtcMutex, pdMS_TO_TICKS(200));
-            if (!rtcMutex || rg.isLocked()) {
-                RtcDateTime now = Rtc->GetDateTime();
-                if (now.IsValid()) {
-                    snprintf(buf, sizeof(buf), "_%04d%02d%02d_%02d%02d%02d",
-                             now.Year(), now.Month(), now.Day(),
-                             now.Hour(), now.Minute(), now.Second());
-                    haveClock = true;
-                }
-            }
-        }
-        if (haveClock) newFile += buf;
-        else           newFile += "_" + String(millis());
+        const time_t now = (time_t)pipelineNowEpoch();
+        struct tm lt;
+        if (now > 1000000000L && localtime_r(&now, &lt))
+            strftime(buf, sizeof(buf), "_%Y%m%d_%H%M%S", &lt);
+        else
+            snprintf(buf, sizeof(buf), "_%lu", (unsigned long)millis());
+        newFile += buf;
     }
     newFile += ".txt";
 
@@ -1920,6 +1915,10 @@ void setupWebServer() {
         caps["flowmeter"] = false;
 #endif
         caps["platformMode"] = (int)g_platformMode;
+        // The exporters this build registered (ESP_Logger.ino, by setup.h
+        // toggle): the export page hides the cards of the others.
+        JsonArray exp = caps["exporters"].to<JsonArray>();
+        for (int i = 0; i < exportManager.count(); i++) exp.add(exportManager.nameAt(i));
     };
 
     auto fillTheme = [](JsonObject o) {

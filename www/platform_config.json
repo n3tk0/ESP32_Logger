@@ -319,6 +319,11 @@
   },
 
   "export": {
+    "defaults": {
+      "_comment": "Common send interval and sensor selection (sensor ids, [] = all). Each exporter below may override with its own interval_ms / sensors; leave them out to use these.",
+      "interval_ms": 60000,
+      "sensors": []
+    },
     "mqtt": {
       "enabled": false,
       "broker": "192.168.1.100",

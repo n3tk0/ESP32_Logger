@@ -1326,7 +1326,7 @@ function dlInit() {
           setVal("dl-aggSec", lg.aggregationIntervalSec || 60);
           var sc = dl.sensorCols || { auto: true, cols: [] };
           setChk("dl-colsAuto", sc.auto !== false);
-          var build = function (sensors) { dlColsBuild(sc, sensors); };
+          var build = function (sensors) { _dlSensors = sensors; dlColsBuild(sc, sensors); };
           (typeof getSensors === "function" ? getSensors({ maxAgeMs: 0 }) : Promise.resolve(null))
             .then(function (d) { build((d && d.sensors) || []); })
             .catch(function () { build([]); });
@@ -1419,20 +1419,42 @@ function _dlSetDeviceOffsetFromIso(iso) {
 // metrics of enabled sensors it has not seen yet. Each one is logged or off;
 // the firmware logs at most 24.
 var _dlCols = [];
+var _dlSensors = [];
 var _dlAvail = { volume: true, ff: true, pf: true };
 var DL_MAX_COLS = 24;
+
+// A name as the firmware keeps it: cut to `max` UTF-8 bytes on a whole
+// letter (utils/Utf8Clip.h). 16 and 15 are DatalogCol's sensor[17] and
+// metric[16] (storage/Datalog.h): change them together. Matching on the full
+// name added "Външен сензор" again on every load next to the saved
+// "Външен с", and the list filled up with copies.
+function dlClip(s, max) {
+  var n = 0, i = 0;
+  s = String(s || "");
+  while (i < s.length) {
+    var c = s.codePointAt(i), b = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+    if (n + b > max) break;
+    n += b;
+    i += c > 0xFFFF ? 2 : 1;
+  }
+  return s.slice(0, i).replace(/\uFFFD+$/, "");
+}
+function dlColKey(s, m) { return dlClip(s, 16) + "\u0001" + dlClip(m, 15); }
 
 function dlColsBuild(saved, sensors) {
   var list = [], seen = {};
   (saved.cols || []).forEach(function (c) {
-    seen[c.s + "\u0001" + c.m] = 1;
+    var k = dlColKey(c.s, c.m);
+    if (seen[k]) return;
+    seen[k] = 1;
     list.push({ s: c.s, m: c.m, l: c.l || "", on: !c.off, a: DATALOG_AGGS.indexOf(c.a) >= 0 ? c.a : "avg" });
   });
   (sensors || []).forEach(function (sn) {
     if (!sn || !sn.enabled) return;
     (sn.metrics || []).forEach(function (m) {
-      if (seen[sn.id + "\u0001" + m]) return;
-      seen[sn.id + "\u0001" + m] = 1;
+      var k = dlColKey(sn.id, m);
+      if (seen[k]) return;
+      seen[k] = 1;
       list.push({ s: sn.id, m: m, l: "", on: saved.auto !== false, a: "avg" });
     });
   });
@@ -1443,6 +1465,22 @@ function dlColsBuild(saved, sensors) {
   var h = document.getElementById("dl-colsJson");
   if (h) h.name = "cols";
   dlColsChanged();
+}
+
+// Starts the list again from the sensors enabled now, dropping columns of
+// sensors that are gone or renamed. Takes effect on Save; the new header
+// starts a new log file, the old one keeps its rows.
+function dlColsReset() {
+  var t = window.I18n ? I18n.t : function (k) { return k; };
+  // Nothing to rebuild from (the sensor list did not load): leave the list.
+  if (!_dlSensors.length) {
+    showMsg("dl-msg", "<div class='alert alert-error'>✗ " + esc(t("settingsPages.dlColsResetNoSensors")) + "</div>", true);
+    return;
+  }
+  if (!window.confirm(t("settingsPages.dlColsResetConfirm"))) return;
+  var auto = document.getElementById("dl-colsAuto");
+  dlColsBuild({ auto: !auto || auto.checked, cols: [] }, _dlSensors);
+  showMsg("dl-msg", "<div class='alert alert-warning'>" + esc(t("settingsPages.dlColsResetDone")) + "</div>", true);
 }
 
 function dlColsRender() {
@@ -2819,7 +2857,8 @@ function hubStatusInit() {
       if (sensors) sensors.innerHTML = " " + _hubBadge("dim", t("settingsHub.sensorsCount", { n: (pc.sensors || []).length }));
 
       var exp = pc.export || {};
-      var enabled = ["mqtt", "http", "sensor_community", "opensensemap"].filter(function (k) {
+      var caps = (ST && ST.caps && ST.caps.exporters) || ["mqtt", "http", "sensor_community", "opensensemap"];
+      var enabled = caps.filter(function (k) {
         return exp[k] && exp[k].enabled;
       }).length;
       setEl2("hub-st-export", enabled
@@ -2942,6 +2981,7 @@ registerHandlers({
   dlDeleteFile: dlDeleteFile,
   dlSwitchFile: dlSwitchFile,
   dlCreateFile: dlCreateFile,
+  dlColsReset: dlColsReset,
   dlUpdatePreview: dlUpdatePreview,
   dlColsChanged: dlColsChanged,
   dlToggleMaxSize: dlToggleMaxSize,
@@ -2953,3 +2993,4 @@ registerHandlers({
   closePopup: closePopup,
   modulesSelect: modulesSelect,
 });
+

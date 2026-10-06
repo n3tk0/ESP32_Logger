@@ -11,7 +11,6 @@
 #include "../core/Globals.h"          // sdAvailable
 #include "../core/SdCompat.h"         // sdFs()
 #include "../pipeline/DataPipeline.h" // fsMutex
-#include "../utils/AtomicWrite.h"
 #include "../utils/MutexGuard.h"
 #include "../utils/JsonIO.h"
 
@@ -76,18 +75,11 @@ static void setSt(Target& t, uint8_t st, const char* err) {
 // ============================================================================
 
 static bool readJson(const char* path, JsonDocument& doc) {
-    MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
-    if (fsMutex && !g.isLocked()) return false;
-    File f = sdFs()->open(path, "r");
-    if (!f) return false;
-    const bool ok = !deserializeJsonFile(doc, f);
-    f.close();
-    return ok;
+    return jsonFromFileLocked(*sdFs(), path, doc, fsMutex);
 }
 
 static bool writeJson(const char* path, const JsonDocument& doc) {
-    return atomicWrite(*sdFs(), path,
-                       [&doc](File& f) { return serializeJson(doc, static_cast<Print&>(f)) > 0; }, fsMutex);
+    return jsonToFileAtomic(*sdFs(), path, doc.as<JsonVariantConst>(), fsMutex);
 }
 
 static void removeFile(const char* path) {
