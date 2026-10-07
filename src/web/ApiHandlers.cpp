@@ -1058,6 +1058,7 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     doc["free_heap"]     = (uint32_t)ESP.getFreeHeap();
     doc["min_free_heap"] = (uint32_t)ESP.getMinFreeHeap();
     doc["queue_drops"]   = (uint32_t)g_queueDrops;
+    doc["export_skips"]  = g_exportSkips.load();
 
     // R19.A — heap sub-object (snapshot all values once for consistency)
     {
@@ -1159,6 +1160,7 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         JsonObject c = doc["counters"].to<JsonObject>();
         c["queueDrops"]    = (uint32_t)g_queueDrops;
         c["ringPushDrops"] = g_ringPushDrops.load();
+        c["exportSkips"]   = g_exportSkips.load();
         c["resets"]        = (uint32_t)g_consecutiveResets;
     }
 

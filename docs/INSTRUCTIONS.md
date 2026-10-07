@@ -323,6 +323,7 @@ profile, logs, and UI files; the first-run wizard runs after restart.
 | `tasks.*` | FreeRTOS stack high-water marks per task (words remaining) |
 | `counters.queueDrops` | Cumulative queue-full drops |
 | `counters.ringPushDrops` | Ring buffer push drops |
+| `counters.exportSkips` | Readings that missed the export queue while ExportTask was busy and no Webhook was on; the periodic exporters send the latest value anyway, so nothing is lost |
 | `counters.resets` | Current consecutive non-graceful reset count |
 | `resetLog` | Tail of `/error_log.txt` (last ≤16 lines). The JSON key keeps its old name so saved diagnostic bundles and the failsafe page still parse. |
 | `uptime` | Seconds since boot |

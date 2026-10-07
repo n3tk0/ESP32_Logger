@@ -64,6 +64,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 
     const uint32_t now = millis();
     bool periodic = false;   // anything enabled that reads the latest-value table
+    bool streaming = false;  // anything enabled that sends every reading
     for (int i = 0; i < _count; i++) {
         IExporter*  exp  = _exporters[i];
         const char* name = exp->getName();
@@ -102,11 +103,13 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         }
 
         if (exp->isEnabled() && !exp->isStreaming()) periodic = true;
+        if (exp->isEnabled() &&  exp->isStreaming()) streaming = true;
         // sensors: the count selected, 0 = all; '*' = the common setting.
         Serial.printf("[ExportManager] '%s' on=%d every %lus%s sensors=%u%s\n",
                       name, (int)exp->isEnabled(), (unsigned long)(iv / 1000),
                       own ? "" : "*", _sensorCount[_selOf[i]], ownSel ? "" : "*");
     }
+    _anyStreaming = streaming;
     // The latest-value table is only worth its RAM once something periodic
     // will read it.
     if (periodic && !_latest) {
