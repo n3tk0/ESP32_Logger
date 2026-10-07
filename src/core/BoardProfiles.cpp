@@ -2,6 +2,7 @@
 // src/core/BoardProfiles.cpp — see BoardProfiles.h for contract.
 // ============================================================================
 #include "BoardProfiles.h"
+#include "LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../managers/StorageManager.h"   // configFs(): settings live on LittleFS
 
 #include <string.h>
@@ -290,13 +291,13 @@ bool isPinAllowed(const BoardProfile* profile, uint8_t pin, PinPurpose /*purpose
 
 bool validateAttachPin(int pin, const char* sensorId, const char* fieldName) {
     if (pin < 0 || pin == (int)PIN_UNSET) {
-        Serial.printf("[%s.%s] init refused: pin not assigned\n",
+        Log.printf("[%s.%s] init refused: pin not assigned\n",
                       sensorId ? sensorId : "?",
                       fieldName ? fieldName : "pin");
         return false;
     }
     if (pin > 255) {
-        Serial.printf("[%s.%s] init refused: GPIO%d out of range\n",
+        Log.printf("[%s.%s] init refused: GPIO%d out of range\n",
                       sensorId ? sensorId : "?",
                       fieldName ? fieldName : "pin", pin);
         return false;
@@ -307,7 +308,7 @@ bool validateAttachPin(int pin, const char* sensorId, const char* fieldName) {
     String usage = String(sensorId) + "." + String(fieldName);
     if (!validatePin(pin, usage)) {
         // validatePin() already logged the conflict details
-        Serial.printf("[%s.%s] init refused: GPIO%d validation failed\n",
+        Log.printf("[%s.%s] init refused: GPIO%d validation failed\n",
                       sensorId ? sensorId : "?",
                       fieldName ? fieldName : "pin", pin);
         return false;
@@ -326,13 +327,13 @@ bool validateAttachPin(int pin, const char* sensorId, const char* fieldName) {
                         && (uint8_t)pin <= g_boardProfile->maxGpio
                         && !inList(g_boardProfile->flashPins, (uint8_t)pin);
         if (!canOverride) {
-            Serial.printf("[%s.%s] init refused: GPIO%d = %s%s\n",
+            Log.printf("[%s.%s] init refused: GPIO%d = %s%s\n",
                           sensorId ? sensorId : "?",
                           fieldName ? fieldName : "pin", pin, reason,
                           g_pinAllowUnsafe ? " (cannot be overridden)" : "");
             return false;
         }
-        Serial.printf("[%s.%s] WARNING: GPIO%d = %s — allowed via allow_unsafe_pins; "
+        Log.printf("[%s.%s] WARNING: GPIO%d = %s — allowed via allow_unsafe_pins; "
                       "ensure proper pull-ups, the device may fail to boot if this pin "
                       "is held LOW at reset\n",
                       sensorId ? sensorId : "?",

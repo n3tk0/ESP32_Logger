@@ -1,4 +1,5 @@
 #include "WiFiManager.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../core/Globals.h"
 #include "ConfigManager.h"
 #include "RtcManager.h"                 // currentPosixTz
@@ -38,7 +39,7 @@ static bool      s_dnsRunning = false;
 //           и earlyGPIO snapshot чете само реалния физически бутон.
 // ============================================================================
 void safeWiFiShutdown() {
-    Serial.println("WiFi: Safe shutdown before restart...");
+    Log.println("WiFi: Safe shutdown before restart...");
 
     // Stop captive-portal DNS first so no in-flight UDP packet trips up
     // the radio teardown below.
@@ -63,7 +64,7 @@ void safeWiFiShutdown() {
     WiFi.mode(WIFI_OFF);
     delay(200);   // Дай на радио стека да се flush-не
 
-    Serial.println("WiFi: Radio OFF, safe to restart.");
+    Log.println("WiFi: Radio OFF, safe to restart.");
 }
 
 uint8_t applyWifiTxPower() {
@@ -72,7 +73,7 @@ uint8_t applyWifiTxPower() {
                       g_boardProfile->id == BOARD_SUPERMINI_C3);
     const uint8_t q = wifiTxPowerFor(config.network.txPower, low);
     if (!WiFi.setTxPower((wifi_power_t)q))
-        Serial.printf("WiFi: could not set TX power %u.%u dBm\n", q / 4, (q % 4) * 25);
+        Log.printf("WiFi: could not set TX power %u.%u dBm\n", q / 4, (q % 4) * 25);
     return q;
 }
 
@@ -107,17 +108,17 @@ bool connectToWiFi() {
            millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
         delay(100);
         yield();  // Cooperative scheduling (task not registered with ESP-IDF TWDT)
-        if (millis() - lastDot >= 250) { Serial.print("."); lastDot = millis(); }
+        if (millis() - lastDot >= 250) { Log.print("."); lastDot = millis(); }
     }
 
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnectedAsClient = true;
         strlcpy(connectedSSID, config.network.clientSSID, sizeof(connectedSSID));
-        Serial.printf("\nWiFi connected: %s\n", WiFi.localIP().toString().c_str());
+        Log.printf("\nWiFi connected: %s\n", WiFi.localIP().toString().c_str());
         return true;
     }
 
-    Serial.println("\nWiFi connection failed");
+    Log.println("\nWiFi connection failed");
     return false;
 }
 

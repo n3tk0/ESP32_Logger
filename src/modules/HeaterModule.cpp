@@ -1,4 +1,5 @@
 #include "HeaterModule.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../core/BoardProfiles.h"
 #include "../sensors/ReadingCache.h"
@@ -29,7 +30,7 @@ bool HeaterModule::load(JsonObjectConst cfg) {
     // stuck, and the honest answer to a config POST is "not applied".
     MutexGuard g(_hwMutex, pdMS_TO_TICKS(500));
     if (!g.isLocked()) {
-        Serial.println("[Heater] config not applied: the hardware lock is held");
+        Log.println("[Heater] config not applied: the hardware lock is held");
         return false;
     }
 
@@ -41,7 +42,7 @@ bool HeaterModule::load(JsonObjectConst cfg) {
 
     int newPin = cfg["pin"] | _pin;
     if (newPin < -1 || newPin > 48) {
-        Serial.printf("[Heater] pin %d out of range — rejected\n", newPin);
+        Log.printf("[Heater] pin %d out of range — rejected\n", newPin);
         return false;
     }
     if (newPin != _pin) _reconfigure = true;
@@ -72,7 +73,7 @@ bool HeaterModule::load(JsonObjectConst cfg) {
     // heater unable to ever run; treat it as a misconfiguration and restore
     // a usable gap rather than silently never heating.
     if (_maxTempC <= _setpointC + OVERTEMP_CLEAR_MARGIN_C) {
-        Serial.printf("[Heater] maxTempC %.1f too close to setpoint %.1f — raised\n",
+        Log.printf("[Heater] maxTempC %.1f too close to setpoint %.1f — raised\n",
                       _maxTempC, _setpointC);
         _maxTempC = _setpointC + OVERTEMP_CLEAR_MARGIN_C + 1.0f;
     }
@@ -208,7 +209,7 @@ bool HeaterModule::_attachPin() {
 
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
     if (!ledcAttach((uint8_t)_pin, _pwmFreqHz, PWM_RESOLUTION_BITS)) {
-        Serial.printf("[Heater] ledcAttach failed on GPIO%d\n", _pin);
+        Log.printf("[Heater] ledcAttach failed on GPIO%d\n", _pin);
         return false;
     }
 #else
@@ -222,7 +223,7 @@ bool HeaterModule::_attachPin() {
     _attached    = true;
     _attachedPin = _pin;
     _applyDuty(0);
-    Serial.printf("[Heater] attached GPIO%d @ %luHz %u-bit%s\n",
+    Log.printf("[Heater] attached GPIO%d @ %luHz %u-bit%s\n",
                   _pin, (unsigned long)_pwmFreqHz, PWM_RESOLUTION_BITS,
                   _invert ? " (active-low)" : "");
     return true;
@@ -310,7 +311,7 @@ void HeaterModule::tick(uint32_t nowMs) {
     float tEncl = NAN;
     if (!_readInput(_tempSensor, _tempMetric, maxAgeMs, tEncl)) {
         if (_fault != FAULT_STALE_TEMP) {
-            Serial.printf("[Heater] enclosure probe '%s/%s' unavailable — output forced off\n",
+            Log.printf("[Heater] enclosure probe '%s/%s' unavailable — output forced off\n",
                           _tempSensor[0] ? _tempSensor : "(unset)", _tempMetric);
         }
         _lastTempC = NAN;
@@ -323,12 +324,12 @@ void HeaterModule::tick(uint32_t nowMs) {
     // ---- Over-temperature latch -------------------------------------------
     if (tEncl >= _maxTempC) {
         if (!_overtempLatch) {
-            Serial.printf("[Heater] OVER-TEMPERATURE %.1f\u00b0C >= %.1f\u00b0C — latched off\n",
+            Log.printf("[Heater] OVER-TEMPERATURE %.1f\u00b0C >= %.1f\u00b0C — latched off\n",
                           tEncl, _maxTempC);
         }
         _overtempLatch = true;
     } else if (_overtempLatch && tEncl < (_maxTempC - OVERTEMP_CLEAR_MARGIN_C)) {
-        Serial.printf("[Heater] over-temperature cleared at %.1f\u00b0C\n", tEncl);
+        Log.printf("[Heater] over-temperature cleared at %.1f\u00b0C\n", tEncl);
         _overtempLatch = false;
     }
     if (_overtempLatch) { _forceOff(FAULT_OVERTEMP); return; }
@@ -357,11 +358,11 @@ void HeaterModule::tick(uint32_t nowMs) {
     if (heating && !_heating) {
         _rampStartMs = nowMs;
         _onSinceMs   = nowMs;
-        Serial.printf("[Heater] ON  T=%.2f\u00b0C target=%.2f\u00b0C%s\n",
+        Log.printf("[Heater] ON  T=%.2f\u00b0C target=%.2f\u00b0C%s\n",
                       tEncl, target,
                       _dewValid ? " (dew-limited)" : "");
     } else if (!heating && _heating) {
-        Serial.printf("[Heater] OFF T=%.2f\u00b0C target=%.2f\u00b0C\n", tEncl, target);
+        Log.printf("[Heater] OFF T=%.2f\u00b0C target=%.2f\u00b0C\n", tEncl, target);
     }
     _heating = heating;
     _fault   = FAULT_NONE;

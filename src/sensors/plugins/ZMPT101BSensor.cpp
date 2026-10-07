@@ -1,4 +1,5 @@
 #include "ZMPT101BSensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include <math.h>
 
@@ -28,7 +29,7 @@ bool ZMPT101BSensor::init(JsonObjectConst cfg) {
     pinMode(_pin, INPUT);
     _ready = true;
 
-    Serial.printf("[ZMPT101B] pin=%d factor=%.4f samples=%d period_us=%u\n",
+    Log.printf("[ZMPT101B] pin=%d factor=%.4f samples=%d period_us=%u\n",
                   _pin, _voltageFactor, _samples, _samplePeriodUs);
     return true;
 }

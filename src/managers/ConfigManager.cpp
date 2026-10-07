@@ -1,4 +1,5 @@
 #include "ConfigManager.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../core/Globals.h"
 #include "../core/ModuleRegistry.h"     // Pass 5: shadow modules.json on save
 #include "../pipeline/DataPipeline.h"   // fsMutex
@@ -370,7 +371,7 @@ void loadDefaultConfig() {
 void migrateConfig(uint8_t fromVersion) {
     DBGF("Migrating config v%d -> v%d\n", fromVersion, CONFIG_VERSION);
     if (fromVersion > CONFIG_VERSION) {
-        Serial.printf("[Config] WARN: config v%d > firmware v%d — resetting defaults\n", fromVersion, CONFIG_VERSION);
+        Log.printf("[Config] WARN: config v%d > firmware v%d — resetting defaults\n", fromVersion, CONFIG_VERSION);
         applyDefaults();
         return;
     }
@@ -470,16 +471,16 @@ bool loadConfig() {
     if (LittleFS.begin(false, "/littlefs", 10, "spiffs")) {
         littleFsAvailable = true;
     } else {
-        Serial.println("[CFG] LittleFS mount failed – using hardcoded defaults");
+        Log.println("[CFG] LittleFS mount failed – using hardcoded defaults");
         loadDefaultConfig();
         return false;
     }
 
     // ── Recover interrupted crash-safe write ─────────────────────────────────
     if (!LittleFS.exists(CONFIG_FILE) && LittleFS.exists("/config.tmp")) {
-        Serial.println("[CFG] Recovering config from temp file");
+        Log.println("[CFG] Recovering config from temp file");
         if (!LittleFS.rename("/config.tmp", CONFIG_FILE))
-            Serial.println("[CFG] config.tmp recovery rename FAILED");
+            Log.println("[CFG] config.tmp recovery rename FAILED");
     } else if (LittleFS.exists("/config.tmp")) {
         LittleFS.remove("/config.tmp");   // stale temp, real file exists
     }
@@ -487,7 +488,7 @@ bool loadConfig() {
     // ── Open config file ──────────────────────────────────────────────────────
     File f = LittleFS.open(CONFIG_FILE, "r");
     if (!f || f.isDirectory()) {
-        Serial.println("[CFG] No config file – using hardcoded defaults");
+        Log.println("[CFG] No config file – using hardcoded defaults");
         if (f) f.close();
         loadDefaultConfig();
         saveConfig();
@@ -498,7 +499,7 @@ bool loadConfig() {
 
     // ── Guard: file must be non-empty and not absurdly large ─────────────────
     if (fileSize == 0 || fileSize > sizeof(DeviceConfig) * 2) {
-        Serial.printf("[CFG] Bad file size %u – using hardcoded defaults\n", fileSize);
+        Log.printf("[CFG] Bad file size %u – using hardcoded defaults\n", fileSize);
         f.close();
         // Transient fault (spurious size): boot on in-memory defaults but do NOT
         // overwrite the on-disk file, so a retry next boot can still recover it.
@@ -513,7 +514,7 @@ bool loadConfig() {
         f.close();
 
         if (got != sizeof(DeviceConfig) || tmp.magic != CONFIG_STRUCT_MAGIC) {
-            Serial.println("[CFG] Magic mismatch / short read – using hardcoded defaults");
+            Log.println("[CFG] Magic mismatch / short read – using hardcoded defaults");
             // Transient fault (short read / bad magic): boot on in-memory defaults
             // but do NOT overwrite the on-disk file, so a retry next boot can still
             // recover it.
@@ -527,7 +528,7 @@ bool loadConfig() {
     else if (fileSize < sizeof(DeviceConfig)) {
         uint8_t* rawBuf = (uint8_t*)malloc(fileSize);
         if (!rawBuf) {
-            Serial.println("[CFG] malloc failed – using hardcoded defaults");
+            Log.println("[CFG] malloc failed – using hardcoded defaults");
             f.close();
             // Transient fault (RAM pressure, file intact): boot on in-memory
             // defaults but do NOT overwrite the on-disk file.
@@ -543,7 +544,7 @@ bool loadConfig() {
 
         if (got != fileSize || fileMagic != CONFIG_STRUCT_MAGIC) {
             free(rawBuf);
-            Serial.println("[CFG] Corrupt file – using hardcoded defaults");
+            Log.println("[CFG] Corrupt file – using hardcoded defaults");
             // Transient fault (short read / bad magic): boot on in-memory defaults
             // but do NOT overwrite the on-disk file, so a retry next boot can still
             // recover it.
@@ -561,7 +562,7 @@ bool loadConfig() {
             if (rawVersion == v) { versionKnown = true; break; }
         }
         if (!versionKnown) {
-            Serial.printf("[CFG] Unknown source version %u — resetting to defaults\n", rawVersion);
+            Log.printf("[CFG] Unknown source version %u — resetting to defaults\n", rawVersion);
             free(rawBuf);
             loadDefaultConfig();
             saveConfig();
@@ -592,14 +593,14 @@ bool loadConfig() {
         #undef SAFE_COPY
 
         free(rawBuf);
-        Serial.printf("[CFG] Migrated %u -> %u bytes\n",
+        Log.printf("[CFG] Migrated %u -> %u bytes\n",
                       (unsigned)fileSize, (unsigned)sizeof(DeviceConfig));
     }
 
     else {
         // fileSize > sizeof(DeviceConfig) — shouldn't happen, treat as corrupt
         f.close();
-        Serial.println("[CFG] Oversized config file – using hardcoded defaults");
+        Log.println("[CFG] Oversized config file – using hardcoded defaults");
         // Transient fault (spurious size): boot on in-memory defaults but do NOT
         // overwrite the on-disk file, so a retry next boot can still recover it.
         loadDefaultConfig();
@@ -611,7 +612,7 @@ bool loadConfig() {
 
     // ── Sanitise wake pins ────────────────────────────────────────────────────
     if (sanitizeWakeConfig()) {
-        Serial.println("[CFG] Wake pins invalid/duplicate – restored defaults");
+        Log.println("[CFG] Wake pins invalid/duplicate – restored defaults");
         saveConfig();
     }
 
@@ -644,7 +645,7 @@ bool loadConfig() {
     // ── Fill any zero/empty fields that survived migration ────────────────────
     applyDefaults();
 
-    Serial.printf("[CFG] Loaded v%u OK\n", config.version);
+    Log.printf("[CFG] Loaded v%u OK\n", config.version);
     return true;
 }
 

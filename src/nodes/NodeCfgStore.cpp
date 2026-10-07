@@ -1,4 +1,5 @@
 #include "NodeCfgStore.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #ifdef FEATURE_REMOTE_NODES
 
@@ -87,7 +88,7 @@ static Entry* alloc(bool espnow, const char* name, uint8_t id) {
         copyStr(e.name, sizeof(e.name), espnow ? "" : name);
         return &e;
     }
-    Serial.println("[nodecfg] index full — config not kept");
+    Log.println("[nodecfg] index full — config not kept");
     return nullptr;
 }
 
@@ -150,7 +151,7 @@ static bool saveEntry(const Entry& e, JsonDocument& doc) {
     char p[ncr::PATH_CAP];
     pathOf(e, p);
     if (writeJson(p, doc)) return true;
-    Serial.printf("[nodecfg] could not write %s\n", p);
+    Log.printf("[nodecfg] could not write %s\n", p);
     return false;
 }
 
@@ -228,7 +229,7 @@ static bool adopt(Entry*& e, Work* w, JsonObjectConst rep, bool espnow, const ch
     w->hoKept = false;
     Issue is;
     if (!decodeConfig(rep, w->cfg, NCJ_DEC_REV | NCJ_DEC_IDENTITY, &is)) {
-        Serial.printf("[nodecfg] report from %s/%u refused: %s %s\n", name, id, is.field,
+        Log.printf("[nodecfg] report from %s/%u refused: %s %s\n", name, id, is.field,
                       is.reason);
         return false;
     }
@@ -573,7 +574,7 @@ size_t nodeCfgRadioDoc(uint8_t id, char* buf, size_t cap, uint16_t& rev) {
             n = jsonToBuf(d, buf, cap);
             rev = e->s.rev;
         } else {
-            Serial.printf("[nodecfg] config for node %u is %u bytes — too big for the radio\n",
+            Log.printf("[nodecfg] config for node %u is %u bytes — too big for the radio\n",
                           id, (unsigned)need);
         }
     }

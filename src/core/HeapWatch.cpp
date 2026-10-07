@@ -1,4 +1,5 @@
 #include "HeapWatch.h"
+#include "LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
@@ -111,7 +112,7 @@ void heapWatchTick(uint32_t now) {
         char acts[96], at[24];
         describeActivities(now, acts, sizeof(acts));
         eventLogNow(at, sizeof(at));
-        Serial.printf("[heap] low: min=%u free=%u largest=%u during %s\n",
+        Log.printf("[heap] low: min=%u free=%u largest=%u during %s\n",
                       (unsigned)minFree, (unsigned)ESP.getFreeHeap(),
                       (unsigned)ESP.getMaxAllocHeap(), acts);
         eventLogPrintf("low heap min=%u free=%u largest=%u at=%s up=%lus  %s",

@@ -1,4 +1,5 @@
 #include "ThemeModule.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../core/Globals.h"
 #include "../core/Config.h"
@@ -42,7 +43,7 @@ bool ThemeModule::load(JsonObjectConst cfg) {
         if (!v) return;
         if (_isHexColor(v)) { copyStr(dst, n, v); }
         else if (!warnedColor) {
-            Serial.printf("[ThemeModule] rejected invalid color for %s\n", key);
+            Log.printf("[ThemeModule] rejected invalid color for %s\n", key);
             warnedColor = true;
         }
     };

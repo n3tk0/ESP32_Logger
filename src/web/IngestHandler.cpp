@@ -1,4 +1,5 @@
 #include "IngestHandler.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #ifdef FEATURE_REMOTE_NODES
 
@@ -461,11 +462,11 @@ void registerIngestHandler(AsyncWebServer& server) {
         const char* tok = INGEST_TOKEN;
         const size_t n  = strlen(tok);
         if (n == 0 || strcmp(tok, "change-me") == 0) {
-            Serial.println("[ingest] WARNING: INGEST_TOKEN is the built-in default — "
+            Log.println("[ingest] WARNING: INGEST_TOKEN is the built-in default — "
                            "anything on this network can post readings. Rebuild with "
                            "-DINGEST_TOKEN='\"your-secret\"'.");
         } else if (n < 12) {
-            Serial.printf("[ingest] WARNING: INGEST_TOKEN is only %u characters — "
+            Log.printf("[ingest] WARNING: INGEST_TOKEN is only %u characters — "
                           "it is the sole guard on POST /api/ingest.\n", (unsigned)n);
         }
     }

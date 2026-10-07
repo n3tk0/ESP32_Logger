@@ -1,4 +1,5 @@
 #include "TaskManager.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "Heartbeat.h"
 #include "SensorTask.h"
 #include "SlowSensorTask.h"
@@ -188,9 +189,9 @@ bool TaskManager::_createSlowSensorTask() {
 void TaskManager::ensureSlowSensorTask() {
     if (!running || hSlowSensor || !sensorManager.hasBlocking()) return;
     if (_createSlowSensorTask())
-        Serial.println("[TaskManager] SlowSensorTask started for a blocking sensor");
+        Log.println("[TaskManager] SlowSensorTask started for a blocking sensor");
     else
-        Serial.println("[TaskManager] SlowSensorTask FAILED — blocking sensors will not be read until reboot");
+        Log.println("[TaskManager] SlowSensorTask FAILED — blocking sensors will not be read until reboot");
 }
 
 bool TaskManager::init(fs::FS& fs) {
@@ -220,7 +221,7 @@ bool TaskManager::init(fs::FS& fs) {
     rtcMutex     = xSemaphoreCreateMutex();   // DS1302 three-wire bus
 
     if (!webDataMutex || !configMutex || !wireMutex || !fsMutex || !rtcMutex) {
-        Serial.println("[TaskManager] Mutex creation FAILED");
+        Log.println("[TaskManager] Mutex creation FAILED");
         _cleanupPartialInit();
         return false;
     }
@@ -239,11 +240,11 @@ bool TaskManager::init(fs::FS& fs) {
     sensorQueue  = xQueueCreate((UBaseType_t)dynSDepth, sizeof(SensorReading));
     storageQueue = xQueueCreate(QUEUE_STORAGE_DEPTH,    sizeof(SensorReading));
     exportQueue  = xQueueCreate(QUEUE_EXPORT_DEPTH,     sizeof(SensorReading));
-    Serial.printf("[TaskManager] sensorQueue depth=%d (sensors=%d)\n",
+    Log.printf("[TaskManager] sensorQueue depth=%d (sensors=%d)\n",
                   dynSDepth, sCount);
 
     if (!sensorQueue || !storageQueue || !exportQueue) {
-        Serial.println("[TaskManager] Queue creation FAILED");
+        Log.println("[TaskManager] Queue creation FAILED");
         _cleanupPartialInit();
         return false;
     }
@@ -282,7 +283,7 @@ bool TaskManager::init(fs::FS& fs) {
                     storageParam.mirrorFS = (&fs == sdFs())
                                            ? static_cast<fs::FS*>(&LittleFS)
                                            : sdFs();
-                    Serial.println("[TaskManager] Mirror write enabled (SD + LittleFS)");
+                    Log.println("[TaskManager] Mirror write enabled (SD + LittleFS)");
                 }
             }
             cfgFile2.close();
@@ -299,32 +300,32 @@ bool TaskManager::init(fs::FS& fs) {
     r = xTaskCreatePinnedToCore(storageTaskFunc,    "StorageTask",
                                 STACK_STORAGE_TASK, &storageParam,
                                 TASK_PRIO_STORAGE,  &hStorage,  0);
-    if (r != pdPASS) { Serial.println("[TaskManager] StorageTask FAILED"); _cleanupPartialInit(); return false; }
+    if (r != pdPASS) { Log.println("[TaskManager] StorageTask FAILED"); _cleanupPartialInit(); return false; }
 
     r = xTaskCreatePinnedToCore(exportTaskFunc,     "ExportTask",
                                 STACK_EXPORT_TASK,  nullptr,
                                 TASK_PRIO_EXPORT,   &hExport,   0);
-    if (r != pdPASS) { Serial.println("[TaskManager] ExportTask FAILED"); _cleanupPartialInit(); return false; }
+    if (r != pdPASS) { Log.println("[TaskManager] ExportTask FAILED"); _cleanupPartialInit(); return false; }
 
     r = xTaskCreatePinnedToCore(sensorTaskFunc,     "SensorTask",
                                 STACK_SENSOR_TASK,  nullptr,
                                 TASK_PRIO_SENSOR,   &hSensor,   0);
-    if (r != pdPASS) { Serial.println("[TaskManager] SensorTask FAILED"); _cleanupPartialInit(); return false; }
+    if (r != pdPASS) { Log.println("[TaskManager] SensorTask FAILED"); _cleanupPartialInit(); return false; }
 
     // SlowSensorTask only when a blocking sensor (SDS011, PMS5003, wind) is
     // configured: otherwise its 4 KB stack does nothing but wake every
     // 500 ms to find no work. ensureSlowSensorTask() starts it later if one
     // is added from the Sensors page.
     if (sensorManager.hasBlocking() && !_createSlowSensorTask()) {
-        Serial.println("[TaskManager] SlowSensorTask FAILED"); _cleanupPartialInit(); return false;
+        Log.println("[TaskManager] SlowSensorTask FAILED"); _cleanupPartialInit(); return false;
     }
 
     r = xTaskCreatePinnedToCore(processingTaskFunc, "ProcessTask",
                                 STACK_PROCESS_TASK, nullptr,
                                 TASK_PRIO_PROCESS,  &hProcess,  0);
-    if (r != pdPASS) { Serial.println("[TaskManager] ProcessTask FAILED"); _cleanupPartialInit(); return false; }
+    if (r != pdPASS) { Log.println("[TaskManager] ProcessTask FAILED"); _cleanupPartialInit(); return false; }
 
-    Serial.println("[TaskManager] All tasks started");
+    Log.println("[TaskManager] All tasks started");
 
     // AUDIT 2.3: running=true ONLY now, after every resource is built.
     running = true;
@@ -401,7 +402,7 @@ void TaskManager::shutdown() {
         // so a re-init doesn't end up with two instances of the same task
         // racing for the same queues / mutexes.
         if (!deleted) {
-            Serial.println("[TaskManager] shutdown: task timeout — forcing vTaskDelete");
+            Log.println("[TaskManager] shutdown: task timeout — forcing vTaskDelete");
             vTaskDelete(*hp);
         }
         *hp = nullptr;
@@ -431,7 +432,7 @@ bool TaskManager::checkHealth(char* why, size_t whyCap) {
         TaskHandle_t h = taskHandles[i];
         if (!h) continue;    // not started (SlowSensorTask with no blocking sensor)
         if (eTaskGetState(h) == eDeleted) {
-            Serial.printf("[Watchdog] Task %d deleted unexpectedly\n", i);
+            Log.printf("[Watchdog] Task %d deleted unexpectedly\n", i);
             if (why) snprintf(why, whyCap, "watchdog: %s deleted", names[i]);
             return false;
         }
@@ -439,7 +440,7 @@ bool TaskManager::checkHealth(char* why, size_t whyCap) {
         // (see Heartbeat.h) — that is a live task, not 49 days of silence.
         const uint32_t silent = heartbeatSilentMs(now, g_taskHeartbeat[i]);
         if (silent > MAX_SILENCE_MS) {
-            Serial.printf("[Watchdog] Task %d stuck (%lums)\n", i, (unsigned long)silent);
+            Log.printf("[Watchdog] Task %d stuck (%lums)\n", i, (unsigned long)silent);
             if (why) snprintf(why, whyCap, "watchdog: %s silent %lus", names[i],
                               (unsigned long)(silent / 1000));
             return false;

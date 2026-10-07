@@ -1,4 +1,5 @@
 #include "SensorCommunityExporter.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../core/Globals.h"
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -10,7 +11,7 @@ bool SensorCommunityExporter::init(JsonObjectConst cfg) {
     // The send interval is resolved and applied by ExportManager after init()
     // (own interval_ms, else export.defaults.interval_ms, never below
     // minIntervalMs()) — there is deliberately no second clock in here.
-    Serial.printf("[SC] deviceId=%s\n", _deviceId);
+    Log.printf("[SC] deviceId=%s\n", _deviceId);
     return true;
 }
 
@@ -36,7 +37,7 @@ bool SensorCommunityExporter::_postPin(const char* pin,
     int code = http.POST(const_cast<char*>(body));
     bool ok  = (code == 201 || code == 200);
     if (!ok) {
-        Serial.printf("[SC] pin=%s POST failed code=%d\n", pin, code);
+        Log.printf("[SC] pin=%s POST failed code=%d\n", pin, code);
     }
     http.end();
     return ok;

@@ -1,4 +1,5 @@
 #include "SlowSensorTask.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "TaskManager.h"
 #include "../sensors/SensorManager.h"
 #include "../pipeline/DataPipeline.h"
@@ -7,11 +8,11 @@
 
 // ---------------------------------------------------------------------------
 void slowSensorTaskFunc(void* /*param*/) {
-    Serial.println("[SlowSensorTask] started");
+    Log.println("[SlowSensorTask] started");
 
     // See SensorTask: park until init() opens the start gate so a higher-prio
     // task can't self-delete by observing running==false mid-init.
-    if (!TaskManager::waitForStart()) { Serial.println("[SlowSensorTask] stopped"); vTaskDelete(nullptr); return; }
+    if (!TaskManager::waitForStart()) { Log.println("[SlowSensorTask] stopped"); vTaskDelete(nullptr); return; }
 
     while (TaskManager::running) {
         g_taskHeartbeat[TASK_IDX_SLOW_SENSOR] = millis();   // C4 heartbeat
@@ -36,6 +37,6 @@ void slowSensorTaskFunc(void* /*param*/) {
         vTaskDelay(pdMS_TO_TICKS(SLOW_SENSOR_TICK_MS));
     }
 
-    Serial.println("[SlowSensorTask] stopped");
+    Log.println("[SlowSensorTask] stopped");
     vTaskDelete(nullptr);
 }

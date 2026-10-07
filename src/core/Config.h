@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 // All build-time tunables (module toggles, debug flags, task tuning,
 // timeouts, batch sizes) live in src/setup.h.  We pull them in here so
@@ -32,9 +33,9 @@ inline String getVersionString() {
 
 // DBG/DBGLN/DBGF resolve to no-ops when DEBUG_MODE == 0 (set in setup.h).
 #if DEBUG_MODE
-  #define DBG(x)      Serial.print(x)
-  #define DBGLN(x)    Serial.println(x)
-  #define DBGF(...)   Serial.printf(__VA_ARGS__)
+  #define DBG(x)      Log.print(x)
+  #define DBGLN(x)    Log.println(x)
+  #define DBGF(...)   Log.printf(__VA_ARGS__)
 #else
   #define DBG(x)
   #define DBGLN(x)

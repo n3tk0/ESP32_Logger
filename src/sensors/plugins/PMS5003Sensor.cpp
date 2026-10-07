@@ -1,4 +1,5 @@
 #include "PMS5003Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
 #include "../../pipeline/DataPipeline.h"  // g_taskHeartbeat / TASK_IDX_SLOW_SENSOR
@@ -18,7 +19,7 @@ bool PMS5003Sensor::init(JsonObjectConst cfg) {
     if (!validateAttachPin(rx, "pms5003", "uart_rx")) return false;
     if (tx >= 0 && !validateAttachPin(tx, "pms5003", "uart_tx")) return false;
     if (!_claimSerial1(this)) {
-        Serial.println("[PMS5003] Serial1 already owned by another sensor — refusing init");
+        Log.println("[PMS5003] Serial1 already owned by another sensor — refusing init");
         return false;
     }
 

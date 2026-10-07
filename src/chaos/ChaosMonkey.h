@@ -38,6 +38,7 @@
 #ifdef ENABLE_CHAOS_MONKEY
 
 #include <Arduino.h>
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <WiFi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -83,35 +84,35 @@ private:
         SemaphoreHandle_t m = (_rng() & 1) ? fsMutex : webDataMutex;
         if (!m) return;
         if (xSemaphoreTake(m, pdMS_TO_TICKS(100)) == pdTRUE) {
-            Serial.println("@CHAOS mutex_starve_start");
+            Log.println("@CHAOS mutex_starve_start");
             vTaskDelay(pdMS_TO_TICKS(2500));
             xSemaphoreGive(m);
-            Serial.println("@CHAOS mutex_starve_end");
+            Log.println("@CHAOS mutex_starve_end");
         }
     }
 
     static void _heapPressure() {
         const size_t BLK = 15 * 1024;
         void* p = malloc(BLK);
-        Serial.printf("@CHAOS heap_pressure alloc=%s\n", p ? "ok" : "fail");
+        Log.printf("@CHAOS heap_pressure alloc=%s\n", p ? "ok" : "fail");
         if (p) {
             memset(p, 0xA5, BLK);          // touch pages so it can't be lazy
             vTaskDelay(pdMS_TO_TICKS(5000));
             free(p);
-            Serial.println("@CHAOS heap_pressure_end");
+            Log.println("@CHAOS heap_pressure_end");
         }
     }
 
     static void _networkFlap() {
-        Serial.println("@CHAOS wifi_drop");
+        Log.println("@CHAOS wifi_drop");
         WiFi.disconnect(false /*wifioff*/);
         vTaskDelay(pdMS_TO_TICKS(_between(3000, 6000)));
         WiFi.reconnect();
-        Serial.println("@CHAOS wifi_reconnect_requested");
+        Log.println("@CHAOS wifi_reconnect_requested");
     }
 
     static void _run(void*) {
-        Serial.printf("@CHAOS begin seed=0x%08x duration_ms=%u\n",
+        Log.printf("@CHAOS begin seed=0x%08x duration_ms=%u\n",
                       (unsigned)CHAOS_SEED, (unsigned)CHAOS_DURATION_MS);
         const uint32_t t0 = millis();
         while (millis() - t0 < CHAOS_DURATION_MS) {
@@ -123,7 +124,7 @@ private:
                 default: _heapPressure(); break;
             }
         }
-        Serial.println("@CHAOS done");
+        Log.println("@CHAOS done");
         vTaskDelete(nullptr);
     }
 };

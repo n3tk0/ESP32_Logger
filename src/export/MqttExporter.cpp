@@ -1,4 +1,5 @@
 #include "MqttExporter.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <new>                        // new (std::nothrow) — this part aborts otherwise
 #include "../core/Globals.h"  // config.deviceId
 #include "../sensors/SensorManager.h"  // publishHaDiscovery()
@@ -46,7 +47,7 @@ bool MqttExporter::init(JsonObjectConst cfg) {
 
     // MQTT_Mini only supports QoS 0 (publish-only). Zero silently.
     if (_qos > 0) {
-        Serial.printf("[MQTT] WARNING: qos=%u requested but only QoS 0 is supported; "
+        Log.printf("[MQTT] WARNING: qos=%u requested but only QoS 0 is supported; "
                       "using QoS 0.\n", _qos);
         _qos = 0;
     }
@@ -82,7 +83,7 @@ bool MqttExporter::init(JsonObjectConst cfg) {
         _stream = new (std::nothrow) WiFiClient();
     }
     if (!_stream) {
-        Serial.println("[MQTT] out of memory allocating the socket — exporter disabled");
+        Log.println("[MQTT] out of memory allocating the socket — exporter disabled");
         _enabled = false;
         return false;
     }
@@ -91,7 +92,7 @@ bool MqttExporter::init(JsonObjectConst cfg) {
     _client.setServer(_broker, _port);
     _client.setKeepAlive(MQTT_KEEPALIVE_S);
 
-    Serial.printf("[MQTT] broker=%s:%d prefix=%s tls=%s\n",
+    Log.printf("[MQTT] broker=%s:%d prefix=%s tls=%s\n",
                   _broker, _port, _topicPrefix, _useTls ? "yes" : "no");
     return true;
 }
@@ -111,7 +112,7 @@ bool MqttExporter::_connect() {
     // trusted. The handshake cost returns only in the case where the saving was
     // never real.
     if (_client.connected() && _client.keepAliveExpired()) {
-        Serial.println("[MQTT] connection idle past the keepalive — reconnecting");
+        Log.println("[MQTT] connection idle past the keepalive — reconnecting");
         _client.disconnect();
         if (_stream) _stream->stop();
     }
@@ -125,7 +126,7 @@ bool MqttExporter::_connect() {
         ok = _client.connect(_clientId);
     }
     if (!ok) {
-        Serial.printf("[MQTT] connect failed, rc=%d\n", _client.state());
+        Log.printf("[MQTT] connect failed, rc=%d\n", _client.state());
     }
     return ok;
 }
@@ -227,10 +228,10 @@ void MqttExporter::publishHaDiscovery() {
     if (!_enabled || !_haDiscovery) return;
 
     if (!_connect()) {
-        Serial.println("[MQTT] HA discovery: not connected");
+        Log.println("[MQTT] HA discovery: not connected");
         return;
     }
-    Serial.println("[MQTT] Publishing HA discovery payloads…");
+    Log.println("[MQTT] Publishing HA discovery payloads…");
     int n = sensorManager.count();
     int published = 0;
     for (int i = 0; i < n; i++) {
@@ -247,5 +248,5 @@ void MqttExporter::publishHaDiscovery() {
             delay(20);  // give broker time to process
         }
     }
-    Serial.printf("[MQTT] HA discovery: %d topics published\n", published);
+    Log.printf("[MQTT] HA discovery: %d topics published\n", published);
 }

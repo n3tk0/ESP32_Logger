@@ -1,4 +1,5 @@
 #include "HCSR04Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 bool HCSR04Sensor::init(JsonObjectConst cfg) {
@@ -19,7 +20,7 @@ bool HCSR04Sensor::init(JsonObjectConst cfg) {
     delayMicroseconds(2);
 
     _ready = true;
-    Serial.printf("[HC-SR04] trig=%d echo=%d max=%.0fcm\n",
+    Log.printf("[HC-SR04] trig=%d echo=%d max=%.0fcm\n",
                   _trigPin, _echoPin, _maxDistanceCm);
     return true;
 }

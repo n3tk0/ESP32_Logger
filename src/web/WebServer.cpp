@@ -18,6 +18,7 @@
  */
 
 #include "WebServer.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
 #include "../core/SdCompat.h"           // sdFs() — SD.h only when FEATURE_SD_STORAGE
@@ -1344,7 +1345,7 @@ static void h_post_restart(AsyncWebServerRequest* r) {
 
 static void h_post_api_format_filesystem(AsyncWebServerRequest* r) {
     if (!requireMutatingAuth(r)) return;
-    Serial.println("[Format] /api/format_filesystem — wiping LittleFS");
+    Log.println("[Format] /api/format_filesystem — wiping LittleFS");
     // R12 Gemini HIGH: acquire fsMutex around the long destructive op.
     // Without it, a concurrent StorageTask write or web-handler read
     // can race the format and corrupt the partition mid-erase.
@@ -1360,12 +1361,12 @@ static void h_post_api_format_filesystem(AsyncWebServerRequest* r) {
         ok = LittleFS.format();
     }
     if (!ok) {
-        Serial.println("[Format] FAILED");
+        Log.println("[Format] FAILED");
         r->send(500, "application/json",
                 "{\"ok\":false,\"error\":\"format failed\"}");
         return;
     }
-    Serial.println("[Format] OK — rebooting");
+    Log.println("[Format] OK — rebooting");
     r->send(200, "application/json",
             "{\"ok\":true,\"message\":\"formatted, rebooting\"}");
     requestRestart("format");

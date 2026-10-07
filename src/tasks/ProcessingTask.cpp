@@ -1,4 +1,5 @@
 #include <time.h>
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "ProcessingTask.h"
 #include "TaskManager.h"
 #include "../setup.h"          // MODULE_HEATER_ENABLED (compile-time toggle)
@@ -55,11 +56,11 @@ static bool isPlausible(const SensorReading& r) {
 
 // ---------------------------------------------------------------------------
 void processingTaskFunc(void* /*param*/) {
-    Serial.println("[ProcessingTask] started");
+    Log.println("[ProcessingTask] started");
 
     // See SensorTask: park until init() opens the start gate so a higher-prio
     // task can't self-delete by observing running==false mid-init.
-    if (!TaskManager::waitForStart()) { Serial.println("[ProcessingTask] stopped"); vTaskDelete(nullptr); return; }
+    if (!TaskManager::waitForStart()) { Log.println("[ProcessingTask] stopped"); vTaskDelete(nullptr); return; }
 
     SensorReading r;
     while (TaskManager::running) {
@@ -165,6 +166,6 @@ void processingTaskFunc(void* /*param*/) {
     HeaterModule::instance().stop();
 #endif
 
-    Serial.println("[ProcessingTask] stopped");
+    Log.println("[ProcessingTask] stopped");
     vTaskDelete(nullptr);
 }

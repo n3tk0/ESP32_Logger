@@ -1,4 +1,5 @@
 #include "ZMCT103CSensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include <math.h>
 
@@ -26,7 +27,7 @@ bool ZMCT103CSensor::init(JsonObjectConst cfg) {
     pinMode(_pin, INPUT);
     _ready = true;
 
-    Serial.printf("[ZMCT103C] pin=%d factor=%.6f samples=%d period_us=%u\n",
+    Log.printf("[ZMCT103C] pin=%d factor=%.6f samples=%d period_us=%u\n",
                   _pin, _currentFactor, _samples, _samplePeriodUs);
     return true;
 }

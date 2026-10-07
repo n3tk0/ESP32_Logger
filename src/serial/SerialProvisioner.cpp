@@ -1,4 +1,5 @@
 #include "SerialProvisioner.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <WiFi.h>
 #include "../managers/WiFiManager.h"  // applyWifiTxPower()
 #include "../managers/OtaManager.h"   // tick() during blocking connect wait
@@ -7,15 +8,15 @@ SerialProvisioner serialProvisioner;
 
 // ---------------------------------------------------------------------------
 void SerialProvisioner::_respond(const char* json) {
-    Serial.print(SERIAL_RESP_PREFIX);
-    Serial.println(json);
+    Log.print(SERIAL_RESP_PREFIX);
+    Log.println(json);
 }
 
 void SerialProvisioner::_respondDoc(JsonDocument& doc) {
     // Serialize directly to Serial to avoid an intermediate String heap allocation.
-    Serial.print(SERIAL_RESP_PREFIX);
+    Log.print(SERIAL_RESP_PREFIX);
     serializeJson(doc, static_cast<Print&>(Serial));
-    Serial.println();
+    Log.println();
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +139,7 @@ void SerialProvisioner::_cmdConnect(const char* ssid, const char* pass) {
         return;
     }
 
-    Serial.printf("[SerialProvisioner] Connecting to '%s'…\n", ssid);
+    Log.printf("[SerialProvisioner] Connecting to '%s'…\n", ssid);
 
     // Switch to STA (keep AP running so we can recover via web if needed).
     WiFi.mode(WIFI_MODE_APSTA);
@@ -167,7 +168,7 @@ void SerialProvisioner::_cmdConnect(const char* ssid, const char* pass) {
         resp["ip"]   = WiFi.localIP().toString();
         resp["gw"]   = WiFi.gatewayIP().toString();
         resp["ssid"] = WiFi.SSID();
-        Serial.printf("[SerialProvisioner] Connected — IP %s\n",
+        Log.printf("[SerialProvisioner] Connected — IP %s\n",
                       WiFi.localIP().toString().c_str());
     } else {
         resp["ok"]  = false;
@@ -175,7 +176,7 @@ void SerialProvisioner::_cmdConnect(const char* ssid, const char* pass) {
         // Revert to AP-only so the device is still accessible
         WiFi.disconnect(/*wifioff=*/false);
         WiFi.mode(WIFI_MODE_AP);
-        Serial.println("[SerialProvisioner] Connection timed out — AP restored");
+        Log.println("[SerialProvisioner] Connection timed out — AP restored");
     }
     _respondDoc(resp);
 }

@@ -1,4 +1,5 @@
 #include "EspNowIngest.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #ifdef FEATURE_ESPNOW_INGEST
 
@@ -323,7 +324,7 @@ static bool saveNodes() {
     // node spinlock and this mutex are never held at the same time.
     MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !guard.isLocked()) {
-        Serial.println("[ESPNOW] fsMutex timeout — retrying in 60 s");
+        Log.println("[ESPNOW] fsMutex timeout — retrying in 60 s");
         s_saveRetryAtMs = millis() + 60000u;
         if (s_saveRetryAtMs == 0) s_saveRetryAtMs = 1;
         return false;
@@ -331,7 +332,7 @@ static bool saveNodes() {
 
     File f = LittleFS.open(NODES_FILE, "w");
     if (!f) {
-        Serial.println("[ESPNOW] could not open the node file for writing "
+        Log.println("[ESPNOW] could not open the node file for writing "
                        "— retrying in 60 s");
         s_saveRetryAtMs = millis() + 60000u;
         if (s_saveRetryAtMs == 0) s_saveRetryAtMs = 1;   // 0 means "no backoff"
@@ -353,7 +354,7 @@ static void loadNodes() {
     // below are removes, which is a write however it is spelled.
     MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !guard.isLocked()) {
-        Serial.println("[ESPNOW] fsMutex timeout — the node table starts empty");
+        Log.println("[ESPNOW] fsMutex timeout — the node table starts empty");
         return;
     }
 
@@ -368,7 +369,7 @@ static void loadNodes() {
         // A layout change, not corruption. Discard rather than reinterpret:
         // reading one struct as another produces nodes with plausible ids and
         // nonsense battery histories, which is worse than starting over.
-        Serial.printf("[ESPNOW] node file is %u bytes, expected %u — discarding\n",
+        Log.printf("[ESPNOW] node file is %u bytes, expected %u — discarding\n",
                       (unsigned)f.size(), (unsigned)want);
         f.close();
         LittleFS.remove(NODES_FILE);
@@ -378,7 +379,7 @@ static void loadNodes() {
     uint32_t magic = 0;
     f.read((uint8_t*)&magic, sizeof(magic));
     if (magic != NODES_MAGIC) {
-        Serial.println("[ESPNOW] node file magic mismatch — discarding");
+        Log.println("[ESPNOW] node file magic mismatch — discarding");
         f.close();
         LittleFS.remove(NODES_FILE);
         return;
@@ -399,7 +400,7 @@ static void loadNodes() {
         taskEXIT_CRITICAL(&s_nodeMux);
     }
     f.close();
-    Serial.printf("[ESPNOW] restored %d node(s)\n", s_nodes.count());
+    Log.printf("[ESPNOW] restored %d node(s)\n", s_nodes.count());
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +422,7 @@ static bool addPeer(const uint8_t mac[6]) {
 
     const esp_err_t rc = esp_now_add_peer(&p);
     if (rc != ESP_OK) {
-        Serial.printf("[ESPNOW] add_peer failed: %d\n", (int)rc);
+        Log.printf("[ESPNOW] add_peer failed: %d\n", (int)rc);
         return false;
     }
     return true;
@@ -790,7 +791,7 @@ static bool servicePendingDiscover() {
     taskEXIT_CRITICAL(&s_nodeMux);
 
     if (!assigned) {
-        Serial.println("[ESPNOW] pairing refused: node table is full");
+        Log.println("[ESPNOW] pairing refused: node table is full");
         return false;
     }
 
@@ -829,7 +830,7 @@ static bool servicePendingDiscover() {
     s_dirty = true;
     s_cfgMirrorGen = 0;
     s_fwMirrorGen  = 0;
-    Serial.printf("[ESPNOW] paired node %u on channel %u\n", assigned, w.channel);
+    Log.printf("[ESPNOW] paired node %u on channel %u\n", assigned, w.channel);
     return true;
 }
 
@@ -950,7 +951,7 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
     // the only way anyone finds out is if it is written down — the serial
     // console is not attached to a device that is outdoors.
     if (logSkew) {
-        Serial.printf("[ESPNOW] node %s clock is %ld s %s\n",
+        Log.printf("[ESPNOW] node %s clock is %ld s %s\n",
                       logSkewId, (long)(logSkewVal < 0 ? -logSkewVal : logSkewVal),
                       logSkewVal > 0 ? "behind" : "ahead");
         eventLogPrintf("boot#%u  ESPNOW_SKEW  node=%s  skew=%+ld s",
@@ -962,7 +963,7 @@ static bool acceptFrame(const RxFrame& f, char* outId, size_t outIdLen,
         // Worth a log line and not just a counter: this is what a node whose
         // collector was reflashed looks like, and the MAC is what you need to
         // pair it again.
-        Serial.printf("[ESPNOW] frame from unprovisioned node %u "
+        Log.printf("[ESPNOW] frame from unprovisioned node %u "
                       "(%02x:%02x:%02x:%02x:%02x:%02x)\n",
                       h.nodeId, f.mac[0], f.mac[1], f.mac[2],
                       f.mac[3], f.mac[4], f.mac[5]);
@@ -1279,7 +1280,7 @@ bool espnowIngestBegin() {
     // start a connection — that is WiFiManager's job — it refuses to proceed
     // only if the interface is not there at all.
     if (WiFi.getMode() == WIFI_OFF) {
-        Serial.println("[ESPNOW] WiFi is off — not starting");
+        Log.println("[ESPNOW] WiFi is off — not starting");
         return false;
     }
 
@@ -1301,15 +1302,15 @@ bool espnowIngestBegin() {
     // this is the feature that requires it: a WiFi reconnect elsewhere cannot
     // quietly undo a decision made next to the radio that depends on it.
     if (esp_wifi_set_ps(WIFI_PS_NONE) != ESP_OK)
-        Serial.println("[ESPNOW] could not turn modem sleep off — "
+        Log.println("[ESPNOW] could not turn modem sleep off — "
                        "unicast may not arrive");
 
     if (esp_now_init() != ESP_OK) {
-        Serial.println("[ESPNOW] esp_now_init() failed");
+        Log.println("[ESPNOW] esp_now_init() failed");
         return false;
     }
     if (esp_now_set_pmk((const uint8_t*)ESPNOW_PMK) != ESP_OK)
-        Serial.println("[ESPNOW] set_pmk() failed");
+        Log.println("[ESPNOW] set_pmk() failed");
 
     esp_now_register_recv_cb(onRecv);
     addBroadcastPeer();
@@ -1345,7 +1346,7 @@ bool espnowIngestBegin() {
     if (s_nodes.count() == 0) espnowBeginPairing(ESPNOW_BOOT_PAIRING_S);
 
     s_up = true;
-    Serial.printf("[ESPNOW] up on channel %u, %d node(s)%s\n",
+    Log.printf("[ESPNOW] up on channel %u, %d node(s)%s\n",
                   currentChannel(), s_nodes.count(),
                   espnowPairingActive() ? ", pairing open" : "");
 
@@ -1358,7 +1359,7 @@ bool espnowIngestBegin() {
     // not: a deployed pair of devices sharing the default must keep talking
     // until their owner rebuilds both.
     if (memcmp(ESPNOW_LMK, "change-this-key!", 16) == 0) {
-        Serial.println("[ESPNOW] WARNING: ESPNOW_LMK is the built-in default — "
+        Log.println("[ESPNOW] WARNING: ESPNOW_LMK is the built-in default — "
                        "any node within range can pair. Rebuild collector AND "
                        "nodes with -DESPNOW_LMK='\"16-byte-secret!\"'.");
     }
@@ -1368,7 +1369,7 @@ bool espnowIngestBegin() {
 void espnowBeginPairing(uint32_t seconds) {
     s_pairUntilMs = millis() + seconds * 1000u;
     if (s_pairUntilMs == 0) s_pairUntilMs = 1;   // 0 is the "never opened" marker
-    Serial.printf("[ESPNOW] pairing window open for %us\n", (unsigned)seconds);
+    Log.printf("[ESPNOW] pairing window open for %us\n", (unsigned)seconds);
 }
 
 bool espnowPairingActive() {
@@ -1533,14 +1534,14 @@ bool espnowSetOfflineIntervals(uint8_t n) {
     // to name a key ("en_offline_iv") that does not exist.
     if (!prefs.begin(ESPNOW_NVS_NS, false)) {
         s_offlineIntervals = previous;
-        Serial.println("[ESPNOW] could not open NVS for the offline threshold");
+        Log.println("[ESPNOW] could not open NVS for the offline threshold");
         return false;
     }
     const bool ok = prefs.putUChar(ESPNOW_NVS_OFFLINE_IV, n) == sizeof(uint8_t);
     prefs.end();
     if (!ok) {
         s_offlineIntervals = previous;
-        Serial.println("[ESPNOW] could not persist the offline threshold");
+        Log.println("[ESPNOW] could not persist the offline threshold");
     }
     return ok;
 }

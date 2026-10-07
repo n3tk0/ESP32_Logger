@@ -1,4 +1,5 @@
 #include "RainSensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 void IRAM_ATTR RainSensor::_isr(void* arg) {
@@ -25,11 +26,11 @@ bool RainSensor::init(JsonObjectConst cfg) {
     if (!validateAttachPin(_pin, "rain", "pin")) return false;
     pinMode(_pin, INPUT_PULLUP);
     if (!_isrPin.attach((uint8_t)_pin, GPIO_INTR_NEGEDGE, &RainSensor::_isr, this)) {
-        Serial.printf("[Rain] ERROR: ISR attach failed on pin %d\n", _pin);
+        Log.printf("[Rain] ERROR: ISR attach failed on pin %d\n", _pin);
         return false;
     }
 
-    Serial.printf("[Rain] pin=%d mm/tip=%.4f  cal_rate(%.2f+%.2fx)\n",
+    Log.printf("[Rain] pin=%d mm/tip=%.4f  cal_rate(%.2f+%.2fx)\n",
                   _pin, _mmPerTip, _calRate.offset, _calRate.scale);
     return true;
 }

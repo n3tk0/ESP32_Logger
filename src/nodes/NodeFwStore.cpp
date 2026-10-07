@@ -1,4 +1,5 @@
 #include "NodeFwStore.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #ifdef FEATURE_REMOTE_NODES
 
@@ -129,7 +130,7 @@ static void saveRollout() {
             if (t.err[0]) x["err"] = (const char*)t.err;
         }
     }
-    if (!writeJson(ROLLOUT, d)) Serial.println("[nodefw] could not write rollout.json");
+    if (!writeJson(ROLLOUT, d)) Log.println("[nodefw] could not write rollout.json");
 }
 
 // ============================================================================
@@ -375,7 +376,7 @@ void nodeFwEspnowDone(uint8_t id, uint32_t imgId, uint8_t status, uint8_t attemp
     char err[sizeof(t->err)];
     nfr::doneError(err, sizeof(err), status, value);
     setSt(*t, st, err);
-    Serial.printf("[nodefw] node %u: %s %s\n", id, nfr::statusName(st), err);
+    Log.printf("[nodefw] node %u: %s %s\n", id, nfr::statusName(st), err);
     saveRollout();
 }
 

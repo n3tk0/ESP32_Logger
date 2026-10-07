@@ -134,6 +134,9 @@ public:
     void begin(unsigned long) {}
 };
 extern HostSerial Serial;   // defined by the test TU that needs it
+// The firmware logs through Log (src/core/LogRing.h: Serial + the RTC ring).
+#define Log Serial
+#define LOG_RING_HOST_SHIM 1
 
 // ----------------------------------------------------------------------------
 // FreeRTOS critical sections and millis(), for the few firmware .cpp files that

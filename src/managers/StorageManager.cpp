@@ -1,4 +1,5 @@
 #include "StorageManager.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../core/Globals.h"
 #include "../utils/Utils.h"
 #include <LittleFS.h>
@@ -109,7 +110,7 @@ static void migrateSettingsFromSd() {
         if (m) m.close();
         if (!ok) {
             LittleFS.remove(SETTINGS_PENDING);
-            Serial.println("[storage] settings move from SD given up");
+            Log.println("[storage] settings move from SD given up");
             touch(SETTINGS_DONE);
         }
     };
@@ -125,9 +126,9 @@ static void migrateSettingsFromSd() {
         // Saved on LittleFS since the move was put off: keep it.
         if (pending && lfsChecksum(path) != then[i]) continue;
         if (copySdToLittleFs(*sd, path)) {
-            Serial.printf("[storage] %s moved from SD to LittleFS\n", path);
+            Log.printf("[storage] %s moved from SD to LittleFS\n", path);
         } else {
-            Serial.printf("[storage] could not copy %s to LittleFS\n", path);
+            Log.printf("[storage] could not copy %s to LittleFS\n", path);
             all = false;
         }
     }
@@ -200,7 +201,7 @@ bool initStorage() {
     } else {
         activeFS = nullptr;
         fsAvailable = false;
-        Serial.println("ERR: No storage available!");
+        Log.println("ERR: No storage available!");
         return false;
     }
     return true;

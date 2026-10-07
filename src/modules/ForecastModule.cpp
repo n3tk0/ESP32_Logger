@@ -1,4 +1,5 @@
 #include "ForecastModule.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "ModuleSchemas.h"      // this module's form, gzipped
 
 #ifdef MODULE_FORECAST_ENABLED
@@ -286,11 +287,11 @@ bool ForecastModule::load(JsonObjectConst cfg) {
     // A coordinate pair of exactly 0,0 is Null Island, not a location anyone
     // configured — treat it as "not set up yet" rather than fetching for it.
     if (_lat == 0.0f && _lon == 0.0f) {
-        Serial.println("[forecast] no coordinates configured");
+        Log.println("[forecast] no coordinates configured");
         return true;   // valid config, just inert
     }
     if (_provider == PROVIDER_OWM && _apiKey[0] == '\0') {
-        Serial.println("[forecast] OWM selected but no api_key set");
+        Log.println("[forecast] OWM selected but no api_key set");
     }
     return true;
 }
@@ -336,7 +337,7 @@ void ForecastModule::tick(uint32_t nowMs) {
         // three-hour-old forecast is still broadly right, and blanking the
         // panel because one HTTPS request timed out trades useful for
         // nothing. Age is shown on the dashboard so the reader can judge.
-        Serial.printf("[forecast] fetch failed (%lu consecutive)\n",
+        Log.printf("[forecast] fetch failed (%lu consecutive)\n",
                       (unsigned long)_failures);
     }
 }
@@ -396,19 +397,19 @@ static String httpGet(const char* url) {
         constexpr int MAX_BODY_BYTES = 32 * 1024;
         const int len = http.getSize();      // -1 when chunked / unknown
         if (len > MAX_BODY_BYTES) {
-            Serial.printf("[forecast] body too large (%d B) — refused\n", len);
+            Log.printf("[forecast] body too large (%d B) — refused\n", len);
         } else {
             body = http.getString();
             if (len < 0 && body.length() > (size_t)MAX_BODY_BYTES) {
                 // Chunked: the length was unknown until it arrived. Drop it
                 // rather than parse it, and free the String on the way out.
-                Serial.printf("[forecast] chunked body too large (%u B) — refused\n",
+                Log.printf("[forecast] chunked body too large (%u B) — refused\n",
                               (unsigned)body.length());
                 body = String();
             }
         }
     }
-    else Serial.printf("[forecast] HTTP %d\n", code);
+    else Log.printf("[forecast] HTTP %d\n", code);
     http.end();
     return body;
 }
@@ -449,7 +450,7 @@ bool ForecastModule::_fetchOpenMeteo() {
 
     JsonDocument doc;
     if (deserializeJson(doc, body.c_str(), body.length(), DeserializationOption::Filter(filter))) {
-        Serial.println("[forecast] open-meteo: bad json");
+        Log.println("[forecast] open-meteo: bad json");
         return false;
     }
 
@@ -526,7 +527,7 @@ bool ForecastModule::_fetchOwm() {
 
     JsonDocument doc;
     if (deserializeJson(doc, body.c_str(), body.length(), DeserializationOption::Filter(filter))) {
-        Serial.println("[forecast] owm: bad json");
+        Log.println("[forecast] owm: bad json");
         return false;
     }
 
@@ -590,7 +591,7 @@ bool ForecastModule::_fetchOwmOutlook(Data& d) {
 
     JsonDocument doc;
     if (deserializeJson(doc, body.c_str(), body.length(), DeserializationOption::Filter(filter))) {
-        Serial.println("[forecast] owm: bad forecast json");
+        Log.println("[forecast] owm: bad forecast json");
         return false;
     }
     JsonArrayConst list = doc["list"];

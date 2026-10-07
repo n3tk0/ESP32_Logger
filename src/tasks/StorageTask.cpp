@@ -1,4 +1,5 @@
 #include "StorageTask.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "TaskManager.h"
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/LiveAggregator.h"
@@ -50,12 +51,12 @@ struct Batch {
         {
             MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
             if (fsMutex && !g.isLocked()) {
-                Serial.printf("[StorageTask] %d row(s) LOST (fsMutex timeout)\n", rows);
+                Log.printf("[StorageTask] %d row(s) LOST (fsMutex timeout)\n", rows);
                 dataLost("datalog fsMutex timeout", (uint32_t)rows);
             } else {
                 int w = datalogAppend(*fs, hdr, buf, rows, epoch);
                 if (w < rows) {
-                    Serial.printf("[StorageTask] %d of %d row(s) LOST\n", rows - (w > 0 ? w : 0), rows);
+                    Log.printf("[StorageTask] %d of %d row(s) LOST\n", rows - (w > 0 ? w : 0), rows);
                     dataLost("datalog write", (uint32_t)(rows - (w > 0 ? w : 0)));
                 }
                 if (littleFsAvailable) datalogColsSaveIfLearned(LittleFS);
@@ -68,7 +69,7 @@ struct Batch {
             const int w = (!fsMutex || g.isLocked())
                         ? datalogAppend(*mirror, hdr, buf, rows, epoch) : -1;
             if (w < rows) {
-                Serial.printf("[StorageTask] mirror: %d of %d row(s) LOST\n", rows - (w > 0 ? w : 0), rows);
+                Log.printf("[StorageTask] mirror: %d of %d row(s) LOST\n", rows - (w > 0 ? w : 0), rows);
                 dataLost("datalog mirror write", (uint32_t)(rows - (w > 0 ? w : 0)));
             }
         }
@@ -83,7 +84,7 @@ struct Batch {
         if (!buf) return;
         uint32_t rev = 0;
         if (datalogHeader(tmpHdr, HDR_BYTES, &rev) < 0) {
-            Serial.println("[StorageTask] row dropped - header did not fit");
+            Log.println("[StorageTask] row dropped - header did not fit");
             dataLost("datalog header too long");
             return;
         }
@@ -94,7 +95,7 @@ struct Batch {
         if (rows && (strcmp(tmpHdr, hdr) != 0 || !datalogSamePeriod(first, t))) flush();
         const int n = dlFormatRow(row, ROW_BYTES, datalogLayout(), r, vals, nVals);
         if (n < 0) {
-            Serial.println("[StorageTask] row dropped - did not fit");
+            Log.println("[StorageTask] row dropped - did not fit");
             dataLost("datalog row too long");
             return;
         }
@@ -126,11 +127,11 @@ void addSensorRow(Batch& b, const float* vals, uint32_t start, uint32_t end, uin
 
 // ---------------------------------------------------------------------------
 void storageTaskFunc(void* param) {
-    Serial.println("[StorageTask] started");
+    Log.println("[StorageTask] started");
 
     // See SensorTask: park until init() opens the start gate before touching
     // the filesystem, so a shutdown that races startup exits before doing work.
-    if (!TaskManager::waitForStart()) { Serial.println("[StorageTask] stopped"); vTaskDelete(nullptr); return; }
+    if (!TaskManager::waitForStart()) { Log.println("[StorageTask] stopped"); vTaskDelete(nullptr); return; }
 
     auto* p = static_cast<StorageTaskParam*>(param);
     StorageTaskParam cfg = p ? *p : StorageTaskParam{};
@@ -144,7 +145,7 @@ void storageTaskFunc(void* param) {
     batch.fs     = cfg.fs;
     batch.mirror = cfg.mirrorFS;
     if (cfg.fs && !batch.alloc()) {
-        Serial.println("[StorageTask] no memory for the row batch - nothing will be logged");
+        Log.println("[StorageTask] no memory for the row batch - nothing will be logged");
         batch.fs = nullptr;
     }
 
@@ -159,7 +160,7 @@ void storageTaskFunc(void* param) {
     float    vals[LiveAggregator::MAX_COLUMNS];
     bool     writing = false;
 
-    Serial.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f sensors=%d runLog=%d\n",
+    Log.printf("[StorageTask] interval=%us humCorr=%d kappa=%.2f sensors=%d runLog=%d\n",
                   (unsigned)agg.intervalSec(),
                   agg.humidityCorrection() ? 1 : 0,
                   agg.humidityKappa(),
@@ -243,6 +244,6 @@ void storageTaskFunc(void* param) {
     batch.flush();
     datalogFlushDone();
 
-    Serial.println("[StorageTask] stopped");
+    Log.println("[StorageTask] stopped");
     vTaskDelete(nullptr);
 }

@@ -1,4 +1,5 @@
 #include "Utils.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <FS.h>
 #include <vector>
 #include "../modules/UsbCdcModule.h"
@@ -145,7 +146,7 @@ bool deleteRecursive(fs::FS& fs, const String& path) {
         // holding under a year of daily files, which is not a suspicious tree.
         // This one holds about three years.
         if (stack.size() > 1024) {
-            Serial.println("[fs] deleteRecursive: tree too large, aborting");
+            Log.println("[fs] deleteRecursive: tree too large, aborting");
             return false;
         }
 
@@ -237,22 +238,22 @@ bool validatePin(int pin, const String& usage) {
     // Chip range only. validateAttachPin() then checks the board profile's
     // maxGpio, strap/flash/reserved lists.
     if (pin < 0 || pin > kChipMaxGpio) {
-        Serial.printf("[validatePin] INVALID: Pin %d out of range (usage: %s)\n", pin, usage.c_str());
+        Log.printf("[validatePin] INVALID: Pin %d out of range (usage: %s)\n", pin, usage.c_str());
         return false;
     }
 
     // ── USB CDC Conflict Detection ─────────────────────────────────────────
     // If USB CDC is enabled, pins 18/19 (ESP32-C3) or 19/20 (ESP32-S3) are locked
     if (usbCdc.isUsbPinLocked(pin)) {
-        Serial.printf("[validatePin] CONFLICT: Pin %d reserved for USB CDC (usage: %s)\n", pin, usage.c_str());
-        Serial.printf("              USB pins on this board: %s\n", usbCdc.getUsbPins().c_str());
-        Serial.printf("              Disable USB CDC in deploy tool before using these pins\n");
+        Log.printf("[validatePin] CONFLICT: Pin %d reserved for USB CDC (usage: %s)\n", pin, usage.c_str());
+        Log.printf("              USB pins on this board: %s\n", usbCdc.getUsbPins().c_str());
+        Log.printf("              Disable USB CDC in deploy tool before using these pins\n");
         return false;
     }
 
     // ── Allowed ────────────────────────────────────────────────────────────
     // Board profile validation in validateAttachPin() handles strap pins and other
     // board-specific restrictions, so we don't duplicate those checks here
-    Serial.printf("[validatePin] OK: Pin %d valid for %s\n", pin, usage.c_str());
+    Log.printf("[validatePin] OK: Pin %d valid for %s\n", pin, usage.c_str());
     return true;
 }

@@ -1,4 +1,5 @@
 #include "BME688Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../I2CBus.h"
 #include "../SensorManager.h"        // R17: _claim/_release helpers
@@ -30,7 +31,7 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "bme688");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, _addr, this)) {
-        Serial.printf("[BME688] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
+        Log.printf("[BME688] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
         return false;
     }
 
@@ -41,7 +42,7 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _calGas.load(cal, "gas_resistance");
 
     if (!_bme.begin(_addr, _wire)) {
-        Serial.printf("[BME688] Not found at 0x%02X\n", _addr);
+        Log.printf("[BME688] Not found at 0x%02X\n", _addr);
         return false;
     }
 
@@ -61,7 +62,7 @@ bool BME688Sensor::init(JsonObjectConst cfg) {
     _loadBaseline();
 
     _ready = true;
-    Serial.printf("[BME688] Ready at 0x%02X heater=%d°C/%dms ambient_ref=%s\n",
+    Log.printf("[BME688] Ready at 0x%02X heater=%d°C/%dms ambient_ref=%s\n",
                   _addr, _heaterTemp, _heaterDurMs,
                   _ambientSensor[0] ? _ambientSensor : "(self)");
     return true;
@@ -86,7 +87,7 @@ float BME688Sensor::_ambientTempC(float fallbackC) const {
     uint32_t ageMs = 0;
     if (!readingCache.get(_ambientSensor, _ambientMetric, refC, ageMs)) {
         if (!_ambientWarned) {
-            Serial.printf("[BME688] ambient ref '%s/%s' not seen yet — using own temperature\n",
+            Log.printf("[BME688] ambient ref '%s/%s' not seen yet — using own temperature\n",
                           _ambientSensor, _ambientMetric);
             _ambientWarned = true;
         }
@@ -94,7 +95,7 @@ float BME688Sensor::_ambientTempC(float fallbackC) const {
     }
     if (ageMs > _ambientMaxAgeMs) {
         if (!_ambientWarned) {
-            Serial.printf("[BME688] ambient ref '%s/%s' stale (%lums) — using own temperature\n",
+            Log.printf("[BME688] ambient ref '%s/%s' stale (%lums) — using own temperature\n",
                           _ambientSensor, _ambientMetric, (unsigned long)ageMs);
             _ambientWarned = true;
         }
@@ -186,5 +187,5 @@ void BME688Sensor::_maybeSaveBaseline() {
     _saver.done(now, _iaq.baseline, ok);
     // fsMutex busy (a datalog flush) or a write error: the saver tries
     // again in five minutes instead of waiting out the hour.
-    if (!ok) Serial.println("[BME688] IAQ baseline save failed, retrying in 5 min");
+    if (!ok) Log.println("[BME688] IAQ baseline save failed, retrying in 5 min");
 }

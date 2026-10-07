@@ -1,4 +1,5 @@
 #include "EventLog.h"
+#include "LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #include <Arduino.h>
 #include <LittleFS.h>
@@ -36,16 +37,16 @@ void eventLogMigrate() {
         // is only ever created by firmware that migrates first — so rather than
         // guess at merge order, say so and leave both files intact. Nothing is
         // lost, and the old one is still downloadable from the Files page.
-        Serial.printf("[log] %s and %s both exist — leaving the old one in place\n",
+        Log.printf("[log] %s and %s both exist — leaving the old one in place\n",
                       EVENT_LOG_LEGACY_PATH, EVENT_LOG_PATH);
         return;
     }
 
     if (fs->rename(EVENT_LOG_LEGACY_PATH, EVENT_LOG_PATH))
-        Serial.printf("[log] renamed %s to %s\n",
+        Log.printf("[log] renamed %s to %s\n",
                       EVENT_LOG_LEGACY_PATH, EVENT_LOG_PATH);
     else
-        Serial.printf("[log] could not rename %s to %s\n",
+        Log.printf("[log] could not rename %s to %s\n",
                       EVENT_LOG_LEGACY_PATH, EVENT_LOG_PATH);
 }
 

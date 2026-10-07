@@ -1,4 +1,5 @@
 #include "SensorManager.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #include <memory>
 #include <new>
@@ -103,7 +104,7 @@ void SensorManager::_destroyAll() {
             // something is genuinely wrong. Resetting anyway is the lesser evil:
             // leaving the registry claiming buses the new config never brought
             // up would refuse every subsequent pin assignment.
-            Serial.println("[SensorManager] _destroyAll: wireMutex timeout — resetting I2C anyway");
+            Log.println("[SensorManager] _destroyAll: wireMutex timeout — resetting I2C anyway");
         }
         I2CBus::resetAll();
     }
@@ -119,7 +120,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 
     File f = fs.open(cfgPath, FILE_READ);
     if (!f) {
-        Serial.printf("[SensorManager] %s not found\n", cfgPath);
+        Log.printf("[SensorManager] %s not found\n", cfgPath);
         return false;
     }
 
@@ -127,7 +128,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     // sensor configs so a crafted file can't exhaust the heap during parse.
     constexpr size_t MAX_CFG_BYTES = 16 * 1024;
     if (f.size() > MAX_CFG_BYTES) {
-        Serial.printf("[SensorManager] %s too large (%u B, cap %u)\n",
+        Log.printf("[SensorManager] %s too large (%u B, cap %u)\n",
                       cfgPath, (unsigned)f.size(), (unsigned)MAX_CFG_BYTES);
         f.close();
         return false;
@@ -138,13 +139,13 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     f.close();
 
     if (err) {
-        Serial.printf("[SensorManager] JSON parse error: %s\n", err.c_str());
+        Log.printf("[SensorManager] JSON parse error: %s\n", err.c_str());
         return false;
     }
 
     JsonArray arr = doc["sensors"].as<JsonArray>();
     if (arr.isNull()) {
-        Serial.println("[SensorManager] No 'sensors' array in config");
+        Log.println("[SensorManager] No 'sensors' array in config");
         return false;
     }
 
@@ -152,7 +153,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     for (JsonObject sensor : arr) {
         if (!sensor["enabled"]) continue;
         if (_count >= MAX_SENSORS) {
-            Serial.println("[SensorManager] MAX_SENSORS reached");
+            Log.println("[SensorManager] MAX_SENSORS reached");
             break;
         }
 
@@ -162,14 +163,14 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         if (!_health[_count]) {
             _health[_count] = new (std::nothrow) HealthData();
             if (!_health[_count]) {
-                Serial.printf("[SensorManager] Sensor '%s' skipped: out of memory\n", id);
+                Log.printf("[SensorManager] Sensor '%s' skipped: out of memory\n", id);
                 continue;
             }
         }
 
         ISensor* s = _createPlugin(type);
         if (!s) {
-            Serial.printf("[SensorManager] Unknown plugin type: %s\n", type);
+            Log.printf("[SensorManager] Unknown plugin type: %s\n", type);
             continue;
         }
 
@@ -199,9 +200,9 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
             _lastReadMs[_count] = 0;
             _count++;
             initialised++;
-            Serial.printf("[SensorManager] Sensor '%s' (%s) ready\n", id, type);
+            Log.printf("[SensorManager] Sensor '%s' (%s) ready\n", id, type);
         } else {
-            Serial.printf("[SensorManager] Sensor '%s' init FAILED\n", id);
+            Log.printf("[SensorManager] Sensor '%s' init FAILED\n", id);
             // R17 follow-up (Codex P2 on PR #93): release any claims this
             // plugin made on Serial1 / I2C addresses before init failed —
             // otherwise the claim outlives the (deleted) instance and
@@ -212,7 +213,7 @@ bool SensorManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         }
     }
 
-    Serial.printf("[SensorManager] %d/%d sensors initialised\n",
+    Log.printf("[SensorManager] %d/%d sensors initialised\n",
                   initialised, _count);
     return initialised > 0;
 }
@@ -273,7 +274,7 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
         if (!blocking && wireMutex) {
             MutexGuard wg(wireMutex, pdMS_TO_TICKS(100));
             if (!wg.isLocked()) {
-                Serial.println("[SensorManager] wireMutex busy — skipping sensor read");
+                Log.println("[SensorManager] wireMutex busy — skipping sensor read");
                 continue;
             }
             t0us = micros();
@@ -419,7 +420,7 @@ bool SensorManager::reloadConfig(fs::FS& fs, const char* cfgPath) {
     // sensor table stays valid; caller surfaces the failure to the user.
     MutexGuard sg(configMutex, pdMS_TO_TICKS(8000));
     if (configMutex && !sg.isLocked()) {
-        Serial.println("[SensorManager] reloadConfig: configMutex timeout — aborted");
+        Log.println("[SensorManager] reloadConfig: configMutex timeout — aborted");
         return false;
     }
     return loadAndInit(fs, cfgPath);

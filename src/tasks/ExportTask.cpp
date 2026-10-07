@@ -1,4 +1,5 @@
 #include "ExportTask.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "TaskManager.h"
 #ifdef MODULE_FORECAST_ENABLED
 #  include "../modules/ForecastModule.h"
@@ -14,12 +15,12 @@
 
 // ---------------------------------------------------------------------------
 void exportTaskFunc(void* /*param*/) {
-    Serial.println("[ExportTask] started");
+    Log.println("[ExportTask] started");
 
     // See SensorTask: park until init() opens the start gate. ExportTask shares
     // loop's priority so it wouldn't preempt today, but gating it keeps every
     // pipeline task consistent and safe if priorities are ever retuned.
-    if (!TaskManager::waitForStart()) { Serial.println("[ExportTask] stopped"); vTaskDelete(nullptr); return; }
+    if (!TaskManager::waitForStart()) { Log.println("[ExportTask] stopped"); vTaskDelete(nullptr); return; }
 
     SensorReading r;
     while (TaskManager::running) {
@@ -62,6 +63,6 @@ void exportTaskFunc(void* /*param*/) {
     // Skip flush-on-exit: sendAll blocks TLS HTTP inside the task-exit path and
     // ESP.restart() can race the TLS connection close.  (AUDIT 2.18)
 
-    Serial.println("[ExportTask] stopped");
+    Log.println("[ExportTask] stopped");
     vTaskDelete(nullptr);
 }

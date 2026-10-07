@@ -1,4 +1,5 @@
 #include "I2CBus.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../core/BoardProfiles.h"   // validateAttachPin
 #include <soc/soc_caps.h>            // SOC_I2C_NUM / SOC_HP_I2C_NUM
 
@@ -73,12 +74,12 @@ TwoWire* acquire(uint8_t bus, int sda, int scl, const char* who) {
     const char* id = (who && *who) ? who : "i2c";
 
     if (bus >= MAX_BUSES) {
-        Serial.printf("[I2C] %s: bus %u invalid (max %u)\n",
+        Log.printf("[I2C] %s: bus %u invalid (max %u)\n",
                       id, (unsigned)bus, (unsigned)(MAX_BUSES - 1));
         return nullptr;
     }
     if (bus >= hardwareBusCount()) {
-        Serial.printf("[I2C] %s: bus %u not present on this chip "
+        Log.printf("[I2C] %s: bus %u not present on this chip "
                       "(%u controller%s) — use bus 0\n",
                       id, (unsigned)bus, (unsigned)hardwareBusCount(),
                       hardwareBusCount() == 1 ? "" : "s");
@@ -97,7 +98,7 @@ TwoWire* acquire(uint8_t bus, int sda, int scl, const char* who) {
         if (b.sda != sda || b.scl != scl) {
             // Refusing is the point. Calling begin() again would succeed and
             // silently move the bus, killing every sensor already on it.
-            Serial.printf("[I2C] %s: bus %u already on SDA%d/SCL%d — refusing "
+            Log.printf("[I2C] %s: bus %u already on SDA%d/SCL%d — refusing "
                           "conflicting SDA%d/SCL%d\n",
                           id, (unsigned)bus, b.sda, b.scl, sda, scl);
             return nullptr;
@@ -109,7 +110,7 @@ TwoWire* acquire(uint8_t bus, int sda, int scl, const char* who) {
     if (!w) return nullptr;
 
     if (!w->begin((int8_t)sda, (int8_t)scl)) {
-        Serial.printf("[I2C] %s: bus %u begin() failed on SDA%d/SCL%d\n",
+        Log.printf("[I2C] %s: bus %u begin() failed on SDA%d/SCL%d\n",
                       id, (unsigned)bus, sda, scl);
         return nullptr;
     }
@@ -118,7 +119,7 @@ TwoWire* acquire(uint8_t bus, int sda, int scl, const char* who) {
     b.sda        = sda;
     b.scl        = scl;
     b.configured = true;
-    Serial.printf("[I2C] bus %u up on SDA%d/SCL%d (first claim: %s)\n",
+    Log.printf("[I2C] bus %u up on SDA%d/SCL%d (first claim: %s)\n",
                   (unsigned)bus, sda, scl, id);
     return w;
 }

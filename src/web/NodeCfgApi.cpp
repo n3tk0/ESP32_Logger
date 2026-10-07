@@ -1,4 +1,5 @@
 #include "NodeCfgApi.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #ifdef FEATURE_REMOTE_NODES
 
@@ -104,7 +105,7 @@ static bool handoverSwitch() {
     strlcpy(net.clientPassword, h["pass"] | "", sizeof(net.clientPassword));
     config.network = net;
     saveConfig();
-    Serial.printf("[nodecfg] handover: switching to \"%s\"\n", net.clientSSID);
+    Log.printf("[nodecfg] handover: switching to \"%s\"\n", net.clientSSID);
     requestRestart("node handover");
     restartTimer  = millis();
     return true;

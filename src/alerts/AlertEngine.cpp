@@ -1,4 +1,5 @@
 #include "AlertEngine.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 // Config.h pulls in setup.h, and this file needs it for a reason that is not
 // obvious: the EXPORT_MQTT_ENABLED guard below. Nothing else in this
 // translation unit's include chain reaches setup.h — AlertEngine.h,
@@ -47,7 +48,7 @@ bool AlertEngine::begin(fs::FS& fs, const char* path) {
             // This is only possible if the FreeRTOS heap is exhausted — extremely
             // unlikely in normal operation, but the condition is visible via
             // GET /api/alerts → { "error": "mutex_init_failed" } and here.
-            Serial.println("[AlertEngine] CRITICAL: mutex create FAILED — alert system disabled");
+            Log.println("[AlertEngine] CRITICAL: mutex create FAILED — alert system disabled");
             return false;
         }
     }
@@ -58,12 +59,12 @@ bool AlertEngine::begin(fs::FS& fs, const char* path) {
 
     File f = fs.open(path, FILE_READ);
     if (!f) {
-        Serial.printf("[AlertEngine] %s not found — starting empty\n", path);
+        Log.printf("[AlertEngine] %s not found — starting empty\n", path);
         return true;   // not an error; first run
     }
 
     if (f.size() > 8 * 1024) {
-        Serial.printf("[AlertEngine] %s too large\n", path);
+        Log.printf("[AlertEngine] %s too large\n", path);
         f.close();
         return false;
     }
@@ -73,7 +74,7 @@ bool AlertEngine::begin(fs::FS& fs, const char* path) {
     f.close();
 
     if (err) {
-        Serial.printf("[AlertEngine] JSON parse error: %s\n", err.c_str());
+        Log.printf("[AlertEngine] JSON parse error: %s\n", err.c_str());
         return false;
     }
 
@@ -105,7 +106,7 @@ bool AlertEngine::begin(fs::FS& fs, const char* path) {
     }
 
     xSemaphoreGive(_mutex);
-    Serial.printf("[AlertEngine] loaded %d rule(s), %d history entries from %s\n",
+    Log.printf("[AlertEngine] loaded %d rule(s), %d history entries from %s\n",
                   _ruleCount, _histCount, path);
     return true;
 }

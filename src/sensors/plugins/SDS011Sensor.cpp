@@ -1,4 +1,5 @@
 #include "SDS011Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../pipeline/DataPipeline.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
@@ -28,7 +29,7 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
     if (!validateAttachPin(rxPin, "sds011", "uart_rx")) return false;
     if (txPin >= 0 && !validateAttachPin(txPin, "sds011", "uart_tx")) return false;
     if (!_claimSerial1(this)) {
-        Serial.println("[SDS011] Serial1 already owned by another sensor — refusing init");
+        Log.println("[SDS011] Serial1 already owned by another sensor — refusing init");
         return false;
     }
 
@@ -69,14 +70,14 @@ bool SDS011Sensor::init(JsonObjectConst cfg) {
             uint8_t asum = 0;
             for (int i = 2; i < 8; i++) asum += ack[i];
             if (ack[1] != 0xC5 || ack[2] != 0x08 || ack[8] != asum || ack[4] != (uint8_t)work)
-                Serial.printf("[SDS011] Work-period ACK mismatch (got period=%u)\n", ack[4]);
+                Log.printf("[SDS011] Work-period ACK mismatch (got period=%u)\n", ack[4]);
         } else {
-            Serial.println("[SDS011] No work-period ACK received");
+            Log.println("[SDS011] No work-period ACK received");
         }
         _drainBuffer();
     }
 
-    Serial.printf("[SDS011] RX=%d TX=%d baud=%d period=%umin mode=%s\n",
+    Log.printf("[SDS011] RX=%d TX=%d baud=%d period=%umin mode=%s\n",
                   rxPin, txPin, baud, _hwPeriodMin,
                   _hwPeriodMin == 0 ? "continuous" : "hw-periodic");
     return true;

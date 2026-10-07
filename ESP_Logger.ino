@@ -48,6 +48,7 @@
 // Edit that single file to change what gets built and how it behaves.
 // ============================================================================
 #include "src/setup.h"
+#include "src/core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #include <Arduino.h>
 #include <esp_sleep.h>
@@ -547,7 +548,7 @@ static void _initPlatform() {
 
     // Initialise AlertEngine — loads /alerts.json from LittleFS if present
     if (configFs() && !alertEngine.begin(*configFs())) {
-        Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
+        Log.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
     }
 
     // Start FreeRTOS task pipeline.
@@ -558,7 +559,7 @@ static void _initPlatform() {
     // mutating endpoints that would xSemaphoreTake(NULL) → assert.
     if (activeFS && !TaskManager::init(*activeFS)) {
         g_safeMode = true;
-        Serial.println("[SafeMode] TaskManager::init failed — entering safe mode "
+        Log.println("[SafeMode] TaskManager::init failed — entering safe mode "
                        "(sensor pipeline skipped)");
     }
 
@@ -602,6 +603,9 @@ void setup() {
     }
 
     Serial.begin(115200);
+    // Before the first Log line: keeps the tail of the boot that just ended
+    // (a crash's last words) and starts this boot's ring.
+    logRingBegin();
     delay(100);
 
     // ── Restart circuit breaker (Pillar 3.7 / AUDIT FC.4) ─────────────────────
@@ -625,7 +629,7 @@ void setup() {
         }
         if (g_consecutiveResets >= 3) {
             g_safeMode = true;
-            Serial.printf("\n[SafeMode] %u consecutive resets — entering "
+            Log.printf("\n[SafeMode] %u consecutive resets — entering "
                           "AP-only safe mode (sensor pipeline skipped)\n",
                           (unsigned)g_consecutiveResets);
         }
@@ -647,7 +651,7 @@ void setup() {
     // can decide to wipe the partition via the explicit "Format" button.
     if (!littleFsAvailable) {
         g_safeMode = true;
-        Serial.println("[SafeMode] LittleFS mount failed — entering safe mode "
+        Log.println("[SafeMode] LittleFS mount failed — entering safe mode "
                        "(use failsafe UI to format if needed)");
     }
 
@@ -656,7 +660,7 @@ void setup() {
     // wizard routes to /firstrun while g_setupRequired is true).
     g_boardProfile  = BoardProfiles::load();
     g_setupRequired = (g_boardProfile == nullptr);
-    Serial.printf("[BoardProfile] %s\n",
+    Log.printf("[BoardProfile] %s\n",
                   g_boardProfile ? g_boardProfile->name
                                  : "none — first-run wizard required");
 
@@ -862,11 +866,11 @@ void setup() {
             wireMutex    = xSemaphoreCreateMutex();
             fsMutex      = xSemaphoreCreateMutex();
             if (!webDataMutex || !configMutex || !wireMutex || !fsMutex) {
-                Serial.println("[Setup] WARNING: mutex creation failed");
+                Log.println("[Setup] WARNING: mutex creation failed");
             }
             // Skip AlertEngine in safe-mode (minimises surface).
             if (!g_safeMode && configFs() && !alertEngine.begin(*configFs())) {
-                Serial.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
+                Log.println("[Setup] WARNING: AlertEngine init failed — alerts disabled");
             }
         }
 
@@ -1190,7 +1194,7 @@ void loop() {
         // sequence never meant to touch.
         MutexGuard rg(rtcMutex, pdMS_TO_TICKS(1000));
         if (rtcMutex && !rg.isLocked()) {
-            Serial.println("[RTC] hardware clock not written: bus busy, will retry");
+            Log.println("[RTC] hardware clock not written: bus busy, will retry");
             g_pendingRtcSet.store(true, std::memory_order_release);
         } else {
             Rtc->SetIsWriteProtected(false); delay(10);
