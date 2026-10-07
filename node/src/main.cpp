@@ -65,6 +65,7 @@ static bool     s_portalBgRunning = false;
 /// §3: the full config goes with the first POST after boot (until one
 /// carrying it is answered), and with every POST while `local`.
 static bool     s_reportedSinceBoot = false;
+static uint32_t s_cfgSentMs         = 0;      ///< when the last POST carrying `cfg` was answered
 /// The rev this node last refused — or rolled back. Never re-applied; see
 /// NodeSync::decideReply().
 static uint16_t s_rejectedRev = 0;
@@ -201,6 +202,12 @@ static bool runDiscovery() {
 static bool connectTo(const char* ssid, const char* pass) {
     WiFi.mode(WIFI_STA);
     WiFi.persistent(false);
+    // NO MODEM SLEEP. The ESP8266 default (WIFI_MODEM_SLEEP) wakes the radio
+    // only on DTIM beacons; the node's own POSTs still go out, but inbound
+    // connections to its page are dropped often enough that, with some
+    // routers, the page is unreachable for days while data arrives fine. This
+    // node is on mains power and keeps WiFi up anyway; the cost is ~50 mA.
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);
     for (int attempt = 1; attempt <= 3; attempt++) {
         LOGF("[wifi] connecting to \"%s\" (attempt %d/3)", ssid, attempt);
         WiFi.begin(ssid, pass);
@@ -615,7 +622,7 @@ static PostResult postBatch() {
         syncSave(s_sync);
     }
     // Delivered with this POST: the report and the refusal.
-    if (withCfg) s_reportedSinceBoot = true;
+    if (withCfg) { s_reportedSinceBoot = true; s_cfgSentMs = millis(); }
     if (errRev && s_sync.err.rev == errRev) {
         s_sync.err.clear();
         syncSave(s_sync);
@@ -650,6 +657,14 @@ static PostResult postBatch() {
             s_linkStatus.lastAccepted = (int16_t)accepted;
             s_linkStatus.lastRoom     = (int16_t)room;
             handleReplyCfg(res["cfg"]);
+            // The collector has no record of this node's settings (its own
+            // report from boot never arrived, or its filesystem was replaced):
+            // send it again with the next POST.
+            if (s_reportedSinceBoot &&
+                NodeSync::honourCfgWant(res["cfg_want"] | false, millis(), s_cfgSentMs)) {
+                LOGLN("[cfg] collector asked for the report; sending it next");
+                s_reportedSinceBoot = false;
+            }
             readReplyFw(res["fw"]);
         } else {
             // 200 with a body this node cannot read: something in the way

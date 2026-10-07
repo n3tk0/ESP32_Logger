@@ -257,6 +257,11 @@ If the node reports `cfg` with `local: true`, the collector stores it as
 and replies with that `cfg` (rev only is enough: `{"cfg":{"rev":6}}` means
 "your local config is now rev 6"; the node clears `local`).
 
+When the collector holds no config for a node and its POST carried no `cfg`
+(the boot report was lost, or the collector's filesystem was replaced), the
+reply carries `"cfg_want": true`; the node sends `cfg` with its next POST, at
+most once per 10 minutes. An older node ignores it.
+
 The node's JSON parse buffer for the reply must hold a full config: budget
 2 KB. The collector accepts an ingest body of up to 6 KB (a full buffered
 batch plus `cfg`).

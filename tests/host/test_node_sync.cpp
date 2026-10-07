@@ -106,6 +106,13 @@ static void test_when_the_report_rides_along() {
     CHECK(shouldSendCfg(true, false));
 }
 
+static void test_the_collector_can_ask_for_the_report_again() {
+    CHECK(!honourCfgWant(false, 1000 + CFG_WANT_MIN_MS, 1000));   // not asked
+    CHECK(!honourCfgWant(true, 60000, 1000));                     // sent a minute ago
+    CHECK(honourCfgWant(true, 1000 + CFG_WANT_MIN_MS, 1000));
+    CHECK(honourCfgWant(true, 100, 0xFFFFFF00u - CFG_WANT_MIN_MS));  // millis() wrap
+}
+
 static ReplyCfg full(uint16_t rev) { ReplyCfg r; r.present = true; r.rev = rev; return r; }
 static ReplyCfg revOnly(uint16_t rev) { ReplyCfg r = full(rev); r.revOnly = true; return r; }
 
@@ -458,6 +465,7 @@ static void test_a_json_round_trip_is_not_a_sensor_change() {
 int main() {
     RUN(test_what_needs_a_restart_and_what_does_not);
     RUN(test_when_the_report_rides_along);
+    RUN(test_the_collector_can_ask_for_the_report_again);
     RUN(test_what_to_do_with_the_replys_config);
     RUN(test_a_refusal_is_carried_intact);
     RUN(test_without_a_next_network_only_the_current_one_is_tried);
