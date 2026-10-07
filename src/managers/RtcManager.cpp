@@ -1,4 +1,5 @@
 #include "RtcManager.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../core/Globals.h"
 #include "../utils/AtomicWrite.h"
 #include "../utils/MutexGuard.h"      // rtcMutex — the DS1302 bus
@@ -116,7 +117,7 @@ void backupBootCount() {
         // else may be acquired while it is held (see DataPipeline.h).
         MutexGuard rg(rtcMutex, pdMS_TO_TICKS(500));
         if (rtcMutex && !rg.isLocked()) {
-            Serial.println("[RTC] bootcount not backed up to RTC RAM: bus busy");
+            Log.println("[RTC] bootcount not backed up to RTC RAM: bus busy");
         } else {
             // R22 follow-up (Gemini HIGH + Codex P2 on PR #99): initRtc now
             // re-enables write protection, so SetMemory needs its own

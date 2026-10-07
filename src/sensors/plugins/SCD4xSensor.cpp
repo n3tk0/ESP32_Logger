@@ -1,4 +1,5 @@
 #include "SCD4xSensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
@@ -57,7 +58,7 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "scd4x");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, ADDR, this)) {
-        Serial.printf("[SCD4x] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
+        Log.printf("[SCD4x] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
 
@@ -72,13 +73,13 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
 
     // Start periodic measurement (5s interval, fixed in SCD40/41)
     if (!_sendCmd(CMD_START_PERIODIC)) {
-        Serial.println("[SCD4x] Not found at 0x62");
+        Log.println("[SCD4x] Not found at 0x62");
         return false;
     }
     // Confirm sensor is still responsive; data not ready yet is normal
     delay(1);
     if (!_sendCmd(CMD_GET_DATA_READY_STATUS)) {
-        Serial.println("[SCD4x] No I2C ACK after start_periodic — refusing ready");
+        Log.println("[SCD4x] No I2C ACK after start_periodic — refusing ready");
         return false;
     }
     delay(1);
@@ -87,7 +88,7 @@ bool SCD4xSensor::init(JsonObjectConst cfg) {
     // Defer the 5.1 s warm-up out of init(); readAll() gates on _warmupUntilMs.
     _warmupUntilMs = millis() + 5100;
     _ready = true;
-    Serial.println("[SCD4x] Started — first reading in ~5s");
+    Log.println("[SCD4x] Started — first reading in ~5s");
     return true;
 }
 

@@ -527,6 +527,7 @@ The **Auth** column in the index uses:
 | GET | `/api/runtime` | read | Heap, uptime, boot count, FS usage |
 | GET | `/api/live` | read | Live legacy water-cycle snapshot (polled) |
 | GET | `/api/diag` | read | Diagnostics / observability blob (R19) |
+| GET | `/api/log` | read | Serial log from the RTC ring: previous boot's tail, then this boot (text/plain) |
 | GET | `/api/recent_logs` | read | Tail of the in-RAM log ring |
 | GET | `/api/changelog` | read | Bundled `changelog.txt` |
 | GET | `/api/csrf-token` | read | Issues the per-boot CSRF token |

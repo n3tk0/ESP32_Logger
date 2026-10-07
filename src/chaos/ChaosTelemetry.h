@@ -24,6 +24,7 @@
 #ifdef ENABLE_CHAOS_TELEMETRY
 
 #include <Arduino.h>
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <WiFi.h>
 #include <esp_system.h>
 
@@ -39,7 +40,7 @@ public:
     static void begin() {
         // One boot banner so the validator can key off a known start marker and
         // capture the power-on reset reason explicitly.
-        Serial.printf("@TLM_BOOT {\"reset\":%d,\"heap\":%u}\n",
+        Log.printf("@TLM_BOOT {\"reset\":%d,\"heap\":%u}\n",
                       (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
     }
 
@@ -48,7 +49,7 @@ public:
         uint32_t now = millis();
         if (now - last < CHAOS_TLM_PERIOD_MS) return;
         last = now;
-        Serial.printf(
+        Log.printf(
             "@TLM {\"ms\":%u,\"heap\":%u,\"minheap\":%u,\"rssi\":%d,"
             "\"wifi\":%d,\"safe\":%d,\"reset\":%d}\n",
             (unsigned)now,

@@ -1,4 +1,5 @@
 #include "SGP30Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
@@ -60,7 +61,7 @@ bool SGP30Sensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "sgp30");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, ADDR, this)) {
-        Serial.printf("[SGP30] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
+        Log.printf("[SGP30] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
 
@@ -70,25 +71,25 @@ bool SGP30Sensor::init(JsonObjectConst cfg) {
 
     // Verify chip is present by reading feature set
     if (!_sendCommand(CMD_GET_FEAT)) {
-        Serial.println("[SGP30] Not found at 0x58");
+        Log.println("[SGP30] Not found at 0x58");
         return false;
     }
     delay(10);
     uint16_t feat;
     if (!_readWords(&feat, 1)) {
-        Serial.println("[SGP30] Feature read failed");
+        Log.println("[SGP30] Feature read failed");
         return false;
     }
 
     // Start IAQ algorithm
     if (!_sendCommand(CMD_IAQ_INIT)) {
-        Serial.println("[SGP30] IAQ init failed");
+        Log.println("[SGP30] IAQ init failed");
         return false;
     }
 
     _initMs = millis();
     _ready  = true;
-    Serial.printf("[SGP30] Ready (feature=0x%04X)\n", feat);
+    Log.printf("[SGP30] Ready (feature=0x%04X)\n", feat);
     return true;
 }
 

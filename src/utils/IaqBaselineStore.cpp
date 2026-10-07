@@ -1,4 +1,5 @@
 #include "IaqBaselineStore.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #include <Arduino.h>
 #include <LittleFS.h>
@@ -36,13 +37,13 @@ float load(const char* path, int heaterTemp, int heaterDurMs, const char* tag) {
     if (rec.heaterTemp != heaterTemp || rec.heaterDurMs != heaterDurMs) {
         // Drop it too: going back to the old settings later must not bring
         // back a baseline that has been out of date ever since.
-        Serial.printf("[%s] IAQ baseline from other heater settings, starting over\n", tag);
+        Log.printf("[%s] IAQ baseline from other heater settings, starting over\n", tag);
         MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
         if (g.isLocked()) LittleFS.remove(path);
         return 0.0f;
     }
     if (!(rec.baseline >= 1.0f && rec.baseline < 1e9f)) return 0.0f;
-    Serial.printf("[%s] IAQ baseline %.0f Ohm restored\n", tag, rec.baseline);
+    Log.printf("[%s] IAQ baseline %.0f Ohm restored\n", tag, rec.baseline);
     return rec.baseline;
 }
 

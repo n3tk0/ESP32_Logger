@@ -1,4 +1,5 @@
 #include "Datalog.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../core/Globals.h"
 #include "../managers/DataLogger.h"      // flushLogBufferToFS (a stub off legacy builds)
 #include "../managers/StorageManager.h"  // getActiveDatalogFile
@@ -183,8 +184,8 @@ void archive(fs::FS& fs, const char* path, const char* suffix) {
         snprintf(dst, sizeof(dst), "%.*s_%s%s%s", (int)(dot - path), path, suffix, tag, dot);
         if (!fs.exists(dst)) break;
     }
-    if (fs.rename(path, dst)) Serial.printf("[datalog] %s -> %s\n", path, dst);
-    else                      Serial.printf("[datalog] could not move %s aside\n", path);
+    if (fs.rename(path, dst)) Log.printf("[datalog] %s -> %s\n", path, dst);
+    else                      Log.printf("[datalog] could not move %s aside\n", path);
     lcFor(fs).path[0] = '\0';
 }
 
@@ -244,7 +245,7 @@ bool trim(fs::FS& fs, const char* path, size_t size, int adding) {
         return true;
     }, nullptr);   // the caller holds fsMutex
     lcFor(fs).path[0] = '\0';
-    if (ok) Serial.printf("[datalog] trimmed %d old rows from %s\n", drop, path);
+    if (ok) Log.printf("[datalog] trimmed %d old rows from %s\n", drop, path);
     return ok;
 }
 
@@ -262,7 +263,7 @@ void datalogColsBegin(fs::FS& fs) {
     f.close();
     ColsLock g;
     if (e || !parseCols(doc.as<JsonVariantConst>()))
-        Serial.println("[datalog] /datalog_cols.json unreadable - logging every metric");
+        Log.println("[datalog] /datalog_cols.json unreadable - logging every metric");
 }
 
 int datalogColsCopy(DatalogCol* out, int max, uint32_t* rev) {
@@ -321,7 +322,7 @@ void datalogColsSaveIfLearned(fs::FS& fs) {
     bool learned;
     { ColsLock g; learned = s_learned; }
     if (learned && !saveCols(fs, nullptr))
-        Serial.println("[datalog] could not save /datalog_cols.json");
+        Log.println("[datalog] could not save /datalog_cols.json");
 }
 
 void datalogColsToJson(JsonObject out) {
@@ -449,12 +450,12 @@ int datalogAppend(fs::FS& fs, const char* header, const char* lines,
         // Not appending, rather than deleting the file: the usual reason the
         // trim fails is a full filesystem, and the rows already on it are
         // the history. The file just must not grow past its limit.
-        Serial.println("[datalog] trim failed - rows not written, log left intact");
+        Log.println("[datalog] trim failed - rows not written, log left intact");
         return 0;
     }
 
     File f = fs.open(path, FILE_APPEND);
-    if (!f) { Serial.printf("[datalog] cannot open %s\n", path); return -1; }
+    if (!f) { Log.printf("[datalog] cannot open %s\n", path); return -1; }
     // NOT f.size() when the file is new: core 2.0.x fills a File's size from
     // a stat() at open, which fails for a file that open() is creating, and
     // returns whatever that failed stat left — so the header was skipped and

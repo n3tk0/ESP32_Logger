@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "UsbCdcModule.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <Preferences.h>
 #include <esp_chip_info.h>
 
@@ -18,17 +19,17 @@ static const char* NVS_KEY_FIRST_RUN = "first_run";
 
 void UsbCdcModule::begin() {
     if (!isUsbCdcSupported()) {
-        Serial.println("[UsbCdc] This board does not support USB CDC configuration.");
+        Log.println("[UsbCdc] This board does not support USB CDC configuration.");
         return;
     }
 
     loadFromNvs();
 
     if (first_run_) {
-        Serial.println();
-        Serial.println("═══════════════════════════════════════════════════════");
-        Serial.println("                   FIRST RUN SETUP");
-        Serial.println("═══════════════════════════════════════════════════════");
+        Log.println();
+        Log.println("═══════════════════════════════════════════════════════");
+        Log.println("                   FIRST RUN SETUP");
+        Log.println("═══════════════════════════════════════════════════════");
         firstRunSetup();
     }
 
@@ -53,23 +54,23 @@ void UsbCdcModule::printStatus() const {
     }
     String pins = getAffectedPins();
 
-    Serial.println();
-    Serial.println("┌─ USB CDC Configuration ─────────────────────────────────");
-    Serial.printf("│ Board:            %s\n", board.c_str());
-    Serial.printf("│ USB CDC on boot:  %s\n", status.c_str());
+    Log.println();
+    Log.println("┌─ USB CDC Configuration ─────────────────────────────────");
+    Log.printf("│ Board:            %s\n", board.c_str());
+    Log.printf("│ USB CDC on boot:  %s\n", status.c_str());
     if (!pins.isEmpty()) {
-        Serial.printf("│ Affected pins:    %s\n", pins.c_str());
+        Log.printf("│ Affected pins:    %s\n", pins.c_str());
     }
-    Serial.println("│");
+    Log.println("│");
     if (hwEnabled) {
-        Serial.println("│ ✓ Serial over USB available (easy debugging)");
-        Serial.println("│ ✗ GPIO pins locked for USB communication");
+        Log.println("│ ✓ Serial over USB available (easy debugging)");
+        Log.println("│ ✗ GPIO pins locked for USB communication");
     } else {
-        Serial.println("│ ✓ GPIO pins available for sensors/IO");
-        Serial.println("│ ✗ No USB serial (use HTTP or UART for logs)");
+        Log.println("│ ✓ GPIO pins available for sensors/IO");
+        Log.println("│ ✗ No USB serial (use HTTP or UART for logs)");
     }
-    Serial.println("└─────────────────────────────────────────────────────────");
-    Serial.println();
+    Log.println("└─────────────────────────────────────────────────────────");
+    Log.println();
 }
 
 void UsbCdcModule::setUsbCdcEnabled(bool enabled) {
@@ -217,27 +218,27 @@ void UsbCdcModule::firstRunSetup() {
     String board = getBoardName();
     String pins = getAffectedPins();
 
-    Serial.println();
-    Serial.printf("Board detected: %s\n", board.c_str());
+    Log.println();
+    Log.printf("Board detected: %s\n", board.c_str());
     if (!pins.isEmpty()) {
-        Serial.printf("USB pins: %s\n", pins.c_str());
+        Log.printf("USB pins: %s\n", pins.c_str());
     }
-    Serial.println();
-    Serial.println("Choose USB CDC configuration:");
-    Serial.println("  [1] Enable USB CDC (default)");
-    Serial.println("      ✓ Easy serial debugging via USB cable");
-    Serial.println("      ✗ USB pins locked for communication");
-    Serial.println();
-    Serial.println("  [2] Disable USB CDC");
-    Serial.println("      ✓ USB pins available for GPIO/sensors");
-    Serial.println("      ✗ No USB serial (use HTTP or UART logs)");
-    Serial.println();
+    Log.println();
+    Log.println("Choose USB CDC configuration:");
+    Log.println("  [1] Enable USB CDC (default)");
+    Log.println("      ✓ Easy serial debugging via USB cable");
+    Log.println("      ✗ USB pins locked for communication");
+    Log.println();
+    Log.println("  [2] Disable USB CDC");
+    Log.println("      ✓ USB pins available for GPIO/sensors");
+    Log.println("      ✗ No USB serial (use HTTP or UART logs)");
+    Log.println();
 #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
-    Serial.println("Current setting: USB CDC ON (build time)");
+    Log.println("Current setting: USB CDC ON (build time)");
 #else
-    Serial.println("Current setting: USB CDC OFF (build time)");
+    Log.println("Current setting: USB CDC OFF (build time)");
 #endif
-    Serial.println("Enter 1 or 2 (default 1): ");
+    Log.println("Enter 1 or 2 (default 1): ");
 
     // Wait for user input with timeout
     unsigned long start = millis();
@@ -252,21 +253,21 @@ void UsbCdcModule::firstRunSetup() {
             }
             if (c >= '0' && c <= '9') {
                 input += c;
-                Serial.print(c);
+                Log.print(c);
             }
         }
         delay(10);
     }
 
-    Serial.println();
+    Log.println();
 
     bool choice = (input == "2") ? false : true;  // Default to true (USB CDC on)
 
     if (choice) {
-        Serial.println("✓ USB CDC enabled. Pins 18/19 are locked for USB.");
+        Log.println("✓ USB CDC enabled. Pins 18/19 are locked for USB.");
     } else {
-        Serial.println("✓ USB CDC disabled. Pins 18/19 are available for GPIO.");
-        Serial.println("  NOTE: Next firmware compilation must have USB CDC OFF.");
+        Log.println("✓ USB CDC disabled. Pins 18/19 are available for GPIO.");
+        Log.println("  NOTE: Next firmware compilation must have USB CDC OFF.");
     }
 
     saveToNvs(choice);

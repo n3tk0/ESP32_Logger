@@ -1,4 +1,5 @@
 #include "FlowRunLogger.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../utils/MutexGuard.h"
 #include "../pipeline/DataPipeline.h"
 #include <math.h>
@@ -55,7 +56,7 @@ void FlowRunLogger::feed(const SensorReading& r, uint32_t epoch) {
             _flowSum       = 0.0;
             _flowCount     = 0;
             _volumeStart   = isfinite(_volumeLatest) ? _volumeLatest : 0.0f;
-            Serial.printf("[FlowRunLogger] run START ts=%lu flow=%.2f L/min\n",
+            Log.printf("[FlowRunLogger] run START ts=%lu flow=%.2f L/min\n",
                           (unsigned long)epoch, flow);
         }
     }
@@ -100,7 +101,7 @@ void FlowRunLogger::_closeRun(uint32_t endTs) {
     _done.pf     = -1;
     strlcpy(_done.trigger, DL_TRIGGER_FLOW, sizeof(_done.trigger));
     _hasDone = true;
-    Serial.printf("[FlowRunLogger] run END ts=%lu dur=%lus vol=%.3f L\n",
+    Log.printf("[FlowRunLogger] run END ts=%lu dur=%lus vol=%.3f L\n",
                   (unsigned long)endTs, (unsigned long)duration, volume);
 
     _state         = IDLE;

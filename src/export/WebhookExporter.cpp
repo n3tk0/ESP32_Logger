@@ -1,4 +1,5 @@
 #include "WebhookExporter.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
@@ -23,7 +24,7 @@ bool WebhookExporter::init(JsonObjectConst cfg) {
         if (rule.sensorId[0] && rule.metric[0]) _ruleCount++;
     }
 
-    Serial.printf("[Webhook] url=%s rules=%d cooldown=%ums\n",
+    Log.printf("[Webhook] url=%s rules=%d cooldown=%ums\n",
                   _url, _ruleCount, _cooldownMs);
     return true;
 }
@@ -57,11 +58,11 @@ bool WebhookExporter::_fireRule(const Rule& rule, float value, uint32_t ts) {
     http.end();
 
     if (code > 0 && code < 300) {
-        Serial.printf("[Webhook] Fired: %s/%s=%.3g threshold=%.3g code=%d\n",
+        Log.printf("[Webhook] Fired: %s/%s=%.3g threshold=%.3g code=%d\n",
                       rule.sensorId, rule.metric, value, rule.threshold, code);
         return true;
     }
-    Serial.printf("[Webhook] Fire failed: code=%d\n", code);
+    Log.printf("[Webhook] Fire failed: code=%d\n", code);
     return false;
 }
 

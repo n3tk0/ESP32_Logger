@@ -51,6 +51,10 @@ extern SemaphoreHandle_t rtcMutex;      // DS1302 three-wire bus serialisation
 extern volatile uint32_t g_queueDrops;
 // Drop counter — incremented when webRingBuf push is skipped due to mutex contention
 extern std::atomic<uint32_t> g_ringPushDrops;
+// Readings that missed exportQueue while no exporter needed every reading:
+// the periodic exporters send the latest value, and the next reading of the
+// same metric replaces this one there. Not data lost (that is g_queueDrops).
+extern std::atomic<uint32_t> g_exportSkips;
 
 // Task health heartbeat (C4) — each task writes millis() here every loop
 enum TaskIndex : uint8_t {

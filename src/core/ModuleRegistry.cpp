@@ -1,4 +1,5 @@
 #include "ModuleRegistry.h"
+#include "LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../pipeline/DataPipeline.h"
 #include "../utils/MutexGuard.h"
 #include <LittleFS.h>
@@ -16,7 +17,7 @@ static void quarantine(fs::FS& fs, const char* path) {
     String bad = String(path) + ".corrupt";
     if (fs.exists(bad.c_str())) fs.remove(bad.c_str());  // FAT rename won't overwrite
     if (!fs.rename(path, bad.c_str())) {
-        Serial.printf("[ModuleRegistry] could not move %s aside — removing\n", path);
+        Log.printf("[ModuleRegistry] could not move %s aside — removing\n", path);
         fs.remove(path);
     }
 }
@@ -25,11 +26,11 @@ static void quarantine(fs::FS& fs, const char* path) {
 bool ModuleRegistry::add(IModule* mod) {
     if (!mod) return false;
     if (_count >= MAX_MODULES) {
-        Serial.println(F("[ModuleRegistry] MAX_MODULES reached"));
+        Log.println(F("[ModuleRegistry] MAX_MODULES reached"));
         return false;
     }
     if (getById(mod->getId()) != nullptr) {
-        Serial.printf("[ModuleRegistry] duplicate id: %s\n", mod->getId());
+        Log.printf("[ModuleRegistry] duplicate id: %s\n", mod->getId());
         return false;
     }
     _modules[_count++] = mod;
@@ -63,7 +64,7 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
 
     File f = fs.open(path, FILE_READ);
     if (!f) {
-        Serial.printf("[ModuleRegistry] %s not found, using defaults\n", path);
+        Log.printf("[ModuleRegistry] %s not found, using defaults\n", path);
         return true;  // absence is fine — modules keep compile-time defaults
     }
 
@@ -71,7 +72,7 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     // Realistic worst case is a few KB (see MAX_FILE_BYTES rationale in .h).
     size_t sz = f.size();
     if (sz > MAX_FILE_BYTES) {
-        Serial.printf("[ModuleRegistry] %s too large (%u B, cap %u) — quarantining\n",
+        Log.printf("[ModuleRegistry] %s too large (%u B, cap %u) — quarantining\n",
                       path, (unsigned)sz, (unsigned)MAX_FILE_BYTES);
         f.close();
         quarantine(fs, path);
@@ -86,11 +87,11 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
     // here means the read buffer or the document did not fit right now.
     // Keep the file and run on defaults until the next boot.
     if (err == DeserializationError::NoMemory) {
-        Serial.printf("[ModuleRegistry] %s: out of memory — file kept\n", path);
+        Log.printf("[ModuleRegistry] %s: out of memory — file kept\n", path);
         return false;
     }
     if (err) {
-        Serial.printf("[ModuleRegistry] parse error: %s — quarantining\n", err.c_str());
+        Log.printf("[ModuleRegistry] parse error: %s — quarantining\n", err.c_str());
         quarantine(fs, path);
         saveAll(fs, path);
         return false;
@@ -106,12 +107,12 @@ bool ModuleRegistry::loadAll(fs::FS& fs, const char* path) {
         bool en = slice["enabled"] | true;
         _modules[i]->setEnabled(en);
         if (!_modules[i]->load(slice)) {
-            Serial.printf("[ModuleRegistry] load FAILED for %s\n", _modules[i]->getId());
+            Log.printf("[ModuleRegistry] load FAILED for %s\n", _modules[i]->getId());
             failed++;
         }
     }
     if (failed > 0) {
-        Serial.printf("[ModuleRegistry] %d module(s) failed to load — defaults retained\n", failed);
+        Log.printf("[ModuleRegistry] %d module(s) failed to load — defaults retained\n", failed);
     }
     return (failed == 0);
 }
@@ -122,7 +123,7 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
 
     MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !guard.isLocked()) {
-        Serial.println("[ModuleRegistry] saveAll: fsMutex timeout");
+        Log.println("[ModuleRegistry] saveAll: fsMutex timeout");
         return false;
     }
 
@@ -138,7 +139,7 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
         JsonObject slice = modules[_modules[i]->getId()].to<JsonObject>();
         slice["enabled"] = _modules[i]->isEnabled();
         if (!_modules[i]->save(slice)) {
-            Serial.printf("[ModuleRegistry] save() failed for %s\n", _modules[i]->getId());
+            Log.printf("[ModuleRegistry] save() failed for %s\n", _modules[i]->getId());
             allOk = false;
         }
     }
@@ -151,14 +152,14 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
     String tmp = String(path) + ".new";
     File f = fs.open(tmp.c_str(), FILE_WRITE);
     if (!f) {
-        Serial.printf("[ModuleRegistry] cannot open %s for write\n", tmp.c_str());
+        Log.printf("[ModuleRegistry] cannot open %s for write\n", tmp.c_str());
         return false;
     }
     size_t want    = measureJson(doc);
     size_t written = serializeJson(doc, static_cast<Print&>(f));
     f.close();
     if (written == 0 || written < want) {
-        Serial.printf("[ModuleRegistry] save TRUNCATED: %u of %u bytes — discarding\n",
+        Log.printf("[ModuleRegistry] save TRUNCATED: %u of %u bytes — discarding\n",
                       (unsigned)written, (unsigned)want);
         fs.remove(tmp.c_str());
         return false;
@@ -172,7 +173,7 @@ bool ModuleRegistry::saveAll(fs::FS& fs, const char* path) const {
         fs.remove(path);
     }
     if (!fs.rename(tmp.c_str(), path)) {
-        Serial.printf("[ModuleRegistry] rename %s -> %s failed\n", tmp.c_str(), path);
+        Log.printf("[ModuleRegistry] rename %s -> %s failed\n", tmp.c_str(), path);
         fs.remove(tmp.c_str());
         return false;
     }
@@ -184,7 +185,7 @@ void ModuleRegistry::startAll() {
     for (int i = 0; i < _count; i++) {
         if (!_modules[i]->isEnabled()) continue;
         if (!_modules[i]->start()) {
-            Serial.printf("[ModuleRegistry] %s start() requested restart\n",
+            Log.printf("[ModuleRegistry] %s start() requested restart\n",
                           _modules[i]->getId());
         }
     }

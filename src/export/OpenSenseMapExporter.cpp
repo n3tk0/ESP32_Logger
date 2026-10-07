@@ -1,4 +1,5 @@
 #include "OpenSenseMapExporter.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <new>            // std::nothrow
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -28,9 +29,9 @@ bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
 
     char tokenMask[12] = "(none)";
     if (_token[0]) snprintf(tokenMask, sizeof(tokenMask), "%.6s...", _token);
-    Serial.printf("[OSM] boxId=%s sensors=%d token=%s\n",
+    Log.printf("[OSM] boxId=%s sensors=%d token=%s\n",
                   _boxId, _sensorIdCount, tokenMask);
-    if (over) Serial.printf("[OSM] %d sensor IDs past the limit of %d ignored\n",
+    if (over) Log.printf("[OSM] %d sensor IDs past the limit of %d ignored\n",
                             over, OSM_MAX_SENSORS);
     return true;
 }
@@ -113,7 +114,7 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
     }
     // A body that did not fit is not valid JSON; never POST half of one.
     if (!full || !appendOk(snprintf(body + pos, bodyLen - pos, "]"))) {
-        Serial.println("[OSM] body overflow — batch dropped");
+        Log.println("[OSM] body overflow — batch dropped");
         delete[] body;
         return true;   // retrying the same batch would overflow the same way
     }
@@ -152,10 +153,10 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
             // the API refuses (422, e.g. a createdAt it deems in the future).
             // Sending it again gets the same answer, and spooling it would
             // replay the refusal in front of every later batch — so drop it.
-            Serial.printf("[OSM] POST rejected code=%d — batch dropped\n", code);
+            Log.printf("[OSM] POST rejected code=%d — batch dropped\n", code);
             ok = true;
         } else if (!ok) {
-            Serial.printf("[OSM] POST failed code=%d\n", code);
+            Log.printf("[OSM] POST failed code=%d\n", code);
         }
         http.end();
     }

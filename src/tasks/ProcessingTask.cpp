@@ -1,4 +1,5 @@
 #include <time.h>
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "ProcessingTask.h"
 #include "TaskManager.h"
 #include "../setup.h"          // MODULE_HEATER_ENABLED (compile-time toggle)
@@ -10,6 +11,7 @@
 #include "../alerts/AlertEngine.h"
 #include "../utils/MutexGuard.h"
 #include "../core/HeapWatch.h"   // dataLost
+#include "../export/ExportManager.h"   // anyStreaming
 #ifdef MODULE_HEATER_ENABLED
 #  include "../modules/HeaterModule.h"
 #endif
@@ -54,11 +56,11 @@ static bool isPlausible(const SensorReading& r) {
 
 // ---------------------------------------------------------------------------
 void processingTaskFunc(void* /*param*/) {
-    Serial.println("[ProcessingTask] started");
+    Log.println("[ProcessingTask] started");
 
     // See SensorTask: park until init() opens the start gate so a higher-prio
     // task can't self-delete by observing running==false mid-init.
-    if (!TaskManager::waitForStart()) { Serial.println("[ProcessingTask] stopped"); vTaskDelete(nullptr); return; }
+    if (!TaskManager::waitForStart()) { Log.println("[ProcessingTask] stopped"); vTaskDelete(nullptr); return; }
 
     SensorReading r;
     while (TaskManager::running) {
@@ -144,9 +146,14 @@ void processingTaskFunc(void* /*param*/) {
             // R12 / AUDIT 2.9: was timeout 0 → silent drops on every WiFi
             // backpressure event. 10ms matches the storageQueue path above
             // and is short enough not to starve other sensors' enqueues.
-            // Drops still counted via g_queueDrops for /api/diag visibility.
+            // A miss is lost only to an exporter that sends every reading
+            // (Webhook); the periodic ones send the latest value, and the
+            // next reading replaces this one. ExportTask is busy for seconds
+            // at a time (the forecast fetch, a slow upload), so those misses
+            // are routine and counted apart from data loss.
             if (xQueueSend(exportQueue, &r, pdMS_TO_TICKS(10)) != pdTRUE) {
-                dataLost("export queue full");
+                if (exportManager.anyStreaming()) dataLost("export queue full");
+                else g_exportSkips.fetch_add(1, std::memory_order_relaxed);
             }
         }
     }
@@ -159,6 +166,6 @@ void processingTaskFunc(void* /*param*/) {
     HeaterModule::instance().stop();
 #endif
 
-    Serial.println("[ProcessingTask] stopped");
+    Log.println("[ProcessingTask] stopped");
     vTaskDelete(nullptr);
 }

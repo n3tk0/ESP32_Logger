@@ -1,4 +1,5 @@
 #include "ExportManager.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../setup.h"
 #include "../pipeline/DataPipeline.h"
 #include "../utils/MutexGuard.h"
@@ -21,7 +22,7 @@ bool ExportManager::addExporter(IExporter* exporter) {
 bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     File f = fs.open(cfgPath, FILE_READ);
     if (!f) {
-        Serial.printf("[ExportManager] %s not found\n", cfgPath);
+        Log.printf("[ExportManager] %s not found\n", cfgPath);
         return false;
     }
 
@@ -30,7 +31,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     // of KB; 16 KB is comfortably above that while still a hard ceiling.
     constexpr size_t MAX_CFG_BYTES = 16 * 1024;
     if (f.size() > MAX_CFG_BYTES) {
-        Serial.printf("[ExportManager] %s too large (%u B, cap %u)\n",
+        Log.printf("[ExportManager] %s too large (%u B, cap %u)\n",
                       cfgPath, (unsigned)f.size(), (unsigned)MAX_CFG_BYTES);
         f.close();
         return false;
@@ -40,13 +41,13 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
     DeserializationError err = deserializeJsonFile(doc, f);
     f.close();
     if (err) {
-        Serial.printf("[ExportManager] JSON error: %s\n", err.c_str());
+        Log.printf("[ExportManager] JSON error: %s\n", err.c_str());
         return false;
     }
 
     JsonObject exportCfg = doc["export"].as<JsonObject>();
     if (exportCfg.isNull()) {
-        Serial.println("[ExportManager] No 'export' section in config");
+        Log.println("[ExportManager] No 'export' section in config");
         return false;
     }
 
@@ -64,6 +65,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
 
     const uint32_t now = millis();
     bool periodic = false;   // anything enabled that reads the latest-value table
+    bool streaming = false;  // anything enabled that sends every reading
     for (int i = 0; i < _count; i++) {
         IExporter*  exp  = _exporters[i];
         const char* name = exp->getName();
@@ -102,11 +104,13 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         }
 
         if (exp->isEnabled() && !exp->isStreaming()) periodic = true;
+        if (exp->isEnabled() &&  exp->isStreaming()) streaming = true;
         // sensors: the count selected, 0 = all; '*' = the common setting.
-        Serial.printf("[ExportManager] '%s' on=%d every %lus%s sensors=%u%s\n",
+        Log.printf("[ExportManager] '%s' on=%d every %lus%s sensors=%u%s\n",
                       name, (int)exp->isEnabled(), (unsigned long)(iv / 1000),
                       own ? "" : "*", _sensorCount[_selOf[i]], ownSel ? "" : "*");
     }
+    _anyStreaming = streaming;
     // The latest-value table is only worth its RAM once something periodic
     // will read it.
     if (periodic && !_latest) {
@@ -114,7 +118,7 @@ bool ExportManager::loadAndInit(fs::FS& fs, const char* cfgPath) {
         // what SensorReading's own constructor would have memset), without
         // a constructor loop in flash for it.
         _latest = static_cast<LatestSlot*>(calloc(EXPORT_LATEST_SLOTS, sizeof(LatestSlot)));
-        if (!_latest) Serial.println("[ExportManager] no heap for the latest-value table");
+        if (!_latest) Log.println("[ExportManager] no heap for the latest-value table");
     }
 
     // Return true as long as the config parsed successfully — "no exporters
@@ -202,7 +206,7 @@ void ExportManager::ingest(const SensorReading& r) {
         // updated one (and say so — that value is lost).
         slot = (empty >= 0) ? empty : (spare >= 0) ? spare : oldest;
         if (empty < 0 && spare < 0 && slot >= 0)
-            Serial.printf("[Export] table full, dropped %s/%s\n",
+            Log.printf("[Export] table full, dropped %s/%s\n",
                           latest[slot].r.sensorId, latest[slot].r.metric);
     }
     if (store && slot >= 0) {
@@ -271,7 +275,7 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
         }
         HeapActivity ha(HA_EXPORT, exp->getName());
         if (exp->send(r, n)) return true;
-        Serial.printf("[ExportManager] '%s' retry %d/%d\n",
+        Log.printf("[ExportManager] '%s' retry %d/%d\n",
                       exp->getName(), attempt + 1, maxRetries);
     }
     // All retries exhausted — spool for later retry (#4.7), where replaying
@@ -314,7 +318,7 @@ void ExportManager::_spoolBatch(IExporter* exp,
 
     MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
     if (!g.isLocked()) {
-        Serial.printf("[ExportManager] fsMutex timeout — dropping spool batch for '%s'\n",
+        Log.printf("[ExportManager] fsMutex timeout — dropping spool batch for '%s'\n",
                       exp->getName());
         return;
     }
@@ -334,16 +338,16 @@ void ExportManager::_spoolBatch(IExporter* exp,
         f = _spoolFS->open(path, FILE_APPEND);
     }
     if (!f) {
-        Serial.printf("[ExportManager] Cannot open spool %s\n", path);
+        Log.printf("[ExportManager] Cannot open spool %s\n", path);
         return;
     }
     // Size guard: don't grow spool beyond MAX_SPOOL_BYTES
     if (f.size() >= MAX_SPOOL_BYTES) {
-        Serial.printf("[ExportManager] Spool full for '%s' — dropping\n", exp->getName());
+        Log.printf("[ExportManager] Spool full for '%s' — dropping\n", exp->getName());
     } else {
         const size_t want = n * sizeof(SensorReading);
         if (f.write(reinterpret_cast<const uint8_t*>(r), want) == want) {
-            Serial.printf("[ExportManager] Spooled %u readings for '%s'\n",
+            Log.printf("[ExportManager] Spooled %u readings for '%s'\n",
                           (unsigned)n, exp->getName());
         } else {
             // A torn record would put every later append at the wrong offset,
@@ -352,7 +356,7 @@ void ExportManager::_spoolBatch(IExporter* exp,
             // the spool rather than keep a file that is wrong from here on.
             f.close();
             _spoolFS->remove(path);
-            Serial.printf("[Export] spool write short, dropped %s\n", path);
+            Log.printf("[Export] spool write short, dropped %s\n", path);
             return;
         }
     }
@@ -411,13 +415,13 @@ bool ExportManager::_drainSpool(IExporter* exp) {
             if (g.isLocked()) {
                 _spoolFS->remove(path);
                 removed = true;
-                Serial.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
+                Log.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
             } else if (attempt < 4) {
                 vTaskDelay(pdMS_TO_TICKS(200));
             }
         }
         if (!removed) {
-            Serial.printf("[ExportManager] WARN: sent OK but spool remove failed for '%s' — next cycle will duplicate\n",
+            Log.printf("[ExportManager] WARN: sent OK but spool remove failed for '%s' — next cycle will duplicate\n",
                           exp->getName());
             return false;
         }
@@ -442,7 +446,7 @@ void ExportManager::tick() {
         if (now - start > EXPORT_MAX_SENDALL_MS) {
             // Unlike the old sendAll(), nothing is lost: this exporter is
             // still due and its values are still in the table next tick.
-            Serial.printf("[ExportManager] circuit breaker: deferring '%s'\n",
+            Log.printf("[ExportManager] circuit breaker: deferring '%s'\n",
                           exp->getName());
             break;
         }

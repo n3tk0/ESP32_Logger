@@ -1,4 +1,5 @@
 #include "SPS30Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../I2CBus.h"
 #include <string.h>
 #include <math.h>
@@ -92,7 +93,7 @@ void SPS30Sensor::_pollStatus() {
     uint32_t raw = 0;
     if (!_readStatus(raw)) {
         _status = STATUS_READ_FAILED;
-        Serial.println("[SPS30] status register read failed");
+        Log.println("[SPS30] status register read failed");
         return;
     }
 
@@ -104,9 +105,9 @@ void SPS30Sensor::_pollStatus() {
     // Log only on change — this runs once a minute for the life of the device.
     if (s != _status) {
         if (s == STATUS_OK) {
-            Serial.println("[SPS30] device status recovered — OK");
+            Log.println("[SPS30] device status recovered — OK");
         } else {
-            Serial.printf("[SPS30] device status 0x%02X (raw 0x%08lX)%s%s%s\n",
+            Log.printf("[SPS30] device status 0x%02X (raw 0x%08lX)%s%s%s\n",
                           s, (unsigned long)raw,
                           (s & STATUS_FAN_ERROR)   ? " FAN"        : "",
                           (s & STATUS_LASER_ERROR) ? " LASER"      : "",
@@ -136,18 +137,18 @@ void SPS30Sensor::_applyAutoCleanInterval(int32_t wantSeconds) {
     }
 
     if (haveCurrent && current == (uint32_t)wantSeconds) {
-        Serial.printf("[SPS30] auto-clean interval already %lus — counter preserved\n",
+        Log.printf("[SPS30] auto-clean interval already %lus — counter preserved\n",
                       (unsigned long)current);
         return;
     }
 
     if (_sendCmdArg32(CMD_AUTOCLEAN_INTV, (uint32_t)wantSeconds)) {
         delay(20);
-        Serial.printf("[SPS30] auto-clean interval set to %lus (was %s)\n",
+        Log.printf("[SPS30] auto-clean interval set to %lus (was %s)\n",
                       (unsigned long)wantSeconds,
                       haveCurrent ? String((unsigned long)current).c_str() : "unknown");
     } else {
-        Serial.println("[SPS30] failed to write auto-clean interval");
+        Log.println("[SPS30] failed to write auto-clean interval");
     }
 }
 
@@ -167,7 +168,7 @@ bool SPS30Sensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "sps30");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, ADDR, this)) {
-        Serial.printf("[SPS30] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
+        Log.printf("[SPS30] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
 
@@ -188,7 +189,7 @@ bool SPS30Sensor::init(JsonObjectConst cfg) {
     // Auto-clean interval is configured in idle mode, before measurement starts.
     int32_t autoClean = cfg["auto_clean_interval_s"] | -1;
     if (autoClean > 0 && (autoClean < 10 || autoClean > 604800)) {
-        Serial.printf("[SPS30] auto_clean_interval_s %ld out of range (10..604800) — ignored\n",
+        Log.printf("[SPS30] auto_clean_interval_s %ld out of range (10..604800) — ignored\n",
                       (long)autoClean);
         autoClean = -1;
     }
@@ -196,7 +197,7 @@ bool SPS30Sensor::init(JsonObjectConst cfg) {
 
     // Start measurement in IEEE-754 float output format.
     if (!_sendCmdArg(CMD_START_MEASURE, ARG_FLOAT_FORMAT)) {
-        Serial.println("[SPS30] Not found / no ACK at 0x69");
+        Log.println("[SPS30] Not found / no ACK at 0x69");
         return false;
     }
 
@@ -211,9 +212,9 @@ bool SPS30Sensor::init(JsonObjectConst cfg) {
         delay(100);
         if (_sendCmd(CMD_START_FAN_CLEAN)) {
             _warmupUntilMs = millis() + FAN_CLEAN_MS + 8000;
-            Serial.println("[SPS30] fan cleaning started (boot)");
+            Log.println("[SPS30] fan cleaning started (boot)");
         } else {
-            Serial.println("[SPS30] fan clean command refused");
+            Log.println("[SPS30] fan clean command refused");
         }
     }
 
@@ -222,7 +223,7 @@ bool SPS30Sensor::init(JsonObjectConst cfg) {
     _nextStatusMs = millis() + _statusIntervalMs;
     _status       = STATUS_OK;
     _ready        = true;
-    Serial.println("[SPS30] Started — first reading in ~8s");
+    Log.println("[SPS30] Started — first reading in ~8s");
     return true;
 }
 

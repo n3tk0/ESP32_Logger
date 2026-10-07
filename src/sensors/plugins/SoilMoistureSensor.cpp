@@ -1,4 +1,5 @@
 #include "SoilMoistureSensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 // R28 / AUDIT 24.11: see ZMPT101BSensor.cpp — IDF 5.x renamed ADC_11db.
@@ -37,7 +38,7 @@ bool SoilMoistureSensor::init(JsonObjectConst cfg) {
     analogSetPinAttenuation(_pin, ADC_ATTEN_DB_12);
     pinMode(_pin, INPUT);
     _ready = true;
-    Serial.printf("[SoilMoisture] pin=%d dry=%d wet=%d samples=%d\n",
+    Log.printf("[SoilMoisture] pin=%d dry=%d wet=%d samples=%d\n",
                   _pin, _dryValue, _wetValue, _samples);
     return true;
 }

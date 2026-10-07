@@ -1,3 +1,4 @@
+#include "../core/LogRing.h"   // /api/log
 #include "ApiHandlers.h"
 #include "../managers/StorageManager.h"   // configFs(): settings live on LittleFS
 #include <ArduinoJson.h>
@@ -1051,6 +1052,22 @@ static void handleConfigPlatform(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 // GET /api/diag — FreeRTOS diagnostics: heap, queues, task stack HWMs, drops
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// GET /api/log — the serial log from the RTC ring (LogRing.h): the previous
+// boot's tail (a crash's last lines), then this boot's, as text/plain.
+// Sent straight from the ring in pieces, without a copy on the heap.
+// ---------------------------------------------------------------------------
+static void handleApiLog(AsyncWebServerRequest* req) {
+    const LogRingView v = logRingView();
+    AsyncWebServerResponse* res = req->beginResponse(
+        "text/plain; charset=utf-8", v.size,
+        [v](uint8_t* buf, size_t maxLen, size_t index) -> size_t {
+            return logRingRead(v, index, buf, maxLen);
+        });
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+}
+
 static void handleApiDiag(AsyncWebServerRequest* req) {
     JsonDocument doc;
 
@@ -1058,6 +1075,8 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     doc["free_heap"]     = (uint32_t)ESP.getFreeHeap();
     doc["min_free_heap"] = (uint32_t)ESP.getMinFreeHeap();
     doc["queue_drops"]   = (uint32_t)g_queueDrops;
+    doc["log_bytes"]     = (uint32_t)logRingView().size;
+    doc["export_skips"]  = g_exportSkips.load();
 
     // R19.A — heap sub-object (snapshot all values once for consistency)
     {
@@ -1159,6 +1178,7 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
         JsonObject c = doc["counters"].to<JsonObject>();
         c["queueDrops"]    = (uint32_t)g_queueDrops;
         c["ringPushDrops"] = g_ringPushDrops.load();
+        c["exportSkips"]   = g_exportSkips.load();
         c["resets"]        = (uint32_t)g_consecutiveResets;
     }
 
@@ -2013,6 +2033,7 @@ void registerApiRoutes(AsyncWebServer& server) {
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
     server.on("/api/sensors/read_now",  HTTP_GET,  handleApiSensorReadNow);
     server.on("/api/diag",              HTTP_GET,  handleApiDiag);
+    server.on("/api/log",               HTTP_GET,  handleApiLog);
     server.on("/api/backup",            HTTP_GET,  handleApiBackup);
     server.on("/api/config/platform",   HTTP_POST, handleConfigPlatform);
 #ifdef FEATURE_ESPNOW_INGEST

@@ -1,4 +1,5 @@
 #include "BME280Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../I2CBus.h"
 #include "../ReadingCache.h"             // ambient temperature reference
 #include "../../utils/Psychrometrics.h"  // dew point / RH re-expression
@@ -20,19 +21,19 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "bme280");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, _addr, this)) {
-        Serial.printf("[BME280] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
+        Log.printf("[BME280] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
         return false;
     }
 
     _ready = _bme.begin(_addr, _wire);
     if (!_ready) {
-        Serial.printf("[BME280] Not found at 0x%02X\n", _addr);
+        Log.printf("[BME280] Not found at 0x%02X\n", _addr);
         return false;
     }
 
     // BME280_Mini auto-detects chip type via chip ID register
     _isBMP280 = !_bme.isBME280();
-    Serial.printf("[BME280] chip_id=0x%02X → %s\n",
+    Log.printf("[BME280] chip_id=0x%02X → %s\n",
                   _bme.chipId(), _isBMP280 ? "BMP280" : "BME280");
 
     // Load calibration
@@ -47,7 +48,7 @@ bool BME280Sensor::init(JsonObjectConst cfg) {
     strlcpy(_ambientMetric, ambMetric, sizeof(_ambientMetric));
     _ambientMaxAgeMs = cfg["ambient_max_age_ms"] | 60000;
 
-    Serial.printf("[%s] ready at 0x%02X  cal_T(%.2f+%.2fx) cal_P(%.2f+%.2fx) ambient_ref=%s\n",
+    Log.printf("[%s] ready at 0x%02X  cal_T(%.2f+%.2fx) cal_P(%.2f+%.2fx) ambient_ref=%s\n",
                   getType(), _addr,
                   _calTemp.offset, _calTemp.scale,
                   _calPressure.offset, _calPressure.scale,
@@ -72,7 +73,7 @@ float BME280Sensor::_ambientTempC(float fallbackC) const {
     uint32_t ageMs = 0;
     if (!readingCache.get(_ambientSensor, _ambientMetric, refC, ageMs)) {
         if (!_ambientWarned) {
-            Serial.printf("[%s] ambient ref '%s/%s' not seen yet — using own temperature\n",
+            Log.printf("[%s] ambient ref '%s/%s' not seen yet — using own temperature\n",
                           getType(), _ambientSensor, _ambientMetric);
             _ambientWarned = true;
         }
@@ -80,7 +81,7 @@ float BME280Sensor::_ambientTempC(float fallbackC) const {
     }
     if (ageMs > _ambientMaxAgeMs) {
         if (!_ambientWarned) {
-            Serial.printf("[%s] ambient ref '%s/%s' stale (%lums) — using own temperature\n",
+            Log.printf("[%s] ambient ref '%s/%s' stale (%lums) — using own temperature\n",
                           getType(), _ambientSensor, _ambientMetric, (unsigned long)ageMs);
             _ambientWarned = true;
         }

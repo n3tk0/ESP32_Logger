@@ -64,6 +64,11 @@ public:
     void setSpoolFS(fs::FS* fs);
 
     int count() const { return _count; }
+
+    // True while an enabled exporter sends every reading (Webhook). Only then
+    // is a reading that missed exportQueue lost to an exporter; the periodic
+    // ones read the latest-value table, where the next reading replaces it.
+    bool anyStreaming() const { return _anyStreaming; }
     const char* nameAt(int i) const { return _exporters[i]->getName(); }
 
 private:
@@ -85,6 +90,7 @@ private:
     uint8_t      _selOf[MAX_EXPORTERS]           = {};   // i or DEF_SEL
     uint32_t     _nextDueMs[MAX_EXPORTERS]   = {};
     bool         _scheduled[MAX_EXPORTERS]   = {};
+    volatile bool _anyStreaming = false;
     uint32_t     _sentSeq[MAX_EXPORTERS]     = {};   // last table seq sent
 
     // ── Latest value per sensor+metric ─────────────────────────────────────

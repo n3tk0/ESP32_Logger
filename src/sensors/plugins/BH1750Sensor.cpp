@@ -1,4 +1,5 @@
 #include "BH1750Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
@@ -46,7 +47,7 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "bh1750");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, _addr, this)) {
-        Serial.printf("[BH1750] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
+        Log.printf("[BH1750] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
         return false;
     }
 
@@ -54,7 +55,7 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
     _calLux.load(cal, "lux");
 
     if (!_sendCmd(CMD_POWER_ON)) {
-        Serial.printf("[BH1750] Not found at 0x%02X\n", _addr);
+        Log.printf("[BH1750] Not found at 0x%02X\n", _addr);
         return false;
     }
     delay(10);
@@ -64,7 +65,7 @@ bool BH1750Sensor::init(JsonObjectConst cfg) {
     delay(180); // wait for first measurement (120ms for H mode, some margin)
 
     _ready = true;
-    Serial.printf("[BH1750] Ready at 0x%02X mode=%s\n", _addr, mode);
+    Log.printf("[BH1750] Ready at 0x%02X mode=%s\n", _addr, mode);
     return true;
 }
 

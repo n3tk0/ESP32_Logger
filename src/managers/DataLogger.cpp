@@ -1,4 +1,5 @@
 #include "DataLogger.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #if PLATFORM_LEGACY_BUILD
 
@@ -28,7 +29,7 @@ void flushLogBufferToFS() {
     // CRLF-terminated rows, the line ending this log has always had.
     constexpr size_t ROW_MAX = 128;
     std::unique_ptr<char[]> lines(new (std::nothrow) char[LOG_BATCH_SIZE * ROW_MAX]);
-    if (!lines) { Serial.println("ERR: datalog - out of memory"); return; }
+    if (!lines) { Log.println("ERR: datalog - out of memory"); return; }
     size_t len = 0;
     int n = 0;
     for (int i = 0; i < logBufferCount; i++) {
@@ -62,7 +63,7 @@ void flushLogBufferToFS() {
     } else {
         for (int i = written; i < logBufferCount; i++) logBuffer[i - written] = logBuffer[i];
         logBufferCount -= written;
-        Serial.println("ERR: datalog write failed — retaining remaining buffer for retry");
+        Log.println("ERR: datalog write failed — retaining remaining buffer for retry");
     }
     // backupBootCount() re-acquires fsMutex internally; release ours first so we
     // don't self-deadlock on the non-recursive mutex (H3 discipline).

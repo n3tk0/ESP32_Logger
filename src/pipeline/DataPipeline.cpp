@@ -1,4 +1,5 @@
 #include "DataPipeline.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <Arduino.h>
 
 // Global queue handles — initialised by TaskManager::init()
@@ -15,6 +16,7 @@ SemaphoreHandle_t rtcMutex      = nullptr;
 volatile uint32_t g_queueDrops = 0;
 // Ring push drop counter (incremented when webDataMutex times out)
 std::atomic<uint32_t> g_ringPushDrops{0};
+std::atomic<uint32_t> g_exportSkips{0};
 
 // Task heartbeat timestamps (C4)
 volatile uint32_t g_taskHeartbeat[TASK_COUNT] = {};
@@ -41,9 +43,9 @@ bool webRingBufInit() {
             bytes     = want;
             wantPsram = true;
         }
-        Serial.printf("[RingBuf] PSRAM free %u KB\n", (unsigned)(freePsram / 1024));
+        Log.printf("[RingBuf] PSRAM free %u KB\n", (unsigned)(freePsram / 1024));
     } else {
-        Serial.println("[RingBuf] PSRAM enabled in build but none reported — "
+        Log.println("[RingBuf] PSRAM enabled in build but none reported — "
                        "check board_build.arduino.memory_type (octal parts need qio_opi)");
     }
 #endif
@@ -55,15 +57,15 @@ bool webRingBufInit() {
         // Both the PSRAM attempt and begin()'s own internal fallback failed at
         // this size. Retry explicitly at the small budget: a 4 MB request
         // failing says nothing about whether 16 KB would.
-        Serial.println("[RingBuf] allocation failed — retrying at internal budget");
+        Log.println("[RingBuf] allocation failed — retrying at internal budget");
         capacity = WEB_RING_BYTES_INTERNAL / sizeof(SensorReading);
         if (!webRingBuf.begin(capacity, false)) {
-            Serial.println("[RingBuf] FAILED — /api/data will report no history");
+            Log.println("[RingBuf] FAILED — /api/data will report no history");
             return false;
         }
     }
 
-    Serial.printf("[RingBuf] %u entries (%u KB%s) in %s\n",
+    Log.printf("[RingBuf] %u entries (%u KB%s) in %s\n",
                   (unsigned)webRingBuf.capacity(),
                   (unsigned)(webRingBuf.bytes() / 1024),
                   RING_COMPACT ? ", compact" : "",

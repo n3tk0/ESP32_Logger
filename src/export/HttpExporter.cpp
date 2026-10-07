@@ -1,4 +1,5 @@
 #include "HttpExporter.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <new>            // std::nothrow
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -39,7 +40,7 @@ bool HttpExporter::init(JsonObjectConst cfg) {
             const char* k = kv.key().c_str();
             const char* v = kv.value().as<const char*>() ?: "";
             if (!_isValidHeaderName(k) || !_isValidHeaderValue(v)) {
-                Serial.printf("[HTTP] rejected header '%s': invalid name or CRLF in value\n", k);
+                Log.printf("[HTTP] rejected header '%s': invalid name or CRLF in value\n", k);
                 continue;
             }
             strncpy(_hdrKeys[_hdrCount], k, sizeof(_hdrKeys[0])-1);
@@ -50,7 +51,7 @@ bool HttpExporter::init(JsonObjectConst cfg) {
         }
     }
 
-    Serial.printf("[HTTP] url=%s method=%s\n", _url, _method);
+    Log.printf("[HTTP] url=%s method=%s\n", _url, _method);
     return true;
 }
 
@@ -128,14 +129,14 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
     if      (strcasecmp(_method, "PUT")   == 0) verb = "PUT";
     else if (strcasecmp(_method, "PATCH") == 0) verb = "PATCH";
     else if (_method[0] && strcasecmp(_method, "POST") != 0) {
-        Serial.printf("[HTTP] method '%s' not supported — sending POST\n", _method);
+        Log.printf("[HTTP] method '%s' not supported — sending POST\n", _method);
     }
     int code = http.sendRequest(verb, (uint8_t*)body, strlen(body));
     bool ok  = (code >= 200 && code < 300);
     if (!ok) {
-        Serial.printf("[HTTP] POST failed, code=%d\n", code);
+        Log.printf("[HTTP] POST failed, code=%d\n", code);
     } else {
-        Serial.printf("[HTTP] sent to %s\n", _url);
+        Log.printf("[HTTP] sent to %s\n", _url);
     }
     http.end();
     delete[] body;

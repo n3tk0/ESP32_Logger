@@ -1,4 +1,5 @@
 #include "KindlePkg.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #ifdef FEATURE_KINDLE_DASHBOARD
 
@@ -109,7 +110,7 @@ void kindlePkgBegin() {
     s_pkg.offer    = d["offer"] | false;
     strlcpy(s_pkg.ver, ver, sizeof(s_pkg.ver));
     strlcpy(s_pkg.md5, md5, sizeof(s_pkg.md5));
-    Serial.printf("[kindlepkg] package %s (%u bytes)%s\n", s_pkg.ver,
+    Log.printf("[kindlepkg] package %s (%u bytes)%s\n", s_pkg.ver,
                   (unsigned)s_pkg.size, s_pkg.offer ? ", offered" : "");
 }
 

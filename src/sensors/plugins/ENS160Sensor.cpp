@@ -1,4 +1,5 @@
 #include "ENS160Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
@@ -46,7 +47,7 @@ bool ENS160Sensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "ens160");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, _addr, this)) {
-        Serial.printf("[ENS160] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
+        Log.printf("[ENS160] I2C address 0x%02X already claimed on bus %u — refusing init\n", _addr, (unsigned)_bus);
         return false;
     }
 
@@ -56,12 +57,12 @@ bool ENS160Sensor::init(JsonObjectConst cfg) {
 
     // Set standard operating mode
     if (!_writeReg(REG_OPMODE, MODE_STANDARD)) {
-        Serial.printf("[ENS160] Not found at 0x%02X\n", _addr);
+        Log.printf("[ENS160] Not found at 0x%02X\n", _addr);
         return false;
     }
     delay(100);
     _ready = _waitReady(2000);
-    if (!_ready) Serial.println("[ENS160] Not ready after init");
+    if (!_ready) Log.println("[ENS160] Not ready after init");
     return _ready;
 }
 

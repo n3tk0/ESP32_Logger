@@ -1,4 +1,5 @@
 #include "VEML7700Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
@@ -71,7 +72,7 @@ bool VEML7700Sensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "veml7700");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, ADDR, this)) {
-        Serial.printf("[VEML7700] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
+        Log.printf("[VEML7700] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
 
@@ -82,14 +83,14 @@ bool VEML7700Sensor::init(JsonObjectConst cfg) {
     // ALS_CONF: bits[12:11]=gain, bits[9:6]=IT, bit[0]=SD(0=on)
     uint16_t conf = ((uint16_t)_gain << 11) | ((uint16_t)itBits << 6);
     if (!_writeReg(REG_CONF, conf)) {
-        Serial.println("[VEML7700] Init failed");
+        Log.println("[VEML7700] Init failed");
         return false;
     }
     delay(_intMs + 10);
 
     _resolution = _lookupResolution(_gain, effIntMs);
     _ready = true;
-    Serial.printf("[VEML7700] Ready gain=%d IT=%dms res=%.5f\n",
+    Log.printf("[VEML7700] Ready gain=%d IT=%dms res=%.5f\n",
                   _gain, effIntMs, _resolution);
     return true;
 }

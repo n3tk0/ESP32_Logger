@@ -1,4 +1,5 @@
 #include "WaterFlowSensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 // ---------------------------------------------------------------------------
@@ -22,7 +23,7 @@ bool WaterFlowSensor::init(JsonObjectConst cfg) {
     // For custom type (defaultPPL == 0), pulses_per_liter is mandatory.
     if (_pulsesPerLiter <= 0.0f) {
         if (_defaultPPL == 0.0f) {
-            Serial.printf("[%s] ERROR: 'pulses_per_liter' is required for custom "
+            Log.printf("[%s] ERROR: 'pulses_per_liter' is required for custom "
                           "water flow sensor (e.g. 450.0 for YF-S201-equivalent)\n",
                           getType());
             return false;
@@ -46,11 +47,11 @@ bool WaterFlowSensor::init(JsonObjectConst cfg) {
     _lastReadMs    = millis();
 
     if (!_isrPin.attach((uint8_t)_pin, GPIO_INTR_NEGEDGE, &WaterFlowSensor::_isr, this)) {
-        Serial.printf("[%s] ERROR: ISR attach failed on pin %d\n", getType(), _pin);
+        Log.printf("[%s] ERROR: ISR attach failed on pin %d\n", getType(), _pin);
         return false;
     }
 
-    Serial.printf("[%s] pin=%d ppl=%.1f cal=%.2f\n",
+    Log.printf("[%s] pin=%d ppl=%.1f cal=%.2f\n",
                   getType(), _pin, _pulsesPerLiter, _calibration);
     return true;
 }

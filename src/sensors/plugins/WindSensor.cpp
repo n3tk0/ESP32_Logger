@@ -1,4 +1,5 @@
 #include "WindSensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 
 void IRAM_ATTR WindSensor::_isr(void* arg) {
@@ -42,16 +43,16 @@ bool WindSensor::init(JsonObjectConst cfg) {
     if (!validateAttachPin(_pin, "wind", "pin")) return false;
     pinMode(_pin, INPUT_PULLUP);
     if (!_isrPin.attach((uint8_t)_pin, GPIO_INTR_NEGEDGE, &WindSensor::_isr, this)) {
-        Serial.printf("[Wind] ERROR: ISR attach failed on pin %d\n", _pin);
+        Log.printf("[Wind] ERROR: ISR attach failed on pin %d\n", _pin);
         return false;
     }
 
     if (_dirPin >= 0) {
         pinMode(_dirPin, INPUT);
-        Serial.printf("[Wind] speed pin=%d  dir pin=%d  dir_range=[%d,%d]\n",
+        Log.printf("[Wind] speed pin=%d  dir pin=%d  dir_range=[%d,%d]\n",
                       _pin, _dirPin, _dirMinVal, _dirMaxVal);
     } else {
-        Serial.printf("[Wind] speed pin=%d ppr=%.1f mpr=%.2f window=%ums poll=%ums\n",
+        Log.printf("[Wind] speed pin=%d ppr=%.1f mpr=%.2f window=%ums poll=%ums\n",
                       _pin, _pulsesPerRev, _metersPerRev,
                       _sampleWindowMs, _pollIntervalMs);
     }

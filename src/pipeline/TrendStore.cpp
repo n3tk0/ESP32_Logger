@@ -1,4 +1,5 @@
 #include "TrendStore.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 #ifdef FEATURE_KINDLE_DASHBOARD
 
@@ -32,7 +33,7 @@ static uint32_t s_retryAtMs = 0;
 /// once because there are five of them and a path that forgot the markDirty()
 /// would leave the hour on the floor without anything looking wrong.
 static bool trendSaveFailed(const char* why) {
-    Serial.printf("[trend] %s — retrying in 60 s\n", why);
+    Log.printf("[trend] %s — retrying in 60 s\n", why);
     trendRing.markDirty();
     s_retryAtMs = millis() + 60000u;
     if (s_retryAtMs == 0) s_retryAtMs = 1;      // 0 means "no backoff"
@@ -160,7 +161,7 @@ void trendStoreLoad() {
     // mutex in between would leave the removes below outside it.
     MutexGuard guard(fsMutex, pdMS_TO_TICKS(2000));
     if (fsMutex && !guard.isLocked()) {
-        Serial.println("[trend] fs busy: empty");
+        Log.println("[trend] fs busy: empty");
         return;
     }
 
@@ -175,7 +176,7 @@ void trendStoreLoad() {
 
     File f = LittleFS.open(TREND_FILE, "r");
     if (!f) {
-        Serial.println("[trend] open failed");
+        Log.println("[trend] open failed");
         return;
     }
 
@@ -184,7 +185,7 @@ void trendStoreLoad() {
         // A layout change between builds, not corruption. Discard rather than
         // reinterpret: reading one struct as another produces series with
         // plausible names and nonsense temperatures.
-        Serial.printf("[trend] %u B, want %u: dropped\n", (unsigned)f.size(), (unsigned)need);
+        Log.printf("[trend] %u B, want %u: dropped\n", (unsigned)f.size(), (unsigned)need);
         f.close();
         LittleFS.remove(TREND_FILE);
         return;
@@ -198,7 +199,7 @@ void trendStoreLoad() {
     f.close();
 
     if (got != need) {
-        Serial.println("[trend] short read: dropped");
+        Log.println("[trend] short read: dropped");
         LittleFS.remove(TREND_FILE);
         return;
     }
@@ -207,12 +208,12 @@ void trendStoreLoad() {
         // The CRC is the interesting case: the file was the right length and
         // still did not survive the last power cut. Saying so is the only way
         // anyone learns that this happened rather than that the chart is new.
-        Serial.println("[trend] bad snapshot: dropped");
+        Log.println("[trend] bad snapshot: dropped");
         LittleFS.remove(TREND_FILE);
         return;
     }
 
-    Serial.println("[trend] restored");
+    Log.println("[trend] restored");
 }
 
 #endif  // FEATURE_KINDLE_DASHBOARD

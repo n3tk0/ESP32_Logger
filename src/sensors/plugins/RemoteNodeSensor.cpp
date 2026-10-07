@@ -1,4 +1,5 @@
 #include "RemoteNodeSensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 
 // See TrendRing.cpp: the guard below needs setup.h, which ISensor.h's include
 // chain does not reach.
@@ -56,7 +57,7 @@ bool RemoteNodeSensor::init(JsonObjectConst config) {
     }
 
     if (_node[0] == '\0') {
-        Serial.printf("[%s.remote] init refused: no node id\n", getId());
+        Log.printf("[%s.remote] init refused: no node id\n", getId());
         return false;
     }
 
@@ -70,7 +71,7 @@ bool RemoteNodeSensor::init(JsonObjectConst config) {
     // Nothing to probe — there is no bus and no device. Success here means
     // "configured", not "the node is alive"; liveness shows up as reading
     // quality once (or if) the node starts posting.
-    Serial.printf("[%s.remote] listening for node \"%s\" (stale after %lu ms)\n",
+    Log.printf("[%s.remote] listening for node \"%s\" (stale after %lu ms)\n",
                   getId(), _node, (unsigned long)_staleAfterMs);
     return true;
 }

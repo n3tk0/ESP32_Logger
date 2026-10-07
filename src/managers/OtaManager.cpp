@@ -1,4 +1,5 @@
 #include "OtaManager.h"
+#include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../core/Globals.h"
 #include "../core/EventLog.h"       // eventLogPrintf
 #include "../setup.h"               // OTA_CONFIRM_TIMEOUT_MS
@@ -73,10 +74,10 @@ void OtaManager::boot() {
             s_rollbackCapable  = true;
             s_pendingDeadline  = millis() + s_autoConfirmMs;
             if (s_requireManualConfirm) {
-                Serial.printf("[OTA] Firmware pending verify on %s — manual confirm required "
+                Log.printf("[OTA] Firmware pending verify on %s — manual confirm required "
                               "(POST /api/ota/confirm)\n", s_runningLabel);
             } else {
-                Serial.printf("[OTA] Firmware pending verify on %s — confirming in %us\n",
+                Log.printf("[OTA] Firmware pending verify on %s — confirming in %us\n",
                               s_runningLabel, (unsigned)(s_autoConfirmMs / 1000));
             }
             _logOtaEvent("PENDING_VERIFY");
@@ -112,7 +113,7 @@ void OtaManager::tick(uint32_t nowMs) {
     // ≤ 0 ⇒ deadline reached/passed).
     int32_t remaining = (int32_t)(s_pendingDeadline - nowMs);
     if (remaining <= 0) {
-        Serial.printf("[OTA] Stability window elapsed (%us) — confirming\n",
+        Log.printf("[OTA] Stability window elapsed (%us) — confirming\n",
                       (unsigned)(s_autoConfirmMs / 1000));
         confirm();
     }
@@ -158,12 +159,12 @@ bool OtaManager::confirm() {
         s_confirmed       = true;
         s_pending         = false;
         s_pendingDeadline = 0;
-        Serial.printf("[OTA] Firmware confirmed on %s\n", s_runningLabel);
+        Log.printf("[OTA] Firmware confirmed on %s\n", s_runningLabel);
         _logOtaEvent("CONFIRMED");
         return true;
     }
 
-    Serial.printf("[OTA] Confirm failed: %s\n", esp_err_to_name(err));
+    Log.printf("[OTA] Confirm failed: %s\n", esp_err_to_name(err));
     return false;
 }
 
@@ -172,11 +173,11 @@ bool OtaManager::rollback() {
     // Verify a previous partition exists before attempting rollback
     const esp_partition_t* prev = esp_ota_get_next_update_partition(nullptr);
     if (!prev) {
-        Serial.println("[OTA] Rollback impossible — no alternate partition");
+        Log.println("[OTA] Rollback impossible — no alternate partition");
         return false;
     }
 
-    Serial.printf("[OTA] Rolling back from %s to %s\n",
+    Log.printf("[OTA] Rolling back from %s to %s\n",
                   s_runningLabel, s_previousLabel);
     _logOtaEvent("ROLLBACK");
 
@@ -192,7 +193,7 @@ bool OtaManager::rollback() {
 
     esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
     // If we get here, rollback failed (reboot didn't happen)
-    Serial.printf("[OTA] Rollback failed: %s\n", esp_err_to_name(err));
+    Log.printf("[OTA] Rollback failed: %s\n", esp_err_to_name(err));
     return false;
 }
 

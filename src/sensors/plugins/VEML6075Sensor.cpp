@@ -1,4 +1,5 @@
 #include "VEML6075Sensor.h"
+#include "../../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "../I2CBus.h"
 #include "../../core/BoardProfiles.h"   // R11: validateAttachPin
 #include "../SensorManager.h"        // R17: _claim/_release helpers
@@ -36,7 +37,7 @@ bool VEML6075Sensor::init(JsonObjectConst cfg) {
     _wire = I2CBus::acquire(_bus, sda, scl, "veml6075");
     if (!_wire) return false;
     if (!_claimI2cAddress(_bus, ADDR, this)) {
-        Serial.printf("[VEML6075] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
+        Log.printf("[VEML6075] I2C address 0x%02X already claimed on bus %u — refusing init\n", ADDR, (unsigned)_bus);
         return false;
     }
 
@@ -49,7 +50,7 @@ bool VEML6075Sensor::init(JsonObjectConst cfg) {
     uint16_t devId = 0;
     _readReg16(0x0C, devId);
     if ((devId & 0xFF) != 0x26) {
-        Serial.printf("[VEML6075] Unexpected device ID 0x%04X (expected 0x0026)\n", devId);
+        Log.printf("[VEML6075] Unexpected device ID 0x%04X (expected 0x0026)\n", devId);
         // Continue anyway — some modules don't expose ID
     }
 
@@ -57,12 +58,12 @@ bool VEML6075Sensor::init(JsonObjectConst cfg) {
     // Bits [6:4]=UV_IT, bit[3]=HD, bit[2]=UV_TRIG, bit[1]=AF, bit[0]=SD
     uint16_t conf = (0b010 << 4); // 100ms integration, power on
     if (!_writeReg16(REG_CONF, conf)) {
-        Serial.println("[VEML6075] Init failed");
+        Log.println("[VEML6075] Init failed");
         return false;
     }
     delay(110); // wait one integration cycle
     _ready = true;
-    Serial.println("[VEML6075] Ready");
+    Log.println("[VEML6075] Ready");
     return true;
 }
 
