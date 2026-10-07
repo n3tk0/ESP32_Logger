@@ -2998,7 +2998,7 @@ zones_forget() {
             unset "Z_${z}_${s}" 2>/dev/null
         done
     done
-    unset Z_GROUP_OUT Z_GROUP_IN Z_GROUP_IN_ADVW Z_SUB Z_SUB_ADVW GRID_ZONES GRID_ROWS IN_ZONES 2>/dev/null
+    unset Z_GROUP_OUT Z_GROUP_IN Z_SUB Z_SUB_ADVW GRID_ZONES GRID_ROWS IN_ZONES 2>/dev/null
     # The forecast is a section that can be switched off, so its heading key
     # has to be able to go away too — draw_forecast_body draws the whole block
     # only when FC_SUMMARY is set.
@@ -3513,10 +3513,10 @@ zone_done() { ZHEAVY=""; ZINV=""; DRAW_INV=""; }
 # An indoor reading's caption, over its value at $2 — and the place's plate
 # first, from the caption's top to the value's foot, when it asked for one.
 in_caption() {
-    # $1=x $2=value top $3=cell width $4=value size $5=caption [$6=caption x]
+    # $1=x $2=value top $3=cell width $4=value size $5=caption
     local ls="${GRID_LAB_SZ:-10}"
     zone_plate "$(( $1 - 6 ))" "$(( $2 - ls - 10 ))" "$3" "$(( ls + 4 + $4 + 12 ))"
-    draw_text_reg "${6:-$1}" "$(( $2 - ls - 4 ))" "$ls" "${LAB_INK:-GRAY7}" "$5"
+    draw_text_reg "$1" "$(( $2 - ls - 4 ))" "$ls" "${LAB_INK:-GRAY7}" "$5"
 }
 
 draw_hline() {
@@ -4355,10 +4355,7 @@ draw_zones() {
            [ "${WALL:-0}" != "1" ]; then
             draw_hline "$rx" "${IN_RULE_Y:-126}" "$rw" "GRAYD"
         fi
-        # Centred over the column on the wall page, as everything in it is.
-        CENTRE_X="$rx"
-        [ "${WALL:-0}" = "1" ] && centre_in "$rx" "$rw" "$(( lab_sz * ${Z_GROUP_IN_ADVW:-0} * $(cap_pct) / 100000 ))"
-        draw_text_reg "$CENTRE_X" "${IN_LAB_Y:-134}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_IN"
+        draw_text_reg "$rx" "${IN_LAB_Y:-134}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_IN"
 
         # The first field gets more of the row, not an equal share: it is set
         # larger, so equal columns crowd it against its neighbour while leaving
@@ -4423,12 +4420,7 @@ draw_zones() {
             elif [ "$vcol" = "1" ]; then
                 cx="$rx"; vsz="$small"
                 if [ "$i" = "1" ]; then y="$small_y"; else y="$low_y"; fi
-                CENTRE_X="$rx"
-                if [ "${WALL:-0}" = "1" ]; then
-                    eval "ladv=\${Z_${z}_LADVW:-0}"
-                    centre_in "$rx" "$rw" "$(( ${GRID_LAB_SZ:-10} * ladv * $(cap_pct) / 100000 ))"
-                fi
-                in_caption "$cx" "$y" "$rw" "$vsz" "$lab" "$CENTRE_X"
+                in_caption "$cx" "$y" "$rw" "$vsz" "$lab"
             elif [ "$col" = "1" ]; then
                 cx=$(( rx + w1 )); vsz="$small"
                 if [ "$i" = "1" ]; then y="$small_y"; else y="$low_y"; fi
@@ -4439,13 +4431,6 @@ draw_zones() {
             else
                 cx=$(( rx + w1 + (i - 1) * cw )); vsz="$small"; y="$small_y"
                 in_caption "$cx" "$y" "$cw" "$vsz" "$lab"
-            fi
-            # The wall page's column centres each value under its caption.
-            if [ "$vcol" = "1" ] && [ "${WALL:-0}" = "1" ] && [ -n "$val" ] &&
-               [ "$vadv" -gt 0 ] 2>/dev/null; then
-                field_w "$vsz" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$bold"
-                centre_in "$rx" "$rw" "$FIELD_W"
-                cx="$CENTRE_X"
             fi
             draw_field "$cx" "$y" "$vsz" "$bold" "$val" "$unit" "$arrow" \
                        "$vadv" "$uadv" "$ink"
@@ -4930,6 +4915,14 @@ draw_week() {
             fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
             draw_text_reg_inv "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "$wk_name"
             draw_text_reg_inv "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "$wk_day"
+            # FBInk's box round the date is taller than the cell leaves it
+            # (the face's line gap, which the span does not count), so its
+            # black ran past the plate's foot: a narrower step under today.
+            # The white under the cell goes back, down to the footer, whose
+            # rule and text are drawn after this.
+            wk_under=$(( ${FOOT_Y:-0} - WK_Y - WK_CELL_H ))
+            [ "${LAND:-0}" != "1" ] && [ "$wk_under" -gt 0 ] && \
+                fill_rect "$wk_x" "$(( WK_Y + WK_CELL_H ))" "$WK_CELL_W" "$wk_under" WHITE
         elif [ "$i" = "$WK_TODAY" ]; then
             # Minimal: today's name black, its date bold, a bar under it.
             fill_rect "$wk_x" "$(( WK_Y + WK_CELL_H - WK_MARK_T ))" \

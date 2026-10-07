@@ -953,6 +953,21 @@ wk_fixture() {
     unset WK_FC WK_STYLE RULE_PX RULE_INK RULE_SOFT RULE_STYLE
 }
 
+# TODAY'S BLACK STAYS IN ITS CELL: FBInk's box round the date runs past the
+# plate's foot on the panel, so the white under the cell is put back, as wide
+# as the cell and down to the footer, after the date is drawn.
+( wk_fixture
+  : > "$FBINK_LOG"; draw_week
+  tx=$(( WK_X + 2 * WK_CELL_W ))
+  bl=$(grep -n -e "top=${WK_Y},left=${tx},width=${WK_CELL_W},height=${WK_CELL_H}" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  dl=$(grep -n -e "--${T}12${T}" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  wl=$(grep -n -e "top=$(( WK_Y + WK_CELL_H )),left=${tx},width=${WK_CELL_W},height=$(( FOOT_Y - WK_Y - WK_CELL_H ))" "$FBINK_LOG" | head -1 | cut -d: -f1)
+  [ -n "$bl" ] && [ -n "$dl" ] && [ -n "$wl" ] && [ "$bl" -lt "$dl" ] && [ "$dl" -lt "$wl" ] || \
+      { echo "plate $bl date $dl white $wl" >&2; cat "$FBINK_LOG" >&2; exit 1; }
+  sed -n "${wl}p" "$FBINK_LOG" | grep -q WHITE || exit 2
+  exit 0 )
+check "$?" "today's black plate has no step under it: the white below the cell is put back"
+
 # Outlined: no grey cells, a line round each in the rule's pen, today still
 # knocked out of black.
 ( wk_fixture; WK_STYLE=1 RULE_INK=GRAY7
@@ -1539,8 +1554,9 @@ check "$?" "the wall page draws hairlines between its outdoor places, the desk p
   exit 0 )
 check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind it, on its plate"
 
-# CENTRED ON THE WALL PAGE: a grid cell's caption and value in the cell, the
-# indoor heading, captions and values in their column.
+# CENTRED ON THE WALL PAGE: a grid cell's caption and value in the cell. The
+# indoor column stays at its left edge, heading, captions and values, as
+# Petko asked after seeing it on the panel.
 ( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
   load_kv "$DASH_TMP/data.txt" PAYLOAD
   ly_load "$WORK/ly.txt"
@@ -1549,22 +1565,22 @@ check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind
   first=$(echo $GRID_ZONES | cut -d' ' -f1)
   eval "Z_${first}_LADVW=2000; Z_${first}_ARROW=; lab=\$Z_${first}_LABEL"
   set -- $LY_GRID_ROWS; gcw=$(( COL_L_W / $1 ))
-  Z_GROUP_IN_ADVW=3000
   reset_log
   draw_zones >/dev/null 2>&1
   lw=$(( GRID_LAB_SZ * 2000 * 115 / 100000 ))
   lx=$(( COL_L_X + (gcw - lw) / 2 ))
   grep -e "--${T}${lab}" "$FBINK_LOG" | grep -q "left=${lx}," || \
       { grep -e "${lab}" "$FBINK_LOG" >&2; echo "want $lx" >&2; exit 1; }
-  hx=$(( COL_R_X + (COL_R_W - GROUP_LAB_SZ * 3000 * 115 / 100000) / 2 ))
-  grep -e "--${T}${Z_GROUP_IN}${T}" "$FBINK_LOG" | grep -q "left=${hx}," || exit 2
-  # The indoor values: none at the column's left edge any more.
+  grep -e "--${T}${Z_GROUP_IN}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," || exit 2
+  # The indoor values and captions (the first has none): at the left edge.
+  n=0
   for z in $IN_ZONES; do
-    eval "v=\$Z_${z}_VALUE"
-    grep -e "--${T}${v}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," && { echo "$z at the edge" >&2; exit 3; }
+    eval "v=\$Z_${z}_VALUE; l=\$Z_${z}_LABEL"; n=$((n + 1))
+    grep -e "--${T}${v}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," || { echo "$z not at the edge" >&2; exit 3; }
+    [ "$n" = 1 ] || [ -z "$l" ] || grep -e "--${T}${l}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," || { echo "$z caption not at the edge" >&2; exit 4; }
   done
   exit 0 )
-check "$?" "the wall page centres its grid cells and its indoor column"
+check "$?" "the wall page centres its grid cells, and keeps the indoor column at its left edge"
 
 # THE READER'S OWN WIFI on the wall page's footer: five bars, as full as the
 # signal /proc/net/wireless gives, and wifid's name for the network. Not on

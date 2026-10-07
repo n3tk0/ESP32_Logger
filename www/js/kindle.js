@@ -340,8 +340,9 @@ function kdT(x, y, size, text, o) {
   o = o || {};
   return "<i style='left:" + x + "px;top:" + y + "px;font-size:" + size + "px;color:" +
     (kdPvInvOn ? "#ffffff" : (o.ink || "#111111")) +
-    ";font-weight:" + (o.heavy ? 900 : (o.bold ? 600 : 400)) +
-    (o.heavy ? ";text-shadow:.025em 0 0 currentColor,-.025em 0 0 currentColor" : "") +
+    // Extra bold is drawn once on a black plate, as the panel draws it.
+    ";font-weight:" + (o.heavy && !kdPvInvOn ? 900 : (o.bold || o.heavy ? 600 : 400)) +
+    (o.heavy && !kdPvInvOn ? ";text-shadow:.025em 0 0 currentColor,-.025em 0 0 currentColor" : "") +
     (o.ls ? ";letter-spacing:" + o.ls + "px" : "") + "'>" + kdEsc(text) + "</i>";
 }
 // A place's black plate, when it asked to be white on black: zone_plate()
@@ -1247,10 +1248,8 @@ function kdRenderPreview() {
   var ilive = L.inside, IX = L.inX, IW = L.inW;
   if (ilive.length) {
     if ((L.clock || L.land) && !L.wall) h += kdRl(IX, L.inRuleY, IW, 1, true);
-    var ghd = kdGroups["in"] || kdGroupPh["in"];
-    // Centred over the column on the wall page, as everything in it is.
-    h += kdT(L.wall ? IX + Math.max(0, kdQ(IW - kdTw(ghd, L.labSz), 2)) : IX, L.inLabY,
-             L.labSz, ghd, { ink:capInk, bold:capB });
+    h += kdT(IX, L.inLabY, L.labSz, kdGroups["in"] || kdGroupPh["in"],
+             { ink:capInk, bold:capB });
     // The first field's share is what it needs to be set larger, not a
     // fixed fraction; or it has a line of its own and the others share the
     // one under it.
@@ -1266,9 +1265,8 @@ function kdRenderPreview() {
       x = big || L.inVcol ? IX : (L.inCol ? IX + w1 : IX + w1 + (i - 1) * cw2);
       v = kdPvValue(z);
       var px = x;
-      // Alone, it stands in the middle of the column; on the wall page every
-      // one does, under its caption, centred on its own.
-      if (ilive.length === 1 || (L.wall && L.inVcol)) {
+      // Alone, it stands in the middle of the column.
+      if (ilive.length === 1) {
         var fw = kdTw(v, ivs) + kdTw(kdPvUnit(z), Math.round(ivs * (kdPvUnit(z) === "°" ? 0.34 : 0.42)));
         if (fw < IW) x = IX + Math.floor((IW - fw) / 2);
       }
@@ -1279,9 +1277,8 @@ function kdRenderPreview() {
                      L.inVcol || (big && L.inStack) || ilive.length === 1 ? IW
                        : (big ? w1 : (L.inCol ? IW - w1 : cw2)),
                      iy + ivs + 6 - ptop);
-      var cap = kdPvCaption(z);
-      if (!big) h += kdT(L.wall && L.inVcol ? IX + Math.max(0, kdQ(IW - kdTw(cap, L.labSz), 2)) : px,
-                         iy - L.labSz - 4, L.labSz, cap, { ink:capInk, bold:capB });
+      if (!big) h += kdT(px, iy - L.labSz - 4, L.labSz, kdPvCaption(z),
+                         { ink:capInk, bold:capB });
       h += kdT(x, iy, ivs, v,
                { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0010), ink:kdPvInk(z.ink),
                  heavy:!!(z.flags & kdFlags.heavy) });

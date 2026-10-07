@@ -1077,7 +1077,10 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     if (!zs && kdChartWantsFine(st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn))
         kdChartUseFine(now, pick, st->ctx.tOut, st->ctx.tIn, st->ctx.haveOut, st->ctx.haveIn);
     st->ctx.lineOnly = line;
-    st->ctx.lineInv  = line && queryArg(req, "inv");
+    {   // ?inv=1 (not 0): the same line for a black plate.
+        const String* inv = queryArg(req, "inv");
+        st->ctx.lineInv = line && inv && inv->toInt() != 0;
+    }
     st->ctx.init(W, H);
     st->begin();
 
@@ -1567,11 +1570,6 @@ static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
     // the panel has no CSS. See kdShellVarUpper().
     kdShellVarUpper(s, "Z_GROUP_OUT", kdGroupOutLabel(zones));
     kdShellVarUpper(s, "Z_GROUP_IN",  kdGroupInLabel(zones));
-    {   // as printed, for the wall page, which centres it over its column
-        char lup[48];
-        kdUpperUtf8(lup, sizeof(lup), kdGroupInLabel(zones));
-        kdShellUint(s, "Z_GROUP_IN_ADVW", kdAdvanceMille(lup));
-    }
 
     kdShellVar(s, "Z_SUB", rd.sub);
     // Its width, for centring it under a headline with nothing beside it.
@@ -2834,7 +2832,7 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
     if (f.inValSz1) {
         uint8_t used[KZ_INDOOR_COUNT];
         const int n = kdIndoorUsed(zones, visible, used);
-        kdWallAt(p, "lab ctr", f.inX, f.inLabY, f.inW);
+        kdWallAt(p, "lab", f.inX, f.inLabY, f.inW);
         appendEscaped(p, kdGroupInLabel(zones));
         p += F("</div>");
         for (int i = 0; i < n && i < 3; i++) {
@@ -2848,11 +2846,11 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
                 kdWallPlate(p, f.inX - 6, top, f.inW, y + vsz + 6 - top);
             }
             if (i) {
-                kdWallAt(p, "lab ctr", f.inX, y - f.labSz - 4, f.inW);
+                kdWallAt(p, "lab", f.inX, y - f.labSz - 4, f.inW);
                 appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
                 p += F("</div>");
             }
-            kdWallAt(p, "cv ctr", f.inX, y, f.inW);
+            kdWallAt(p, "cv", f.inX, y, f.inW);
             const char* cls = i == 0 ? "iv iv-1" : "iv";
             appendValue(p, r, sl, cls);
             p += F("</div>");
@@ -2893,7 +2891,7 @@ static void kdWallCss(String& p, const KindleConfig& skin, const KdFlow& f) {
     p += F(".wa{position:absolute;white-space:nowrap;overflow:hidden}"
            ".wl .lab,.wl .head,.wl .sub,.wl .cv,.wfc{line-height:1;margin:0}"
            ".wl .lab,.wl .sub,.wl .slash{color:#000}.lu{text-transform:none}"
-           ".wl .grid{margin-top:0}.wl .grid td{height:auto;vertical-align:top;text-align:center}"
+           ".wl .grid{margin-top:0}.wl .grid td{height:auto;vertical-align:top;text-align:center;padding:0}"
            ".wl .v1,.wl .v2,.wl .gv,.wl .iv{font-weight:700}"
            ".v2{color:#000}.ink-d{color:#444}.ink-m{color:#777}.ink-l{color:#aaa}"
            ".wa.wr{height:0;overflow:visible}.wa.wv{width:0;overflow:visible}"
@@ -3540,13 +3538,22 @@ void kindleTrackTrends(bool load) {
     kdSkinClamp(skin);
     KdChartPick pick;
     kdChartPick(skin, pick);
-    for (int s = 0; s < 2; s++) if (pick.on[s]) kdWant(w, pick.id[s], pick.metric[s]);
+    // The desk chart's two lines first, but only where a desk chart can be
+    // shown: with both pages on the wall, upright, they would take two of the
+    // four from the places ticked for a line.
+    const bool deskChart = (skin.showFlags & KSHOW_CHART) &&
+        (skin.pageStyle != KPAGE_WALL || skin.webStyle != KPAGE_WALL ||
+         kdRotLandscape(skin.rotation) || kdRotLandscape(kdPageRot(skin)));
+    if (deskChart)
+        for (int s = 0; s < 2; s++) if (pick.on[s]) kdWant(w, pick.id[s], pick.metric[s]);
     kdWant(w, outdoorSensorId(), "temperature");
     if (kdSlots().z[KZ_HERO].used()) kdWant(w, kdSlots().z[KZ_HERO].sensorId, kdSlots().z[KZ_HERO].metric);
     for (const KindleSlot& sl : kdSlots().z)
         if (sl.used() && ((sl.flags & KSLOTF_LINE) ||
                           ((sl.flags & KSLOTF_TREND) && !strcmp(sl.metric, "pressure"))))
             kdWant(w, sl.sensorId, sl.metric);
+    if (!deskChart)
+        for (int s = 0; s < 2; s++) if (pick.on[s]) kdWant(w, pick.id[s], pick.metric[s]);
     kdWant(w, outdoorSensorId(), "pressure");
     kdWant(w, outdoorSensorId(), "humidity");
     trendRing.keepOnly(w.id, w.m, w.n);
