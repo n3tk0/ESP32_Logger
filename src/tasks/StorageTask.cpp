@@ -6,6 +6,7 @@
 #include "../storage/Datalog.h"
 #include "../core/Globals.h"   // bootCount, littleFsAvailable
 #include "../utils/MutexGuard.h"
+#include "../core/HeapWatch.h"   // dataLost
 #include <LittleFS.h>
 #include <string.h>
 
@@ -50,12 +51,12 @@ struct Batch {
             MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
             if (fsMutex && !g.isLocked()) {
                 Serial.printf("[StorageTask] %d row(s) LOST (fsMutex timeout)\n", rows);
-                g_queueDrops += rows;
+                dataLost("datalog fsMutex timeout", (uint32_t)rows);
             } else {
                 int w = datalogAppend(*fs, hdr, buf, rows, epoch);
                 if (w < rows) {
                     Serial.printf("[StorageTask] %d of %d row(s) LOST\n", rows - (w > 0 ? w : 0), rows);
-                    g_queueDrops += rows - (w > 0 ? w : 0);
+                    dataLost("datalog write", (uint32_t)(rows - (w > 0 ? w : 0)));
                 }
                 if (littleFsAvailable) datalogColsSaveIfLearned(LittleFS);
             }
@@ -68,7 +69,7 @@ struct Batch {
                         ? datalogAppend(*mirror, hdr, buf, rows, epoch) : -1;
             if (w < rows) {
                 Serial.printf("[StorageTask] mirror: %d of %d row(s) LOST\n", rows - (w > 0 ? w : 0), rows);
-                g_queueDrops += rows - (w > 0 ? w : 0);
+                dataLost("datalog mirror write", (uint32_t)(rows - (w > 0 ? w : 0)));
             }
         }
         len = 0; rows = 0; buf[0] = '\0';
@@ -83,7 +84,7 @@ struct Batch {
         uint32_t rev = 0;
         if (datalogHeader(tmpHdr, HDR_BYTES, &rev) < 0) {
             Serial.println("[StorageTask] row dropped - header did not fit");
-            g_queueDrops++;
+            dataLost("datalog header too long");
             return;
         }
         if (wantRev && rev != wantRev) return;
@@ -94,7 +95,7 @@ struct Batch {
         const int n = dlFormatRow(row, ROW_BYTES, datalogLayout(), r, vals, nVals);
         if (n < 0) {
             Serial.println("[StorageTask] row dropped - did not fit");
-            g_queueDrops++;
+            dataLost("datalog row too long");
             return;
         }
         if (len + n + 3 > PEND_BYTES) flush();

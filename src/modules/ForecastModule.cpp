@@ -12,6 +12,7 @@
 #include "../core/Globals.h"        // config.kindle: whether the week strip wants the days
 #include "../web/DashboardStrings.h"
 #include "../web/KindleDashboard.h"   // kdPx(): the glyphs scale with the page
+#include "../core/HeapWatch.h"         // heapActivityBegin/End
 
 ForecastModule forecastModule;
 
@@ -323,7 +324,9 @@ void ForecastModule::tick(uint32_t nowMs) {
     _fetching = true;
     _refreshRequested = false;
 
+    heapActivityBegin(HA_FORECAST, "fetch");
     const bool ok = _fetch();
+    heapActivityEnd(HA_FORECAST);
     _fetching = false;
     if (ok) {
         _failures = 0;

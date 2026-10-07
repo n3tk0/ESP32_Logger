@@ -6,6 +6,7 @@
 #include <string.h>
 #include <time.h>
 #include "../utils/JsonIO.h"
+#include "../core/HeapWatch.h"   // HeapActivity
 
 ExportManager exportManager;
 
@@ -213,6 +214,7 @@ void ExportManager::ingest(const SensorReading& r) {
         IExporter* exp = _exporters[i];
         if (!exp->isEnabled() || !exp->isStreaming()) continue;
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
+        HeapActivity ha(HA_EXPORT, exp->getName());
         exp->send(&r, 1);
     }
 }
@@ -267,6 +269,7 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
             vTaskDelay(pdMS_TO_TICKS(delayMs));
             g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         }
+        HeapActivity ha(HA_EXPORT, exp->getName());
         if (exp->send(r, n)) return true;
         Serial.printf("[ExportManager] '%s' retry %d/%d\n",
                       exp->getName(), attempt + 1, maxRetries);
@@ -393,6 +396,7 @@ bool ExportManager::_drainSpool(IExporter* exp) {
         // one pass, each as slow as the network is, and the watchdog is
         // counting.
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
+        HeapActivity ha(HA_EXPORT, exp->getName());
         if (!exp->send(batch, count)) { allOk = false; break; }
     }
     f.close();
