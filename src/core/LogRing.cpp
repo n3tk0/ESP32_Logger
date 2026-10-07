@@ -7,7 +7,9 @@
 
 namespace {
 
-constexpr uint32_t MAGIC = 0x4C4F4731;   // "LOG1"; another size is another layout
+// "LG" plus the sizes: a build with other sizes has another layout, and must
+// not read this one's bytes as its own.
+constexpr uint32_t MAGIC = 0x4C470000u ^ ((uint32_t)LOG_RING_BYTES << 4) ^ (uint32_t)LOG_RING_PREV;
 
 struct RtcLog {
     uint32_t magic;

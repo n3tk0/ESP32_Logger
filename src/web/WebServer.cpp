@@ -2643,7 +2643,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                     // between "someone else is flashing" and "out of memory".
                     const bool wasBusy = Update.isRunning();
                     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-                        Update.printError(Serial);
+                        Update.printError(Log);
                         ctx->rejected    = true;
                         ctx->beginFailed = true;   // not the image's fault
                         ctx->beginBusy   = wasBusy;
@@ -2661,7 +2661,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 OtaCtx* ctx = static_cast<OtaCtx*>(req->_tempObject);
                 if (!ctx || ctx->authFailed || ctx->rejected) return;
 
-                if (Update.write(data, len) != len) Update.printError(Serial);
+                if (Update.write(data, len) != len) Update.printError(Log);
                 if (ctx->shaActive) {
                     mbedtls_sha256_update(&ctx->sha, data, len);
                 }
@@ -2699,7 +2699,7 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                         // is still open here. Leaving otaOpen set hands it to
                         // the destructor, which is what keeps a failed write
                         // from wedging the next attempt too.
-                        Update.printError(Serial);
+                        Update.printError(Log);
                     }
                 }
             }

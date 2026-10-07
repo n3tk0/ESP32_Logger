@@ -7,16 +7,19 @@
 SerialProvisioner serialProvisioner;
 
 // ---------------------------------------------------------------------------
+// Replies are the provisioning protocol, not log lines: Serial only, so a
+// reply never lands in /api/log half-written (the doc below goes straight to
+// Serial) or carries what the tool asked for.
 void SerialProvisioner::_respond(const char* json) {
-    Log.print(SERIAL_RESP_PREFIX);
-    Log.println(json);
+    Serial.print(SERIAL_RESP_PREFIX);
+    Serial.println(json);
 }
 
 void SerialProvisioner::_respondDoc(JsonDocument& doc) {
     // Serialize directly to Serial to avoid an intermediate String heap allocation.
-    Log.print(SERIAL_RESP_PREFIX);
+    Serial.print(SERIAL_RESP_PREFIX);
     serializeJson(doc, static_cast<Print&>(Serial));
-    Log.println();
+    Serial.println();
 }
 
 // ---------------------------------------------------------------------------
