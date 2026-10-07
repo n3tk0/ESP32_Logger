@@ -352,11 +352,13 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
 
     NC_LOCK(2000, );
     Entry* e = find(false, node, 0);
+    bool renaming = false;                // a rename that did not go through retries next POST
     if (!e) {
         // A node the collector renamed now posts under its new name. Its file
         // is still under the old one; move it rather than lose it.
         for (Entry& x : s_e) {
             if (!x.used || x.espnow || !ncr::renamedTo(node, x.dname, x.sname)) continue;
+            renaming = true;
             char from[ncr::PATH_CAP], to[ncr::PATH_CAP];
             pathOf(x, from);
             ncr::filePath(to, false, node, 0);
@@ -366,7 +368,14 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
             break;
         }
     }
-    if (!e && rep.isNull()) return;       // nothing held, nothing reported
+    if (!e && rep.isNull()) {
+        // Nothing held, nothing reported. A WiFi node reports its config only
+        // on its first POST after boot, so a report lost here (a wiped
+        // filesystem, a refused or dropped report) would otherwise not come
+        // again until the node restarts: ask for it (§3, `cfg_want`).
+        if (!renaming) reply["cfg_want"] = true;
+        return;
+    }
 
     Work* w = new (std::nothrow) Work;
     if (!w) return;
@@ -374,7 +383,7 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
     if (e && !haveFile) {                 // the file went; so does the entry
         e->used = false;
         e = nullptr;
-        if (rep.isNull()) { delete w; return; }
+        if (rep.isNull()) { reply["cfg_want"] = true; delete w; return; }
     }
 
     bool     save    = false;

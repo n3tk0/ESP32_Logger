@@ -126,6 +126,17 @@ static inline bool shouldSendCfg(bool local, bool reportedSinceBoot) {
     return local || !reportedSinceBoot;
 }
 
+/// The collector's `cfg_want`: it holds nothing for this node (its LittleFS
+/// was wiped, or the boot report was lost on its side) and asks for the
+/// report again. Honoured at most once per CFG_WANT_MIN_MS, so a collector
+/// that keeps refusing the report costs one ~1 KB POST in ten minutes, not
+/// one per cycle. `lastSentMs`: when the last report was answered.
+static const uint32_t CFG_WANT_MIN_MS = 10UL * 60UL * 1000UL;
+
+static inline bool honourCfgWant(bool want, uint32_t nowMs, uint32_t lastSentMs) {
+    return want && (uint32_t)(nowMs - lastSentMs) >= CFG_WANT_MIN_MS;   // wrap-safe
+}
+
 /// The `cfg` of an ingest reply, as far as the decision needs it.
 struct ReplyCfg {
     bool     present = false;   ///< the reply had a "cfg" object
