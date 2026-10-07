@@ -58,6 +58,7 @@
 #include "src/core/Globals.h"
 #include "src/core/BoardProfiles.h"   // R11: pin-rules registry loaded after initStorage
 #include "src/core/EventLog.h"        // the one diagnostic log, and its rename
+#include "src/core/HeapWatch.h"       // low heap / lost readings in the event log
 #include "src/core/ModuleRegistry.h"  // Pass 5: unified module registry (phase 1 = empty)
 #include "src/modules/WiFiModule.h"    // Pass 5 phase 2
 #include "src/modules/OtaModule.h"     // Pass 5 phase 2
@@ -1046,6 +1047,9 @@ void loop() {
     // operation.  A panic or hardware-watchdog reset before then triggers
     // a bootloader-level rollback to the previous slot.
     OtaManager::tick(millis());
+
+    // Low heap and lost readings go to the event log, with what was running.
+    heapWatchTick(millis());
 
     // ── Restart circuit breaker — clear counter after healthy uptime ──────────
     // 60 s without a watchdog/panic = this image boots cleanly.  Reset the

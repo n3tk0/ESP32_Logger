@@ -59,6 +59,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include "../utils/JsonIO.h"
+#include "../core/HeapWatch.h"            // heapActivityBegin/End
 
 // Safe strncpy that always null-terminates
 #define SAFE_STRNCPY(dst, src, n) do { strncpy(dst, src, (n) - 1); dst[(n) - 1] = '\0'; } while(0)
@@ -1655,6 +1656,15 @@ void setupWebServer() {
 
     // C2: track web activity for idle power restore
     auto touchActivity = []() { g_lastWebActivity = millis(); };
+
+    // Every request names itself for the low-heap event-log line
+    // (HeapWatch.h). The response is sent after the handler returns, which
+    // the line covers by naming a request finished in the last few seconds.
+    server.addMiddleware([](AsyncWebServerRequest* r, ArMiddlewareNext next) {
+        heapActivityBegin(HA_WEB, r->url().c_str());
+        next();
+        heapActivityEnd(HA_WEB);
+    });
 
     // Defense-in-depth headers applied to every response.
     //

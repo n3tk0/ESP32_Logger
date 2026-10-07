@@ -17,6 +17,7 @@
 #include <LittleFS.h>
 #include "../export/MqttExporter.h"
 #include "../utils/JsonIO.h"
+#include "../core/HeapWatch.h"   // HeapActivity
 
 // Forward-declared in Logger.ino (same sketch scope as ApiHandlers.cpp)
 #ifdef EXPORT_MQTT_ENABLED
@@ -207,6 +208,7 @@ void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
     // Publish staged alerts AFTER releasing the lock. send() takes
     // arbitrary count; one call dispatches all alerts from this tick.
     if (g_mqttExporter && stagedCount > 0) {
+        HeapActivity ha(HA_ALERT, "mqtt");
         g_mqttExporter->send(stagedMqtt, (size_t)stagedCount);
     }
 #endif

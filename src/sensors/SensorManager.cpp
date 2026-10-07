@@ -3,6 +3,7 @@
 #include <memory>
 #include <new>
 #include "../utils/MutexGuard.h"
+#include "../core/HeapWatch.h"   // dataLost
 #include <LittleFS.h>
 #include "../pipeline/DataPipeline.h"  // wireMutex (#14)
 #include "../core/BoardProfiles.h"     // g_pinAllowUnsafe (per-sensor pin override)
@@ -390,8 +391,7 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                     readingCache.put(readings[j]);
 
                 if (xQueueSend(queue, &readings[j], 0) != pdTRUE) {
-                    extern volatile uint32_t g_queueDrops;
-                    g_queueDrops++;
+                    dataLost("sensor queue full");
                 } else {
                     pushed++;
                 }

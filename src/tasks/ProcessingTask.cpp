@@ -9,6 +9,7 @@
 #include "../core/SensorTypes.h"
 #include "../alerts/AlertEngine.h"
 #include "../utils/MutexGuard.h"
+#include "../core/HeapWatch.h"   // dataLost
 #ifdef MODULE_HEATER_ENABLED
 #  include "../modules/HeaterModule.h"
 #endif
@@ -135,7 +136,7 @@ void processingTaskFunc(void* /*param*/) {
 
         // Forward to storage (always, even errors — raw data is immutable)
         if (xQueueSend(storageQueue, &r, pdMS_TO_TICKS(50)) != pdTRUE) {
-            g_queueDrops++;  // storageQueue full — count drop (N8)
+            dataLost("storage queue full");  // N8
         }
 
         // Forward to export (only good data)
@@ -145,7 +146,7 @@ void processingTaskFunc(void* /*param*/) {
             // and is short enough not to starve other sensors' enqueues.
             // Drops still counted via g_queueDrops for /api/diag visibility.
             if (xQueueSend(exportQueue, &r, pdMS_TO_TICKS(10)) != pdTRUE) {
-                g_queueDrops++;
+                dataLost("export queue full");
             }
         }
     }

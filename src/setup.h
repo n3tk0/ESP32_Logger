@@ -368,14 +368,17 @@
 #  define SLOW_SENSOR_TICK_MS    500
 #endif
 #ifndef STACK_STORAGE_TASK
-#  define STACK_STORAGE_TASK     8192   // LiveAggregator (~0.6 KB: sum,
-                                        // count, min, max, last per column),
-                                        // the columns' modes (24 B), and the
-                                        // datalogAppend() path: the trim's
-                                        // copy buffer, atomicWrite and the
-                                        // FS driver. The file's first line
-                                        // (DL_HEADER_MAX), the row and header
-                                        // buffers are on the heap.
+// LiveAggregator (~0.6 KB: sum, count, min, max, last per column), the
+// columns' modes (24 B), and the datalogAppend() path: the trim's copy
+// buffer, atomicWrite and the FS driver. The file's first line
+// (DL_HEADER_MAX), the row and header buffers are on the heap.
+// On the C3 34 h of logging (day rotation and trims included) left 4.2 KB of
+// 8 KB unused, so 6 KB keeps 2 KB of margin and gives 2 KB back to the heap.
+#  if defined(CONFIG_IDF_TARGET_ESP32C3)
+#    define STACK_STORAGE_TASK   6144
+#  else
+#    define STACK_STORAGE_TASK   8192
+#  endif
 #endif
 #ifndef STACK_EXPORT_TASK
 #  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation
