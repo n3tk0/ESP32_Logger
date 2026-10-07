@@ -43,7 +43,7 @@ pre{margin:0;max-height:360px;overflow:auto;font:12px/1.4 var(--mono);white-spac
 <p class="muted" id="ts"></p>
 </div><script>
 var L={en:{h:"Node diagnostics",back:"Settings",cp:"Copy JSON",copied:"Copied",rf:"Refresh",sys:"System",wifi:"Wi-Fi",col:"Collector",sens:"Sensors",log:"Log (RAM, since boot)",
-uptime:"Uptime",fw:"Firmware",reset:"Last reset",heap:"Free heap",block:"Largest block",frag:"Fragmentation",conn:"Connected",ssid:"Network",rssi:"Signal",ch:"Channel",ip:"IP",connects:"Connections",wfails:"Failed cycles",upFor:"Connected for",
+uptime:"Uptime",fw:"Firmware",reset:"Last reset",heap:"Free heap",block:"Largest block",frag:"Fragmentation",conn:"Connected",ssid:"Network",rssi:"Signal",ch:"Channel",ip:"IP",sleep:"Power save",connects:"Connections",wfails:"Failed cycles",upFor:"Connected for",
 host:"Address",posts:"Delivered",pfails:"Failed",code:"Last HTTP",lastOk:"Last delivery",lastFail:"Last failure",acc:"Last accepted / room",backlog:"Queued",dropped:"Lost (queue full)",
 type:"Sensor",state:"State",reads:"Reads",empty:"Empty",lastRead:"Last value",ok:"ok",missing:"missing",
 awake:"Awake",warmed:"Warmed up",pending:"Waiting",bytes:"Bytes received",frames:"Valid frames",bad:"Bad checksum",other:"Other frames",used:"Frames sent",gu:"Given up",woke:"Woken",frame:"Last frame",mode:"Reporting mode",period:"Working period",last:"Last sent",
@@ -57,7 +57,7 @@ vWarm:"Warming up: readings start once the fan has run its warm-up.",
 vOk:"Working: frames arrive and readings are sent.",
 err:"Could not read /api/diag"},
 bg:{h:"Диагностика на node-а",back:"Настройки",cp:"Копирай JSON",copied:"Копирано",rf:"Обнови",sys:"Система",wifi:"Wi-Fi",col:"Collector",sens:"Сензори",log:"Лог (RAM, от старта)",
-uptime:"Работи от",fw:"Фърмуер",reset:"Последен рестарт",heap:"Свободен heap",block:"Най-голям блок",frag:"Фрагментация",conn:"Свързан",ssid:"Мрежа",rssi:"Сигнал",ch:"Канал",ip:"IP",connects:"Свързвания",wfails:"Неуспешни цикли",upFor:"Свързан от",
+uptime:"Работи от",fw:"Фърмуер",reset:"Последен рестарт",heap:"Свободен heap",block:"Най-голям блок",frag:"Фрагментация",conn:"Свързан",ssid:"Мрежа",rssi:"Сигнал",ch:"Канал",ip:"IP",sleep:"Режим на сън",connects:"Свързвания",wfails:"Неуспешни цикли",upFor:"Свързан от",
 host:"Адрес",posts:"Доставени",pfails:"Неуспешни",code:"Последен HTTP",lastOk:"Последна доставка",lastFail:"Последна грешка",acc:"Последно приети / място",backlog:"В опашката",dropped:"Изгубени (пълна опашка)",
 type:"Сензор",state:"Състояние",reads:"Четения",empty:"Празни",lastRead:"Последна стойност",ok:"ok",missing:"липсва",
 awake:"Буден",warmed:"Загрял",pending:"Чака",bytes:"Получени байтове",frames:"Валидни кадри",bad:"Грешен checksum",other:"Други кадри",used:"Изпратени кадри",gu:"Отказани",woke:"Събуден",frame:"Последен кадър",mode:"Режим на отчитане",period:"Работен период",last:"Последно изпратени",
@@ -96,6 +96,7 @@ function render(d){J=d;var s=d.sys||{},w=d.wifi||{},c=d.collector,h="";
 h+=card("sys",kv([["uptime",dur(s.uptime_s)],["fw",s.fw],["reset",s.reset],["heap",s.heap+" B",s.heap<8000?"warn":""],["block",s.max_block+" B"],["frag",s.frag+" %"]]));
 var wk=[["conn",yn(w.connected),w.connected?"ok":"err"]];
 if(w.connected)wk.push(["ssid",w.ssid],["rssi",w.rssi+" dBm",w.rssi<-80?"warn":""],["ch",w.ch],["ip",w.ip]);
+wk.push(["sleep",w.sleep,w.sleep&&w.sleep!="none"?"warn":"ok"]);
 wk.push(["connects",w.connects],["wfails",w.fails,w.fails?"warn":""],["upFor",w.up_s==null?null:dur(w.up_s)]);
 h+=card("wifi",kv(wk));
 if(c)h+=card("col",kv([["host",c.host+":"+c.port],["posts",c.posts],["pfails",c.fails,c.fails?"warn":""],["code",c.last_code,c.last_code==200?"ok":c.last_code?"err":""],["lastOk",ago(c.last_ok_s)],["lastFail",ago(c.last_fail_s)],["acc",(c.accepted==null?"—":c.accepted)+" / "+(c.room==null?"—":c.room)],["backlog",c.backlog+" / "+c.backlog_cap,c.backlog>c.backlog_cap/2?"warn":""],["dropped",c.dropped,c.dropped?"err":""]]));

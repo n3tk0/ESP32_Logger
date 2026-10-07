@@ -423,6 +423,14 @@ static void handleDiag() {
             w["ch"]   = WiFi.channel();
             w["ip"]   = WiFi.localIP().toString();
         }
+        // "none" is what connectTo() asks for; "modem" here means the page
+        // can drop inbound connections again (main.cpp, connectTo()).
+        switch (WiFi.getSleepMode()) {
+            case WIFI_NONE_SLEEP:  w["sleep"] = "none";  break;
+            case WIFI_LIGHT_SLEEP: w["sleep"] = "light"; break;
+            case WIFI_MODEM_SLEEP: w["sleep"] = "modem"; break;
+            default:               w["sleep"] = nullptr; break;
+        }
         if (s_link) {
             w["connects"] = s_link->wifiConnects;
             w["fails"]    = s_link->wifiFails;
