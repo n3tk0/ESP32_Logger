@@ -517,7 +517,15 @@ struct KindleConfig {
     // holds there.
     uint8_t  pageStyle;
     uint8_t  webStyle;
-    uint8_t  reserved[12];
+    // The desk page's chart: which place each of its two lines is drawn from.
+    // chartA is the solid line with the low-to-high band, chartB the dashed
+    // one. 0 = as before (the outdoor sensor's temperature, the indoor
+    // sensor's), 1..11 = the place KZ_HERO..KZ_IN3 plus one, and for chartB
+    // KCHART_NONE = no second line. Formerly reserved[0] and [1]. See
+    // kdChartPick() in KindleDashboard.cpp.
+    uint8_t  chartA;
+    uint8_t  chartB;
+    uint8_t  reserved[10];
 };
 
 struct DeviceConfig {

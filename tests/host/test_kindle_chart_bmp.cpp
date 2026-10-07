@@ -287,8 +287,73 @@ static void test_line_only() {
     CHECK_EQ(other, 0);
 }
 
+// ?inv=1: the same line for a black plate, mid grey on black, so the plate
+// drawn first no longer hides it.
+static void test_line_only_inverted() {
+    ChartBmpCtx c;
+    fillCtx(c, true);
+    c.lineOnly = true;
+    c.lineInv = true;
+    c.init(560, 160);
+    int grey = 0, other = 0;
+    std::vector<uint8_t> row(c.rowBytes);
+    for (int y = 0; y < 160; y++) {
+        c.renderRow(row.data(), y);
+        for (int x = 0; x < 560; x++) {
+            const uint8_t v = (x & 1) ? (row[x / 2] & 0x0F) : (row[x / 2] >> 4);
+            if (v == cssGrey(0x77)) grey++;
+            else if (v != 0) other++;
+        }
+    }
+    CHECK(grey > 560 * 3);
+    CHECK_EQ(other, 0);
+}
+
+// The second line a different metric (a pressure beside a temperature): on a
+// scale of its own, so both curves fill the plot — on one scale the
+// temperature would be a flat line at the foot. The right margin leaves room
+// for its values, the same width as the left.
+static void test_second_line_on_its_own_scale() {
+    ChartBmpCtx c;
+    fillCtx(c, true);
+    for (int i = 0; i < TrendRing::HOURS; i++) {
+        const float p = 1000.0f + (float)i * 0.5f;
+        c.tIn[i].min = p - 0.2f; c.tIn[i].max = p + 0.2f; c.tIn[i].sum = p * 4.0f;
+    }
+    c.ownB = true;
+    c.init(LO_W, LO_H);
+    CHECK_EQ(c.R, ChartBmp::marginR(LO_W, true));
+    CHECK_EQ(c.R, LO_W - c.L);          // as wide a margin as the left
+    CHECK(c.hi < 100.0f);               // the temperature's scale is its own
+    CHECK(c.loB > 900.0f);              // ...and so is the pressure's
+    // Both lines run from near the top of the plot to near its foot.
+    CHECK(c.outMeanY[0] - c.outMeanY[TrendRing::HOURS - 1] > (c.B - c.T) / 2);
+    CHECK(c.inMeanY[0] - c.inMeanY[TrendRing::HOURS - 1] > (c.B - c.T) / 2);
+    for (int i = 0; i < TrendRing::HOURS; i++) {
+        CHECK(c.inMeanY[i] >= c.T && c.inMeanY[i] <= c.B);
+    }
+
+    // The same two on one scale, as before: the temperature is squashed.
+    ChartBmpCtx one;
+    fillCtx(one, true);
+    for (int i = 0; i < TrendRing::HOURS; i++) one.tIn[i] = c.tIn[i];
+    one.init(LO_W, LO_H);
+    CHECK_EQ(one.R, ChartBmp::marginR(LO_W));
+    CHECK(one.outMeanY[0] - one.outMeanY[TrendRing::HOURS - 1] < (one.B - one.T) / 10);
+
+    // A line alone never keeps room for a second scale.
+    ChartBmpCtx ln;
+    fillCtx(ln, true);
+    ln.ownB = true;
+    ln.lineOnly = true;
+    ln.init(560, 160);
+    CHECK_EQ(ln.R, 559);
+}
+
 int main() {
+    RUN(test_second_line_on_its_own_scale);
     RUN(test_line_only);
+    RUN(test_line_only_inverted);
     RUN(test_header_is_a_valid_4bit_bmp);
     RUN(test_row_bytes_are_exact);
     RUN(test_chunking_is_transparent);

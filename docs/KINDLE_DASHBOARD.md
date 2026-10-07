@@ -363,12 +363,11 @@ eleven, always in the same spot at the same size:
 ```
 
 Each place names a sensor, a metric, an optional caption, how many decimals,
-seven switches — bold, show the unit, show the age when stale, show the pressure
+switches — bold, show the unit, show the age when stale, show the pressure
 tendency, **extra bold** (the bold face drawn twice a hair apart on the panel,
-weight 900 in the browser), **inverted colours** (white on a black plate the
-size of the place) and, for a grid or indoor place whose metric has a scale,
-**a bar** beside the value that fills as the reading gets better (humidity best
-at 40–60 %, the AQI, the BME680's IAQ, CO₂, TVOC and dust best low; `kdBarScore()`) — and **how
+weight 900 in the browser; on a black plate the panel draws it once, since a
+second white pass only smears into the black), **inverted colours** (white on
+a black plate the size of the place) and the 24 h line below — and **how
 dark it is drawn**: black, dark, mid or light grey. Four
 levels rather than a colour picker, because the panel has sixteen real grey
 levels and the ones worth having are the ones far enough apart to render solid,
@@ -819,6 +818,12 @@ across the headline's row. The panel fetches it as
 draws it before the figures; the browser page shows the same image,
 stretched over the row.
 
+**Every line is drawn after its place's plate.** An inverted place asks for
+its line with `&inv=1`, which comes back mid grey on black rather than light
+grey on white, so the black plate no longer hides it. The panel keeps each
+image as `line_<PLACE>_<w>x<h>_<inv>.bmp`, so a place that changes size or
+colour fetches a new one rather than drawing the old one.
+
 **A grid place's own 24 h line** works the same way, for any reading: tick
 *24 h line on the wall* on the place (`KSLOTF_LINE`). The payload says
 `Z_<PLACE>_LINE=1`; the panel fetches `/kindle/graph.bmp?line=1&z=<place>&w=…&h=…`
@@ -834,6 +839,22 @@ at three metres, and the room they took is the room the readings want. The
 captions and the line under the headline are black, every value is bold,
 the value beside the headline is black rather than #444, and the rules are
 the heaviest black ones unless they have been set.
+
+**The grid's readings sit in the middle of their cells**, figures and
+captions, and so do the indoor values and the forecast's condition word. The
+indoor heading and captions stay at the column's left edge. The panel centres by the
+widths the collector sends (`Z_<zone>_VADVW`, `_UADVW` and `_LADVW`,
+`FC_SUMMARY_ADVW`).
+On the wall page the panel centres a caption at 115 % of the collector's
+estimate, Bookerly's width, as the grid's arrow has always been placed.
+
+**The footer shows the WiFi signal**, on the panel only: five bars filled by
+strength (the link level in `/proc/net/wireless`, as dBm or as percent; −55
+dBm and better is five, −86 still one, weaker none) and the network's name,
+ten type sizes left of the status and cut, by letters, to the room before it.
+The name comes from the Kindle's own `com.lab126.wifid`, else `wpa_cli`; the
+collector is not asked. On a collector's own access point it is not drawn:
+the footer's note already names that network, and is long enough to meet it.
 
 Upright only: turned to 90° or 270°, the page is the desk one on its side.
 The FBInk script asks for it with `?wall=1`, and only a script that does gets
@@ -1498,6 +1519,29 @@ own: the same 6 % padding with a 0.4° floor that `appendChart()` and
 `ChartBmpCtx::init()` both apply, because a second opinion here would label the
 image with somebody else's scale.
 
+### Which two lines the chart draws
+
+The desk page's chart has two lines — the solid one with its hourly low-to-high
+band, and the dashed one — and the reader chooses what each follows, under
+Settings → E-ink dashboard → Reader: `chart_a` and `chart_b` in
+`/api/kindle/config`, `KindleConfig::chartA` and `chartB`. 0 is the chart as
+it always was, the outdoor sensor's temperature and the indoor sensor's; 1..11
+is a place (`hero`, `big`, `g1`..`g6`, `in1`..`in3`, in that order), and the
+line follows whatever reading stands there; `chart_b` 255 is no second line.
+A place with nothing in it draws the default, so emptying a place never
+empties the chart. Still two lines and no more: each is a series in the trend
+ring, and the chart's two come first in it (`kindleTrackTrends()`), ahead of
+the places' own 24 h lines.
+
+Two different metrics share no axis — a temperature and a pressure on one
+scale are one flat line and one curve — so then the dashed line is drawn to a
+scale of its own. Its values go down the right, in a margin as wide as the
+left one (`ChartBmp::marginR(w, true)`, `kdPx(40)` on the page); the panel
+gets them as `CH_Z0`..`CH_Z4` with their widths, always sent and empty when
+the two lines share a scale. A pressure's values are in the unit the page
+prints it in. The key under the chart names a chosen place by its caption, the
+dashed one with "(right)" when it has its own scale.
+
 ### What keeps them together now
 
 `tools/check_kindle_parity.py` reads the stylesheet out of the firmware — the
@@ -1585,10 +1629,12 @@ headline feature work on the board you probably have rather than only on the
 one with PSRAM.
 
 **Which four is the reader's choice, not a fifth series.** `kindleTrackTrends()`
-keeps, while there is room: the outdoor temperature (the chart and the
-headline's line), then in place order every place ticked *24 h line* or
-showing a pressure tendency arrow, then the indoor temperature, the outdoor
-pressure and humidity. A places save applies it at once
+keeps, while there is room: the desk chart's two lines (`chart_a`,
+`chart_b`; by default the outdoor and indoor temperatures), then the outdoor
+temperature and the headline's own reading, then in place order every place
+ticked *24 h line* or showing a pressure tendency arrow, then the outdoor
+pressure and humidity. With both pages on the wall, upright, no desk chart
+can be shown, and its two lines go after the places instead. A places save applies it at once
 (`TrendRing::keepOnly()`): a series no longer chosen is dropped with its
 hours, a new one starts empty and fills an hour at a time, and the ones that
 stay keep their history.

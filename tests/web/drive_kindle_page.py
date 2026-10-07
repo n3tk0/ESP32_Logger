@@ -816,6 +816,38 @@ with sync_playwright() as p:
         "fetch('/api/kindle/config').then(function(r){return r.json()})")
     check(got.get("browser_dev") == 0 and got.get("browser_bar") == 0, "and back to auto")
 
+    # The desk chart's two lines: a place each (Grid 1 is 3, the headline 1)
+    # or none, sent as the numbers the collector stores, back on the re-read,
+    # and the places' names in the choices.
+    opts = pg.evaluate(
+        "Array.prototype.map.call(document.querySelectorAll('#kd-chb option'),"
+        " function(o){return o.value})")
+    check(opts[:1] == ["0"] and "3" in opts and opts[-1] == "255" and len(opts) == 13,
+          "the dashed line offers the default, the eleven places and none (%r)" % (opts,))
+    check(pg.evaluate("document.querySelectorAll('#kd-cha option[value=\"255\"]').length") == 0,
+          "and the solid line has no none")
+    pg.select_option("#kd-cha", "1")
+    pg.select_option("#kd-chb", "255")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("chart_a") == 1 and got.get("chart_b") == 255,
+          "the chart's lines reach the device (%r, %r)"
+          % (got.get("chart_a"), got.get("chart_b")))
+    pg.reload()
+    pg.wait_for_timeout(1500)
+    tab(pg, "reader")
+    check(pg.input_value("#kd-cha") == "1" and pg.input_value("#kd-chb") == "255",
+          "and they come back on the re-read")
+    pg.select_option("#kd-cha", "0")
+    pg.select_option("#kd-chb", "0")
+    pg.click('[data-click="kindleSave"]')
+    pg.wait_for_timeout(1400)
+    got = pg.evaluate(
+        "fetch('/api/kindle/config').then(function(r){return r.json()})")
+    check(got.get("chart_a") == 0 and got.get("chart_b") == 0, "and back to the defaults")
+
     # The week strip and the dividing lines: five selects, five keys, and a
     # re-read that brings every one of them back.
     tab(pg, "page")

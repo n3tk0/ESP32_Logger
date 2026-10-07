@@ -335,8 +335,10 @@ payload_key_ok() {
         # used — see rule_pen().
         WK_STYLE|WK_FC|WF_NOW|WF[0-9]_*|RULE_PX|RULE_INK|RULE_SOFT|RULE_STYLE) return 0 ;;
         # The chart's axis: the five values, the five hours, their widths, and
-        # where the image's plot area is inside the image.
-        CH_Y[0-9]|CH_Y[0-9]W|CH_H[0-9]|CH_H[0-9]W|CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
+        # where the image's plot area is inside the image. CH_Z* are the
+        # second line's values down the right, when it has a scale of its own.
+        CH_Y[0-9]|CH_Y[0-9]W|CH_Z[0-9]|CH_Z[0-9]W|CH_H[0-9]|CH_H[0-9]W) return 0 ;;
+        CH_L|CH_R|CH_T|CH_B|CH_NOTE) return 0 ;;
         # A newer copy of these scripts, on offer from the collector — see
         # pkg_check(). Each one is checked again where it is used.
         PKG_VER|PKG_MD5|PKG_SIZE) return 0 ;;
@@ -2878,52 +2880,75 @@ graph_fits() {
 # for a section nothing draws.
 chart_wanted() { [ "${SHOW_CHART:-1}" = "1" ]; }
 
-# The wall page's outdoor line behind the headline (HERO_LINE): the chart's
-# switch on a page with no chart. As wide as the headline's row and as tall
-# as the headline, drawn before it by draw_zones().
-fetch_heroline() {
-    if [ "${HERO_LINE:-0}" != "1" ] || [ "${LAYOUT_FLOW:-0}" != "1" ]; then
-        rm -f "$TMP/heroline.bmp"
-        return 0
-    fi
-    if wget -q -T 15 -O "$TMP/heroline.new" \
-         "$(host_url)/kindle/graph.bmp?line=1&w=${HEAD_W:-564}&h=$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))" \
-         2>/dev/null && [ -s "$TMP/heroline.new" ]; then
-        mv "$TMP/heroline.new" "$TMP/heroline.bmp"
+# A 24 h line drawn behind figures on the wall page: the outdoor one behind
+# the headline (HERO_LINE, the chart's switch on a page with no chart) and a
+# grid place's own (Z_<PLACE>_LINE). Kept in a file named by its place, size
+# and pens — white on black for a place set that way — so a page laid out
+# afresh, or a place turned inverse, never draws one that no longer fits; the
+# last good one of the same shape stays when a fetch fails.
+line_file() {
+    # $1=place $2=w $3=h -> LINE_F
+    local inv
+    eval "inv=\${Z_$1_INV:-0}"
+    LINE_F="$TMP/line_$1_$2x$3_${inv:-0}.bmp"
+}
+fetch_line() {
+    # $1=place $2=query prefix ("" or "z=g1&") $3=w $4=h
+    line_file "$1" "$3" "$4"
+    local q="line=1&$2w=$3&h=$4"
+    case "$LINE_F" in *_1.bmp) q="$q&inv=1" ;; esac
+    if wget -q -T 15 -O "$TMP/line.new" "$(host_url)/kindle/graph.bmp?$q" \
+         2>/dev/null && [ -s "$TMP/line.new" ]; then
+        rm -f "$TMP/line_$1_"*.bmp
+        mv "$TMP/line.new" "$LINE_F"
     else
-        rm -f "$TMP/heroline.new"
+        rm -f "$TMP/line.new"
     fi
+}
+# Drawn on the place's plate, if it has one, and under its figures.
+draw_line() {
+    # $1=place $2=x $3=y $4=w $5=h
+    line_file "$1" "$4" "$5"
+    [ -s "$LINE_F" ] && draw_image "$LINE_F" "$2" "$3"
     return 0
 }
 
-# A wall grid place's own 24 h line (Z_<PLACE>_LINE): as wide as its cell
-# less the gutter and as tall as its figures, drawn before them. Fetched
-# after load_data(), so the places are the payload's.
-fetch_zonelines() {
-    [ "${WALL:-0}" = "1" ] && [ "${LAYOUT_FLOW:-0}" = "1" ] || return 0
-    local gcols gvsz gi z
-    set -- ${GRID_ZONES:-}
+fetch_lines() {
+    if [ "${LAYOUT_FLOW:-0}" != "1" ]; then rm -f "$TMP"/line_*.bmp; return 0; fi
+    if [ "${HERO_LINE:-0}" = "1" ]; then
+        fetch_line HERO "" "${HEAD_W:-564}" "$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))"
+    else
+        rm -f "$TMP"/line_HERO_*.bmp
+    fi
+    # Files from before lines were named by their shape.
+    rm -f "$TMP/heroline.bmp" "$TMP"/zline_*.bmp
+    local gcols gvsz gi z f keep=" HERO "
+    set --
+    if [ "${WALL:-0}" = "1" ]; then set -- ${GRID_ZONES:-}; fi
     for gcols in ${LY_GRID_ROWS:-}; do
+        [ -n "${1:-}" ] || break
         if [ "$gcols" -ge 3 ]; then gvsz="${GRID_VAL_SZ_3:-26}"; else gvsz="${GRID_VAL_SZ:-31}"; fi
         gi=0
         while [ "$gi" -lt "$gcols" ] && [ -n "${1:-}" ]; do
             z="$1"; shift; gi=$((gi + 1))
             eval "[ \"\${Z_${z}_LINE:-}\" = 1 ]" || continue
-            if wget -q -T 15 -O "$TMP/zline.new" \
-                 "$(host_url)/kindle/graph.bmp?line=1&z=$(echo "$z" | tr 'A-Z' 'a-z')&w=$(( ${COL_L_W:-270} / gcols - 14 ))&h=$gvsz" \
-                 2>/dev/null && [ -s "$TMP/zline.new" ]; then
-                mv "$TMP/zline.new" "$TMP/zline_$z.bmp"
-            else
-                rm -f "$TMP/zline.new"
-            fi
+            keep="$keep$z "
+            fetch_line "$z" "z=$(echo "$z" | tr 'A-Z' 'a-z')&" \
+                       "$(( ${COL_L_W:-270} / gcols - 14 ))" "$gvsz"
         done
+    done
+    # A place that no longer has a line, or a page that is no longer the
+    # wall, leaves none behind.
+    for f in "$TMP"/line_*.bmp; do
+        [ -e "$f" ] || continue
+        z="${f#"$TMP"/line_}"; z="${z%%_*}"
+        case "$keep" in *" $z "*) ;; *) rm -f "$f" ;; esac
     done
     return 0
 }
 
 fetch_graph() {
-    fetch_heroline
-    fetch_zonelines
+    fetch_lines
     chart_wanted || return 1
     # Into a scratch file, and only into place once it is whole. wget -O
     # truncates its target the moment it opens it, so fetching straight onto
@@ -2996,10 +3021,20 @@ zones_forget() {
     return 0
 }
 
+# The place names the payload lists go into eval as variable names (Z_G1_…),
+# so they are upper-case letters, digits and _ or the lists are dropped:
+# payload_key_ok() checks a key's NAME, and these are values.
+zones_check() {
+    case " ${GRID_ZONES:-} ${IN_ZONES:-} " in
+        *[!A-Z0-9_\ ]*) GRID_ZONES=""; IN_ZONES="" ;;
+    esac
+}
+
 load_data() {
     [ -f "$TMP/data.txt" ] || return 1
     zones_forget
     load_kv "$TMP/data.txt" PAYLOAD || return 1
+    zones_check
     # The face chosen on the collector, picked up the moment it changes — and
     # the whole page redrawn in it, not one zone at a time over half an hour.
     if [ "${FONT_FACE:-0}" != "$FONT_FACE_SET" ]; then
@@ -3021,6 +3056,7 @@ load_data() {
     if [ "${ROT_FAIL:-0}" = "1" ] && [ "${PAGE_ROT:-0}" != "0" ] && fetch_data; then
         zones_forget
         load_kv "$TMP/data.txt" PAYLOAD || return 1
+        zones_check
         load_layout
     fi
     # The collector's zone, from any payload, the cached one included; its
@@ -3457,14 +3493,14 @@ fill_rect() {
     fb -q -b -B "$pen" -k top="$2",left="$1",width="$3",height="$4"
 }
 
-# ── A place's own style: extra bold, white on black, the bar ────────────────
-# zone_style PLACE reads the three the collector sent for it (Z_<PLACE>_HEAVY,
-# _INV and _BAR, each only when set); draw_field() thickens the value and
-# draws the bar from them, and zone_plate() lays the black plate. zone_done
-# puts the pens back, so the next place is drawn as it asked to be.
-ZHEAVY=""; ZBAR=""; ZINV=""
+# ── A place's own style: extra bold, white on black ─────────────────────────
+# zone_style PLACE reads the two the collector sent for it (Z_<PLACE>_HEAVY
+# and _INV, each only when set); draw_field() thickens the value from them,
+# and zone_plate() lays the black plate. zone_done puts the pens back, so the
+# next place is drawn as it asked to be.
+ZHEAVY=""; ZINV=""
 zone_style() {
-    eval "ZHEAVY=\${Z_$1_HEAVY:-}; ZBAR=\${Z_$1_BAR:-}; ZINV=\${Z_$1_INV:-}"
+    eval "ZHEAVY=\${Z_$1_HEAVY:-}; ZINV=\${Z_$1_INV:-}"
 }
 zone_plate() {
     # $1=x $2=y $3=w $4=h — the place's rectangle, black when it asked for it
@@ -3472,7 +3508,7 @@ zone_plate() {
     fill_rect "$1" "$2" "$3" "$4" BLACK
     DRAW_INV=1
 }
-zone_done() { ZHEAVY=""; ZBAR=""; ZINV=""; DRAW_INV=""; }
+zone_done() { ZHEAVY=""; ZINV=""; DRAW_INV=""; }
 
 # An indoor reading's caption, over its value at $2 — and the place's plate
 # first, from the caption's top to the value's foot, when it asked for one.
@@ -3699,6 +3735,89 @@ draw_status() {
     return 0
 }
 
+# THE READER'S OWN WIFI, on the wall page's footer: five bars, as full as its
+# signal, and the network's name — this end's link, the one that decides
+# whether the page keeps up, so read here and nothing from the collector.
+# The name from wifid, or wpa_supplicant where wifid has none; the signal from
+# /proc/net/wireless, whose level is dBm (-65.), dBm + 256 (191.) or a
+# percentage, by driver.
+WIFI_PROC=/proc/net/wireless
+WIFI_SSID=""
+WIFI_BARS=0
+wifi_read() {
+    WIFI_SSID=$(lipc-get-prop com.lab126.wifid currentEssid 2>/dev/null | head -1)
+    [ -n "$WIFI_SSID" ] || \
+        WIFI_SSID=$(wpa_cli status 2>/dev/null | sed -n 's/^ssid=//p' | head -1)
+    # Printable; draw_wifi() cuts it to the room it has.
+    WIFI_SSID=$(printf '%s' "$WIFI_SSID" | tr -d '\000-\037')
+    local lvl
+    lvl=$(awk 'NR > 2 { sub(/\.$/, "", $4); print $4; exit }' "$WIFI_PROC" 2>/dev/null)
+    WIFI_BARS=0
+    case "$lvl" in
+        -[0-9]*) lvl=${lvl#-} ;;
+        [0-9]*)  if [ "$lvl" -gt 100 ] 2>/dev/null; then lvl=$(( 256 - lvl ))
+                 else WIFI_BARS=$(( (lvl + 19) / 20 )); return 0; fi ;;
+        *)       return 0 ;;
+    esac
+    # dBm as a magnitude: -55 and stronger is all five.
+    [ "$lvl" -ge 0 ] 2>/dev/null || return 0
+    if   [ "$lvl" -le 55 ]; then WIFI_BARS=5
+    elif [ "$lvl" -le 62 ]; then WIFI_BARS=4
+    elif [ "$lvl" -le 70 ]; then WIFI_BARS=3
+    elif [ "$lvl" -le 78 ]; then WIFI_BARS=2
+    elif [ "$lvl" -le 86 ]; then WIFI_BARS=1
+    fi
+    return 0
+}
+
+# The first $2 letters of $1, counted as letters rather than bytes: busybox
+# cut counts bytes, and a name cut inside a two-byte letter draws as a box.
+utf8_head() {
+    printf '%s' "$1" | LC_ALL=C awk -v n="$2" 'BEGIN { RS = "\001" } {
+        o = ""; k = 0
+        for (i = 1; i <= length($0); i++) {
+            c = substr($0, i, 1)
+            if (!(c >= "\200" && c < "\300")) { if (k == n) break; k++ }
+            o = o c
+        }
+        printf "%s", o }'
+}
+
+# How wide a caption is drawn, in percent of the collector's estimate. The
+# estimate is the browser's serif; the Kindle's Bookerly sets a caption 15 %
+# wider, which is what the grid's arrow has always been placed by. Centring
+# on the wall page goes by the same, so its two columns agree.
+cap_pct() { if [ "${WALL:-0}" = "1" ]; then echo 115; else echo 100; fi; }
+
+# Left of the status line, ten type sizes before STAT_X: the bars stand on
+# the footer's baseline, filled to the signal and light grey past it, and the
+# name is cut to the room left before the status. Not on a collector's own
+# access point: the note at the footer's left already names that network,
+# and is long enough to run into this.
+draw_wifi() {
+    [ "${WALL:-0}" = "1" ] && [ "${STAT_X:-0}" -gt 0 ] 2>/dev/null || return 0
+    case "${LBL_MEASURED:-}" in "AP "*) return 0 ;; esac
+    wifi_read
+    local sz="${STAT_SZ:-${FOOT_SZ:-12}}" y="${STAT_Y:-${FOOT_Y:-0}}"
+    local x i=1 h pen bw gap base tx n
+    x=$(( STAT_X - sz * 10 ))
+    bw=$(( sz / 4 )); [ "$bw" -lt 2 ] && bw=2
+    gap=$(( sz / 6 )); [ "$gap" -lt 1 ] && gap=1
+    base=$(( y + sz * ${BASELINE_MILLE:-848} / 1000 ))
+    while [ "$i" -le 5 ]; do
+        h=$(( sz * (i + 1) / 6 ))
+        pen=GRAYC; [ "$i" -le "$WIFI_BARS" ] && pen=BLACK
+        fill_rect "$(( x + (i - 1) * (bw + gap) ))" "$(( base - h ))" "$bw" "$h" "$pen"
+        i=$((i + 1))
+    done
+    # About half a type size a letter, and half a size clear of the status.
+    tx=$(( x + 5 * (bw + gap) + sz / 3 ))
+    n=$(( (STAT_X - sz / 2 - tx) * 2 / sz ))
+    [ -n "$WIFI_SSID" ] && [ "$n" -gt 0 ] && \
+        draw_text_reg "$tx" "$y" "$sz" "GRAY7" "$(utf8_head "$WIFI_SSID" "$n")"
+    return 0
+}
+
 # ── Clock ────────────────────────────────────────────────────────────────────
 #
 # THE TIME COMES FROM THIS DEVICE, THE FORMAT FROM THE COLLECTOR. The Kindle
@@ -3845,8 +3964,10 @@ draw_field() {
     if [ "$bold" = "1" ]; then
         draw_text_bold "$x" "$y" "$sz" "$ink" "$val"
         # Extra bold: the bold face again, a hair to the right — the
-        # reader's faces stop at bold.
-        [ "$ZHEAVY" = "1" ] && \
+        # reader's faces stop at bold. Not on a black plate: that pass paints
+        # its own box (draw_text()), which would rub out the first, so a
+        # place set white on black stays plain bold on the panel.
+        [ "$ZHEAVY" = "1" ] && [ -z "${DRAW_INV:-}" ] && \
             draw_text_bold "$(( x + (sz / 40 > 1 ? sz / 40 : 1) ))" "$y" "$sz" "$ink" "$val"
     else
         draw_text_reg  "$x" "$y" "$sz" "$ink" "$val"
@@ -3888,22 +4009,6 @@ draw_field() {
         draw_arrow "$(( ux + sz / 10 ))" "$(( y + sz * vb / 1000 ))" \
                    "$asz" "$arrow" "GRAY4"
         ux=$(( ux + sz / 10 + asz * 62 / 100 ))
-    fi
-
-    # The bar: an outline as tall as the figures, standing on their
-    # baseline, filled from the foot as far as the reading is good.
-    if [ -n "$ZBAR" ]; then
-        local bw bt bh bx by bf vb2="${BASELINE_MILLE:-848}"
-        [ "$bold" = "1" ] && vb2="${BASELINE_MILLE_BOLD:-$vb2}"
-        bw=$(( sz * 20 / 100 )); [ "$bw" -lt 6 ] && bw=6
-        bt=$(( sz * 4 / 100 ));  [ "$bt" -lt 2 ] && bt=2
-        bh=$(( sz * 72 / 100 ))
-        bx=$(( ux + sz * 16 / 100 ))
-        by=$(( y + sz * vb2 / 1000 - bh ))
-        fill_rect "$bx" "$by" "$(( bw + 2 * bt ))" "$bh" BLACK
-        fill_rect "$(( bx + bt ))" "$(( by + bt ))" "$bw" "$(( bh - 2 * bt ))" WHITE
-        bf=$(( (bh - 2 * bt) * ZBAR / 100 ))
-        fill_rect "$(( bx + bt ))" "$(( by + bh - bt - bf ))" "$bw" "$bf" BLACK
     fi
 }
 
@@ -4077,16 +4182,16 @@ draw_zones() {
     local z val unit lab arrow bold vadv uadv ink n i cx cw vsz y ladv lcx vcx capu capa
 
     # ── Left column: the outdoor headline ───────────────────────────────────
-    # The outdoor line behind it, first, so the figures are drawn over it.
-    [ "${HERO_LINE:-0}" = "1" ] && [ -s "$TMP/heroline.bmp" ] && \
-        draw_image "$TMP/heroline.bmp" "$lx" "${HERO_Y:-38}"
     # White on black, when the headline asked for it: the whole of its row,
     # heading and the line under it included.
-    zone_style HERO; ZBAR=""
+    zone_style HERO
     local hb=$(( ${SUB_Y:-128} + ${SUB_SZ:-14} + 6 ))
     [ "${HEAD_RULE_Y:-0}" -gt 0 ] 2>/dev/null && hb=$(( HEAD_RULE_Y - 4 ))
     zone_plate "$(( lx - 6 ))" "$(( ${TOP_Y:-20} - 6 ))" \
                "$(( ${HEAD_W:-${COL_L_W:-270}} + 12 ))" "$(( hb - ${TOP_Y:-20} + 6 ))"
+    # The outdoor line behind it, on the plate, so the figures are drawn over it.
+    [ "${HERO_LINE:-0}" = "1" ] && \
+        draw_line HERO "$lx" "${HERO_Y:-38}" "${HEAD_W:-564}" "$(( ${SUB_Y:-180} - ${HERO_Y:-40} ))"
     draw_text_reg "$lx" "${TOP_Y:-20}" "$lab_sz" "${LAB_INK:-GRAY7}" "$Z_GROUP_OUT"
 
     local hero_sz="${HERO_SZ:-84}" hero_y="${HERO_Y:-38}" hx="$lx" sx0="$lx"
@@ -4188,12 +4293,18 @@ draw_zones() {
             if [ "${WALL:-0}" = "1" ] && [ -n "$arrow" ]; then capa="$arrow"; arrow=""; fi
             cx=$(( lx + gi * gcw ))
             # A row of one is centred, caption and value each on their own —
-            # the page's .grid td.c1. Widths of 0 (an older collector) leave
-            # both at the cell's left edge.
+            # the page's .grid td.c1 — and every cell is on the wall page.
+            # Widths of 0 (an older collector) leave both at the cell's left
+            # edge. The caption's arrow, after it, is counted in with it.
             lcx="$cx"; vcx="$cx"
-            if [ "$gcols" = "1" ]; then
+            if [ "$gcols" = "1" ] || [ "${WALL:-0}" = "1" ]; then
                 eval "ladv=\${Z_${z}_LADVW:-0}"
-                centre_in "$cx" "$gcw" "$(( ${GRID_LAB_SZ:-10} * ladv / 1000 ))"
+                # A wall caption is measured as the arrow is placed, with
+                # Bookerly's 15 % (CAP_PCT); the desk's row of one as it was.
+                local lw=$(( ${GRID_LAB_SZ:-10} * ladv * $(cap_pct) / 100000 ))
+                [ -n "$capa" ] && lw=$(( lw + ${GRID_LAB_SZ:-10} * 2 ))
+                [ "$ladv" -gt 0 ] 2>/dev/null || lw=0
+                centre_in "$cx" "$gcw" "$lw"
                 lcx="$CENTRE_X"
                 if [ -n "$val" ] && [ "$vadv" -gt 0 ] 2>/dev/null; then
                     field_w "$gvsz" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$bold"
@@ -4201,14 +4312,14 @@ draw_zones() {
                     vcx="$CENTRE_X"
                 fi
             fi
-            # Its own 24 h line behind the figures, first, as the headline's.
-            if [ "${WALL:-0}" = "1" ] && [ -s "$TMP/zline_$z.bmp" ] &&
-               eval "[ \"\${Z_${z}_LINE:-}\" = 1 ]"; then
-                draw_image "$TMP/zline_$z.bmp" "$cx" "$(( gy + ${GRID_LAB_SZ:-10} + 4 ))"
-            fi
             zone_style "$z"
             zone_plate "$(( cx - 6 ))" "$(( gy - 6 ))" "$(( gcw - 6 ))" \
                        "$(( ${GRID_LAB_SZ:-10} + 4 + gvsz + 12 ))"
+            # Its own 24 h line behind the figures, on the plate, as the
+            # headline's.
+            if [ "${WALL:-0}" = "1" ] && eval "[ \"\${Z_${z}_LINE:-}\" = 1 ]"; then
+                draw_line "$z" "$cx" "$(( gy + ${GRID_LAB_SZ:-10} + 4 ))" "$(( gcw - 14 ))" "$gvsz"
+            fi
             draw_text_reg "$lcx" "$gy" "${GRID_LAB_SZ:-10}" "${LAB_INK:-GRAY7}" "$lab"
             if [ -n "$capa" ]; then
                 eval "ladv=\${Z_${z}_LADVW:-0}"
@@ -4320,6 +4431,14 @@ draw_zones() {
             else
                 cx=$(( rx + w1 + (i - 1) * cw )); vsz="$small"; y="$small_y"
                 in_caption "$cx" "$y" "$cw" "$vsz" "$lab"
+            fi
+            # The wall page's column: the captions at its left edge, as the
+            # heading, and each value centred in it.
+            if [ "$vcol" = "1" ] && [ "${WALL:-0}" = "1" ] && [ -n "$val" ] &&
+               [ "$vadv" -gt 0 ] 2>/dev/null; then
+                field_w "$vsz" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$bold"
+                centre_in "$rx" "$rw" "$FIELD_W"
+                cx="$CENTRE_X"
             fi
             draw_field "$cx" "$y" "$vsz" "$bold" "$val" "$unit" "$arrow" \
                        "$vadv" "$uadv" "$ink"
@@ -4482,11 +4601,15 @@ draw_chart_axis() {
     k=0
     while [ "$k" -le 4 ]; do
         eval "lab=\${CH_Y${k}:-}; w=\${CH_Y${k}W:-0}"
+        y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * ${BASELINE_MILLE:-848} / 1000 ))
         if [ -n "$lab" ]; then
-            y=$(( GR_Y + CH_T + (CH_B - CH_T) * k / 4 + base - sz * ${BASELINE_MILLE:-848} / 1000 ))
             x=$(( GR_X + CH_L - gap - sz * w / 1000 ))
             draw_text_reg "$x" "$y" "$sz" "GRAY7" "$lab"
         fi
+        # The second line's own value on the same rule, left-aligned right
+        # of the plot — sent only when it has a scale of its own (CH_Z*).
+        eval "lab=\${CH_Z${k}:-}"
+        [ -n "$lab" ] && draw_text_reg "$(( GR_X + CH_R + gap ))" "$y" "$sz" "GRAY7" "$lab"
         k=$((k + 1))
     done
 
@@ -4611,8 +4734,11 @@ draw_forecast_body() {
             ty=$(( FC_TEXT_Y + (FC_TEXT_SZ - tsz) / 2 ))
         fi
         # Bold on the wall page, where it is read from across the room.
+        # And centred over the forecast's column there, as the page's .ctr:
+        # by the regular face's measure and a twentieth more for the bold.
         if [ "${WALL:-0}" = "1" ]; then
-            draw_text_bold "$FC_TEXT_X" "$ty" "$tsz" "BLACK" "$FC_SUMMARY"
+            centre_in "$FC_TEXT_X" "${FC_TEXT_W:-0}" "$(( tsz * ${FC_SUMMARY_ADVW:-0} * 105 / 100000 ))"
+            draw_text_bold "$CENTRE_X" "$ty" "$tsz" "BLACK" "$FC_SUMMARY"
         else
             draw_text_reg "$FC_TEXT_X" "$ty" "$tsz" "BLACK" "$FC_SUMMARY"
         fi
@@ -4712,6 +4838,7 @@ draw_forecast_body() {
 
     draw_hline "$FOOT_RULE_X" "$FOOT_RULE_Y" "$FOOT_RULE_W" "GRAYA"
     draw_text_reg "$FOOT_X" "$FOOT_Y" "$FOOT_SZ" "GRAY5" "$LBL_MEASURED"
+    draw_wifi
     draw_status
 }
 
@@ -4796,6 +4923,14 @@ draw_week() {
             fill_rect "$wk_x" "$WK_Y" "$WK_CELL_W" "$WK_CELL_H" BLACK
             draw_text_reg_inv "$wk_nx" "$wk_ny" "$WK_NAME_SZ" "$wk_name"
             draw_text_reg_inv "$wk_dx" "$wk_dy" "$WK_DAY_SZ" "$wk_day"
+            # FBInk's box round the date is taller than the cell leaves it
+            # (the face's line gap, which the span does not count), so its
+            # black ran past the plate's foot: a narrower step under today.
+            # The white under the cell goes back, down to the footer, whose
+            # rule and text are drawn after this.
+            wk_under=$(( ${FOOT_Y:-0} - WK_Y - WK_CELL_H ))
+            [ "${LAND:-0}" != "1" ] && [ "$wk_under" -gt 0 ] && \
+                fill_rect "$wk_x" "$(( WK_Y + WK_CELL_H ))" "$WK_CELL_W" "$wk_under" WHITE
         elif [ "$i" = "$WK_TODAY" ]; then
             # Minimal: today's name black, its date bold, a bar under it.
             fill_rect "$wk_x" "$(( WK_Y + WK_CELL_H - WK_MARK_T ))" \

@@ -202,7 +202,7 @@ var kdGroups  = { out: "", in: "" };               // the reader's headings
 var kdGroupPh = { out: "OUTSIDE", in: "INSIDE" };  // what "" renders as
 // The place flags — KSLOTF_* in src/web/KindleSlots.h, which /api/kindle/slots
 // does not send.
-var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8, heavy: 16, inv: 32, bar: 64, line: 128 };
+var kdFlags   = { bold: 1, unit: 2, age: 4, trend: 8, heavy: 16, inv: 32, line: 128 };
 var kdInks    = [];     // [{id, css}] from the firmware's own enum
 var kdAutoDec = 255;
 var kdOpen    = "hero"; // which row is expanded
@@ -340,8 +340,9 @@ function kdT(x, y, size, text, o) {
   o = o || {};
   return "<i style='left:" + x + "px;top:" + y + "px;font-size:" + size + "px;color:" +
     (kdPvInvOn ? "#ffffff" : (o.ink || "#111111")) +
-    ";font-weight:" + (o.heavy ? 900 : (o.bold ? 600 : 400)) +
-    (o.heavy ? ";text-shadow:.025em 0 0 currentColor,-.025em 0 0 currentColor" : "") +
+    // Extra bold is drawn once on a black plate, as the panel draws it.
+    ";font-weight:" + (o.heavy && !kdPvInvOn ? 900 : (o.bold || o.heavy ? 600 : 400)) +
+    (o.heavy && !kdPvInvOn ? ";text-shadow:.025em 0 0 currentColor,-.025em 0 0 currentColor" : "") +
     (o.ls ? ";letter-spacing:" + o.ls + "px" : "") + "'>" + kdEsc(text) + "</i>";
 }
 // A place's black plate, when it asked to be white on black: zone_plate()
@@ -353,38 +354,14 @@ function kdPvPlate(z, x, y, w, h) {
          "px;background:#000'></u>";
 }
 function kdPvPlateEnd() { kdPvInvOn = false; }
-// kdBarScore() in KindleFlow.h: how good a reading is, 0..100, or -1 — in
-// whole numbers, as the collector works it out.
-var KD_BAR_SCALES = { humidity:[40, 10], humidity_amb:[40, 10], aqi:[0, 500],
-  co2:[400, 2000], eco2:[400, 2000], tvoc:[0, 2200], pm1:[0, 75], pm25:[0, 75],
-  pm4:[0, 150], pm10:[0, 150], battery_percent:[100, 0], iaq:[0, 500] };
-function kdPvBarScore(metric, v) {
-  var sc = KD_BAR_SCALES[metric];
-  if (!sc || isNaN(v)) return -1;
-  v = Math.trunc(v);
-  if (sc[0] === 40 && v > 60) v = 100 - v;
-  else if (sc[0] === 40 && v > 40) v = 40;
-  var s = Math.trunc((sc[1] - v) * 100 / (sc[1] - sc[0]));
-  return s < 0 ? 0 : (s > 100 ? 100 : s);
-}
-// The place's bar, or -1: switched on, a metric with a scale, a reading.
-function kdPvBarOf(z) {
-  if (!(z.flags & kdFlags.bar)) return -1;
-  var v = kdPvValue(z);
-  return v === "" ? -1 : kdPvBarScore(z.metric, parseFloat(v));
-}
-// The bar after a value drawn at x..`x` (its right end), `top` and size `sz`:
-// draw_field() in update_dash.sh.
-function kdPvBar(x, top, sz, fill) {
-  if (fill < 0) return "";
-  var bw = Math.max(6, Math.round(sz * 0.20)), bt = Math.max(2, Math.round(sz * 0.04));
-  var bh = Math.round(sz * 0.72), bx = x + Math.round(sz * 0.16);
-  var by = top + Math.round(sz * 0.85) - bh, fg = kdPvInvOn ? "#fff" : "#000";
-  var f = Math.round((bh - 2 * bt) * fill / 100);
-  return "<u style='left:" + bx + "px;top:" + by + "px;width:" + bw + "px;height:" +
-         (bh - 2 * bt) + "px;border:" + bt + "px solid " + fg + "'></u>" +
-         "<u style='left:" + (bx + bt) + "px;top:" + (by + bh - bt - f) + "px;width:" + bw +
-         "px;height:" + f + "px;background:" + fg + "'></u>";
+// A 24 h line behind figures — graph.bmp?line=1 — white on black when it
+// is drawn on a place's plate.
+function kdPvLine(x, y, w, hh, sw) {
+  return "<svg style='left:" + x + "px;top:" + y + "px;width:" + w + "px;height:" + hh +
+         "px' viewBox='0 0 560 100' preserveAspectRatio='none' aria-hidden='true'>" +
+         "<polyline points='0,70 70,78 140,84 210,62 280,36 350,22 420,30 490,48 560,40'" +
+         " fill='none' stroke='" + (kdPvInvOn ? "#777777" : "#c0c0c0") + "' stroke-width='" +
+         sw + "' vector-effect='non-scaling-stroke'/></svg>";
 }
 function kdBox(x, y, w, h, cls) {
   return "<u class='" + cls + "' style='left:" + x + "px;top:" + y + "px;width:" +
@@ -971,10 +948,8 @@ function kdFlowInput(show) {
       if (kdPvUnitToCaption(u)) u = "";
       arrow = false;
     }
-    // The bar beside it, KDF_BAR_ADV in KindleFlow.h.
-    var bar = kdPvBarOf(z) >= 0 ? 440 : 0;
-    return (firstIn ? kdFlowFirstInAdvance(z.metric, v, u, arrow)
-                    : kdFlowWorstAdvance(z.metric, v, u, arrow)) + bar;
+    return firstIn ? kdFlowFirstInAdvance(z.metric, v, u, arrow)
+                   : kdFlowWorstAdvance(z.metric, v, u, arrow);
   }
   // The headline and the value beside it by what they print, and the value
   // also by the two figures it is sized for, as the collector measures them
@@ -1141,18 +1116,15 @@ function kdRenderPreview() {
   var valB = !!L.wall;
 
   // ── Left column: the headline, its line, its grid ──
-  // The wall page's outdoor line behind the headline: the chart's switch on a
-  // page with no chart — appendHeroLine() and graph.bmp?line=1.
-  if (L.wall && (show & 0x0020)) {
-    h += "<svg style='left:" + X + "px;top:" + L.heroY + "px;width:" + HW + "px;height:" +
-         (L.subY - L.heroY) + "px' viewBox='0 0 560 100' preserveAspectRatio='none'" +
-         " aria-hidden='true'><polyline points='0,70 70,78 140,84 210,62 280,36 350,22" +
-         " 420,30 490,48 560,40' fill='none' stroke='#c0c0c0' stroke-width='5'" +
-         " vector-effect='non-scaling-stroke'/></svg>";
-  }
   z = kdSlot("hero");
   h += kdPvPlate(z, X - 6, L.groupY - 6, HW + 12,
                  (L.headRuleY ? L.headRuleY - 4 : L.subY + L.subSz + 6) - L.groupY + 6);
+  // The wall page's outdoor line behind the headline, on its plate: the
+  // chart's switch on a page with no chart — appendHeroLine() and
+  // graph.bmp?line=1.
+  if (L.wall && (show & 0x0020)) {
+    h += kdPvLine(X, L.heroY, HW, L.subY - L.heroY, 5);
+  }
   h += kdT(X, L.groupY, L.labSz, kdGroups.out || kdGroupPh.out, { ink:capInk, bold:capB });
   v = kdPvValue(z);
   u = kdPvUnit(z);
@@ -1187,8 +1159,8 @@ function kdRenderPreview() {
                kdPvUnit(z), { ink:"#444444", bold:unitB });
     }
   }
+  var sub = "-2.4 to 15.3°  ·  3 min";
   if (show & 0x0008) {
-    var sub = "-2.4 to 15.3°  ·  3 min";
     h += kdT(lone ? X + Math.max(0, kdQ(HW - kdTw(sub, L.subSz), 2)) : X,
              L.subY, L.subSz, sub, { ink:capInk });
   }
@@ -1220,20 +1192,18 @@ function kdRenderPreview() {
         var tend = (z.flags & kdFlags.trend) && (show & 0x0004) && z.metric === "pressure";
         if (L.wall && tend) { cap += " ↘"; tend = false; }
         usz = Math.round(vs * (u === "°" ? 0.34 : 0.42));
-        // A row of one is centred in the column, caption and value each.
-        if (rows[r].length === 1) {
+        // A row of one is centred in the column, caption and value each, and
+        // every cell is on the wall page.
+        if (rows[r].length === 1 || L.wall) {
           lx = x + Math.max(0, kdQ(cw - kdTw(cap, L.labSz), 2));
           x += Math.max(0, kdQ(cw - kdTw(v, vs) - kdTw(u, usz), 2));
         }
-        // The place's own 24 h line behind its figures — appendCell().
-        if (L.wall && (z.flags & kdFlags.line)) {
-          h += "<svg style='left:" + (X + i * cw) + "px;top:" + (gy + L.labSz + 4) + "px;width:" +
-               (cw - 14) + "px;height:" + vs + "px' viewBox='0 0 560 100'" +
-               " preserveAspectRatio='none' aria-hidden='true'><polyline points='0,60 90,70" +
-               " 180,40 280,50 370,24 460,36 560,30' fill='none' stroke='#c0c0c0'" +
-               " stroke-width='4' vector-effect='non-scaling-stroke'/></svg>";
-        }
         h += kdPvPlate(z, X + i * cw - 6, gy - 6, cw - 6, L.labSz + 4 + vs + 12);
+        // The place's own 24 h line behind its figures, on its plate —
+        // appendCell().
+        if (L.wall && (z.flags & kdFlags.line)) {
+          h += kdPvLine(X + i * cw, gy + L.labSz + 4, cw - 14, vs, 4);
+        }
         h += kdT(lx, gy, L.labSz, cap, { ink:capInk, bold:capB });
         h += kdT(x, gy + L.labSz + 6, vs, v,
                  { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0004), ink:kdPvInk(z.ink),
@@ -1244,7 +1214,6 @@ function kdRenderPreview() {
         if (tend) {
           h += kdT(ux + kdTw(u, usz) + 4, uy, 16, "↘", { ink:"#444444" });
         }
-        h += kdPvBar(ux + kdTw(u, usz), gy + L.labSz + 6, vs, kdPvBarOf(z));
         kdPvPlateEnd();
       }
     }
@@ -1295,15 +1264,21 @@ function kdRenderPreview() {
       // On the wall page, one under the other at the column's edge.
       x = big || L.inVcol ? IX : (L.inCol ? IX + w1 : IX + w1 + (i - 1) * cw2);
       v = kdPvValue(z);
-      // Alone, it stands in the middle of the column.
-      if (ilive.length === 1) {
+      var px = x;
+      // Alone, it stands in the middle of the column; on the wall page every
+      // value does, under a caption at the column's left edge.
+      if (ilive.length === 1 || (L.wall && L.inVcol)) {
         var fw = kdTw(v, ivs) + kdTw(kdPvUnit(z), Math.round(ivs * (kdPvUnit(z) === "°" ? 0.34 : 0.42)));
         if (fw < IW) x = IX + Math.floor((IW - fw) / 2);
       }
       var ptop = big ? iy - 6 : iy - L.labSz - 10;
-      h += kdPvPlate(z, x - 6, ptop, big || L.inVcol ? IW : (L.inCol ? IW - w1 : cw2),
+      // The plate as the panel lays it (update_dash.sh): the column's width
+      // in a column or alone, the first place's share beside the others.
+      h += kdPvPlate(z, px - 6, ptop,
+                     L.inVcol || (big && L.inStack) || ilive.length === 1 ? IW
+                       : (big ? w1 : (L.inCol ? IW - w1 : cw2)),
                      iy + ivs + 6 - ptop);
-      if (!big) h += kdT(x, iy - L.labSz - 4, L.labSz, kdPvCaption(z),
+      if (!big) h += kdT(px, iy - L.labSz - 4, L.labSz, kdPvCaption(z),
                          { ink:capInk, bold:capB });
       h += kdT(x, iy, ivs, v,
                { bold:valB || (z.flags & kdFlags.bold) || (bold & 0x0010), ink:kdPvInk(z.ink),
@@ -1312,7 +1287,6 @@ function kdRenderPreview() {
       usz = Math.round(ivs * (u === "°" ? 0.34 : 0.42));
       h += kdT(x + kdTw(v, ivs), iy + (big ? 16 : 9), usz, u,
                { ink:"#444444", bold:unitB });
-      h += kdPvBar(x + kdTw(v, ivs) + kdTw(u, usz), iy, ivs, kdPvBarOf(z));
       kdPvPlateEnd();
     }
   }
@@ -1330,7 +1304,11 @@ function kdRenderPreview() {
          " fill='none' stroke='#111111' stroke-width='3'/>" +
          "<polyline points='0,60 70,62 140,58 210,64 280,60 350,56 420,62 490,58 560,60'" +
          " fill='none' stroke='#777777' stroke-width='2' stroke-dasharray='7 5'/></svg>";
-    h += kdT(L.grX, L.grY + L.grH + 2, 15, "outside mean", { ink:"#444444" });
+    // The key names the line the reader chose, as /kindle/data does.
+    var ca = +kdVal("kd-cha", "0"), cz = kdZones[KD_CHART_PLACES[ca - 1]] || {};
+    h += kdT(L.grX, L.grY + L.grH + 2, 15,
+             (ca && cz.sensor && cz.metric) ? (cz.label || cz.shown || cz.metric) : "outside mean",
+             { ink:"#444444" });
   }
 
   // ── The forecast, on the page that has one ──
@@ -1351,7 +1329,9 @@ function kdRenderPreview() {
     h += kdBox(L.fcIconX, L.fcIconY, isz, isz, "kd-pl");
     var fsz = L.fcTextW ? Math.min(L.fcTextSz, kdQ(L.fcTextW * 1000, kdAdvanceMille("Showers")))
                         : L.fcTextSz;
-    h += kdT(L.fcTextX, L.fcTextY + kdQ(L.fcTextSz - fsz, 2), fsz, "Showers",
+    // Centred over the forecast's column on the wall page.
+    h += kdT(L.wall ? L.fcTextX + Math.max(0, kdQ(L.fcTextW - kdTw("Showers", fsz), 2)) : L.fcTextX,
+             L.fcTextY + kdQ(L.fcTextSz - fsz, 2), fsz, "Showers",
              { bold:L.wall || !!(bold & 0x0040) });
     // The wall page sets the high and low by what they print: kdWallFcFit().
     var tsz = L.fcTempSz;
@@ -1429,6 +1409,17 @@ function kdRenderPreview() {
   // ── The footer, and the status line the FBInk panel draws ──
   h += kdRl(18, L.footY, RW, 1);
   h += kdT(18, L.footY + 8, 15, "measured on site", { ink:"#545c68" });
+  // The wall page's reader WiFi, left of the status line: draw_wifi().
+  if (L.wall) {
+    // At the panel's STAT_SZ, 15: bars 3 px wide, 2 apart, on the baseline.
+    var wx = L.statX - 150, wb = L.footY + 8 + Math.round(15 * 0.848);
+    for (i = 1; i <= 5; i++) {
+      h += "<u style='left:" + (wx + (i - 1) * 5) + "px;top:" + (wb - Math.floor(15 * (i + 1) / 6)) +
+           "px;width:3px;height:" + Math.floor(15 * (i + 1) / 6) + "px;background:" +
+           (i <= 4 ? "#000" : "#ccc") + "'></u>";
+    }
+    h += kdT(wx + 30, L.footY + 8, 15, "HomeWiFi", { ink:"#777777" });
+  }
 
   // ── The hit targets ──
   // A button per region, over the drawing, so the picture is the index. Each
@@ -1625,8 +1616,6 @@ function kdSlotEditor(key) {
         ? kdFlagBox(key, kdFlags.trend, kdI18n("flagTrend")) : "") +
       kdFlagBox(key, kdFlags.heavy, kdI18n("flagHeavy")) +
       kdFlagBox(key, kdFlags.inv,   kdI18n("flagInv")) +
-      (kdPvBarScore(z.metric, 50) >= 0 && key !== "hero" && key !== "big"
-        ? kdFlagBox(key, kdFlags.bar, kdI18n("flagBar")) : "") +
       // The wall grid draws it; any place's choice keeps its history.
       (/^g\d$/.test(key) ? kdFlagBox(key, kdFlags.line, kdI18n("flagLine")) : "") +
     "</div></div>";
@@ -1663,7 +1652,37 @@ function kdFlagBox(key, bit, label) {
          kdEsc(label) + "</label>";
 }
 
+// The chart's two lines (chart_a/chart_b): the default, each of the eleven
+// places — numbered as the collector stores them, KZ_HERO..KZ_IN3 plus one —
+// with what is in it now, and for the dashed line none. Built here rather
+// than as data-i18n markup because the text follows the places, so it is
+// redrawn with them and on a language switch; the selection is kept.
+var KD_CHART_PLACES = ["hero","big","g1","g2","g3","g4","g5","g6","in1","in2","in3"];
+function kdChartOpts() {
+  [["kd-cha", "chartDefA", false], ["kd-chb", "chartDefB", true]].forEach(function (c) {
+    var sel = document.getElementById(c[0]);
+    if (!sel) return;
+    var keep = sel.value || "0";
+    var o = [[0, kdI18n(c[1])]];
+    KD_CHART_PLACES.forEach(function (k, i) {
+      var z = kdZones[k] || {};
+      var what = (z.sensor && z.metric) ? (z.label || z.shown || z.metric) : kdI18n("chartEmpty");
+      o.push([i + 1, kdI18n("chPlace_" + k) + " — " + what]);
+    });
+    if (c[2]) o.push([255, kdI18n("chartNone")]);
+    sel.innerHTML = "";
+    o.forEach(function (x) {
+      var el = document.createElement("option");
+      el.value = String(x[0]); el.textContent = x[1];
+      sel.appendChild(el);
+    });
+    sel.value = keep;
+    if (sel.value !== keep) sel.value = "0";
+  });
+}
+
 function kdRenderZones() {
+  kdChartOpts();
   var box = document.getElementById("kd-zones");
   if (!box) return;
   var show = kdLoaded ? kdMaskOf(KD_SHOW, "kd-s-") : kdShowInit;
@@ -1816,7 +1835,7 @@ function kdSnapshot() {
     press:kdVal("kd-press","0"), dec:kdVal("kd-dec","1"),
     refresh:kdVal("kd-refresh",""), follow:kdVal("kd-follow","1"),
     pin:kdVal("kd-clockpin","1"), res:kdVal("kd-fbink-res","0"),
-    layout:kdVal("kd-layout","0"), page:kdVal("kd-page","0"), wpage:kdVal("kd-wpage","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
+    layout:kdVal("kd-layout","0"), page:kdVal("kd-page","0"), wpage:kdVal("kd-wpage","0"), cha:kdVal("kd-cha","0"), chb:kdVal("kd-chb","0"), rot:kdVal("kd-rot","0"), prot:kdVal("kd-prot","-1"), csync:kdCsyncDays(),
     bdev:kdVal("kd-bdev","0"), bbar:kdVal("kd-bbar","0"),
     wkfc:kdVal("kd-wkfc","0"), wkst:kdVal("kd-wkst","0"),
     rulew:kdVal("kd-rulew","0"), rulei:kdVal("kd-rulei","0"), rules:kdVal("kd-rules","0"),
@@ -2111,6 +2130,9 @@ function kindleRender(d) {
   kdSet("kd-fbink-res", d.fbink_res_w || 0);
   kdSet("kd-layout",    d.layout_mode || 0);
   kdSet("kd-page",      d.page_style || 0);
+  kdChartOpts();
+  kdSet("kd-cha",       d.chart_a || 0);
+  kdSet("kd-chb",       d.chart_b == null ? 0 : d.chart_b);
   kdSet("kd-wpage",     d.web_style || 0);
   kdSet("kd-rot",       d.rotation || 0);
   // -1 is "the same as the panel", and what a collector too old to send the
@@ -2252,6 +2274,8 @@ function kdConfigBody() {
   body.set("layout_mode",   kdVal("kd-layout", "0"));
   body.set("page_style",    kdVal("kd-page", "0"));
   body.set("web_style",     kdVal("kd-wpage", "0"));
+  body.set("chart_a",       kdVal("kd-cha", "0"));
+  body.set("chart_b",       kdVal("kd-chb", "0"));
   body.set("outdoor_sensor", (document.getElementById("kd-outdoor-sensor") || {}).value || "");
   body.set("indoor_sensor",  (document.getElementById("kd-indoor-sensor") || {}).value || "");
   return body;

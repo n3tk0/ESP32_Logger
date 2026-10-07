@@ -143,11 +143,40 @@ inline uint16_t clampW(uint16_t w, uint16_t panelW) {
 /// amount no photograph would ever settle. check_kindle_parity.py compares
 /// GR_W/GR_H and not these, so nothing else was going to say so.
 inline int marginL(uint16_t w) { return w * 40 / 560; }
-inline int marginR(uint16_t w) { return w - w * 4 / 560; }
+/// `right`: the second line has a scale of its own (ChartBmpCtx::ownB), and
+/// its values stand right of the plot in a margin as wide as the left one.
+inline int marginR(uint16_t w, bool right = false) {
+    return w - w * (right ? 40 : 4) / 560;
+}
 inline int marginT(uint16_t h) { return h * 10 / 220; }
 inline int marginB(uint16_t h) { return h - h * 26 / 220; }
 
 }  // namespace ChartBmp
+
+/// The scale one line or two are drawn to, from their lowest and highest
+/// readings: 6 % padding either side with a floor of 0.4, the same in the
+/// image, the page's SVG and the panel's axis labels — a second opinion in
+/// any of them would label the chart with somebody else's scale. Nothing
+/// recorded (lo > hi) comes back as an arbitrary span, which no label shows.
+/// Widen lo..hi to take in every hour of `h` that has a reading; nothing
+/// when !have. Start from lo = 1e9, hi = -1e9.
+inline void chartRange(const TrendRing::Hour* h, bool have, float& lo, float& hi) {
+    if (!have) return;
+    for (int i = 0; i < TrendRing::HOURS; i++) {
+        if (!h[i].count) continue;
+        if (h[i].min < lo) lo = h[i].min;
+        if (h[i].max > hi) hi = h[i].max;
+    }
+}
+
+inline void chartScale(float& lo, float& hi, float& span) {
+    if (lo > hi) { lo = 0.0f; hi = 1.0f; }
+    float pad = (hi - lo) * 0.06f;
+    if (pad < 0.4f) pad = 0.4f;
+    lo -= pad; hi += pad;
+    span = hi - lo;
+    if (span < 0.001f) span = 1.0f;  // safety
+}
 
 // Rendering context for the BMP chart, computed once and shared across chunks.
 struct ChartBmpCtx {
@@ -163,7 +192,14 @@ struct ChartBmpCtx {
     /// the outdoor mean alone, light grey and thick, edge to edge, with no
     /// grid, band or indoor line — the headline's figures are drawn over it.
     bool lineOnly = false;
+    /// ...and on black, for a place set white on black: a mid grey line.
+    bool lineInv = false;
+    /// The second line on a scale of its own, when it is not the same metric
+    /// as the first — a temperature and a pressure share no axis. Its values
+    /// go down the right; ChartBmp::marginR(w, true) leaves room for them.
+    bool ownB = false;
     float yScale;  // (B - T) / span
+    float loB, hiB, spanB, yScaleB;  // the second line's, when ownB
 
     // Precomputed X positions for each hour
     int hourX[TrendRing::HOURS];
@@ -193,30 +229,25 @@ struct ChartBmpCtx {
         H = height;
         rowBytes = W / 2;
         L = ChartBmp::marginL(W);
-        R = ChartBmp::marginR(W);
+        if (lineOnly) ownB = false;
+        R = ChartBmp::marginR(W, ownB);
         T = ChartBmp::marginT(H);
         B = ChartBmp::marginB(H);
         if (lineOnly) { L = 0; R = W - 1; T = 4; B = H - 5; haveIn = false; }
         dx = (float)(R - L) / (float)(TrendRing::HOURS - 1);
 
         // Compute Y scale
-        lo = 1e9f; hi = -1e9f;
-        for (int i = 0; i < TrendRing::HOURS; i++) {
-            if (haveOut && tOut[i].count) {
-                if (tOut[i].min < lo) lo = tOut[i].min;
-                if (tOut[i].max > hi) hi = tOut[i].max;
-            }
-            if (haveIn && tIn[i].count) {
-                if (tIn[i].min < lo) lo = tIn[i].min;
-                if (tIn[i].max > hi) hi = tIn[i].max;
-            }
-        }
-        float pad = (hi - lo) * 0.06f;
-        if (pad < 0.4f) pad = 0.4f;
-        lo -= pad; hi += pad;
-        span = hi - lo;
-        if (span < 0.001f) span = 1.0f;  // safety
+        lo = loB = 1e9f; hi = hiB = -1e9f;
+        chartRange(tOut, haveOut, lo, hi);
+        chartRange(tIn, haveIn, ownB ? loB : lo, ownB ? hiB : hi);
+        chartScale(lo, hi, span);
         yScale = (float)(B - T) / span;
+        if (ownB) {
+            chartScale(loB, hiB, spanB);
+        } else {
+            loB = lo; hiB = hi; spanB = span;
+        }
+        yScaleB = (float)(B - T) / spanB;
 
         // Precompute positions
         for (int i = 0; i < TrendRing::HOURS; i++) {
@@ -229,7 +260,7 @@ struct ChartBmpCtx {
                 outMeanY[i] = T + (int)((hi - tOut[i].sum / tOut[i].count) * yScale);
             }
             if (inHourValid[i]) {
-                inMeanY[i] = T + (int)((hi - tIn[i].sum / tIn[i].count) * yScale);
+                inMeanY[i] = T + (int)((hiB - tIn[i].sum / tIn[i].count) * yScaleB);
             }
         }
 
@@ -242,8 +273,8 @@ struct ChartBmpCtx {
     // `bmpY` is the BMP row (bottom-up: bmpY = H-1-y).
     void renderRow(uint8_t* row, int y) const {
         // Fill with white (palette index 15)
-        memset(row, 0xFF, rowBytes);
-        if (lineOnly) { renderLine(row, y, 2, cssGrey(0xC0)); return; }
+        memset(row, lineInv ? 0x00 : 0xFF, rowBytes);
+        if (lineOnly) { renderLine(row, y, 2, cssGrey(lineInv ? 0x77 : 0xC0)); return; }
 
         // ── Vertical grid lines (every 3h + "now") ──
         if (y >= T && y <= B) {

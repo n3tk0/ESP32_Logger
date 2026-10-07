@@ -778,7 +778,7 @@ def run_web_filter(app) -> None:
     The setting was applied in one place: step 8's HTTP upload loop, file by
     file. Step 7 runs `pio run -t uploadfs`, which images data/www/ exactly
     as it stands — so over USB the setting did nothing at all, and a tree with
-    both copies of every page is about 970 KB of a 4 MB C3's 1088 KB LittleFS
+    both copies of every page is about 970 KB of a 4 MB C3's 1088 KB LittleFS (960 KB since)
     partition, before one row of CSV. Somebody choosing "compressed only" to
     make it fit got both copies anyway and a full filesystem.
     """

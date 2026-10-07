@@ -156,7 +156,8 @@ constexpr uint8_t KSLOTF_AGE      = 0x04;  ///< append "· 4m" when it is stale
 constexpr uint8_t KSLOTF_TREND    = 0x08;  ///< append the 3 h tendency arrow
 constexpr uint8_t KSLOTF_HEAVY    = 0x10;  ///< extra bold: the bold face, thickened
 constexpr uint8_t KSLOTF_INV      = 0x20;  ///< white on a black plate
-constexpr uint8_t KSLOTF_BAR      = 0x40;  ///< a bar beside it, fuller the better it is
+// 0x40 was a bar beside the value, removed 2026-10-03: a saved place may
+// still carry it, and nothing reads it.
 constexpr uint8_t KSLOTF_LINE     = 0x80;  ///< keep its 24 h history; the wall draws it
 constexpr uint8_t KSLOTF_ALL      = 0xFF;
 

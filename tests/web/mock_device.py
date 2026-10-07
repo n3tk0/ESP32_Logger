@@ -320,6 +320,9 @@ KINDLE = {
     # Read from: the FBInk panel and the browser page each a desk or a wall.
     "page_style": 0,
     "web_style": 0,
+    # The desk chart's two lines: 0 the default, a place plus one, 255 none.
+    "chart_a": 0,
+    "chart_b": 0,
     "outdoor_sensor": "balcony",
     "indoor_sensor": "",
 }
@@ -1130,7 +1133,8 @@ class H(http.server.SimpleHTTPRequestHandler):
                       "fbink_res_w", "layout_mode", "clock", "rotation", "page_rotation", "clock_sync",
                       "browser_dev", "browser_bar",
                       "week_forecast", "week_style", "rule_weight", "rule_ink",
-                      "rule_style", "out_size", "in_size", "page_style", "web_style"):
+                      "rule_style", "out_size", "in_size", "page_style", "web_style",
+                      "chart_a", "chart_b"):
                 if k in body:
                     KINDLE[k] = int(body[k][0])
             for k in ("face_custom", "outdoor_sensor", "indoor_sensor"):

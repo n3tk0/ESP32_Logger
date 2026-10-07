@@ -4,7 +4,7 @@ app_slot.py — how many bytes an OTA image is allowed to be, for this build.
 
 WHY IT IS COMPUTED AND NOT WRITTEN DOWN
 ---------------------------------------
-The limit is the size of the app partition, and it differs per board: 1,472 KB
+The limit is the size of the app partition, and it differs per board: 1,536 KB
 on the 4 MB C3s, 3,264 KB on the 8 MB S3s, 6,400 KB on the 16 MB one. Those
 numbers were typed into .github/workflows/build-firmware.yml once, with the hex
 in a comment beside them, and they are correct — until somebody changes a
@@ -21,7 +21,7 @@ twice the app flash and the same limit per image — the second slot is what
 makes a rollback possible, not what makes a bigger firmware possible.
 
     python3 tools/app_slot.py partitions_balanced.csv
-    1507328
+    1572864
     python3 tools/app_slot.py --env esp32s3
     3342336
 

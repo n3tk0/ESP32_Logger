@@ -186,7 +186,7 @@
 // library and SD driver underneath it.  MEASURED at ~34 KB on the C3 — two
 // `pio run -e xiao_esp32c3` builds of this default config: firmware.bin is
 // 1,333,408 bytes with and 1,298,832 without, so 34,576 off the image that
-// has to fit app0 (0x170000 = 1,507,328).  It is spent whether or not a card
+// has to fit app0 (0x180000 = 1,572,864).  It is spent whether or not a card
 // is ever fitted.
 //
 // With this off: sdFs() returns nullptr and sdAvailable stays false, so every
