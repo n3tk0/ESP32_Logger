@@ -841,8 +841,8 @@ the value beside the headline is black rather than #444, and the rules are
 the heaviest black ones unless they have been set.
 
 **The grid's readings sit in the middle of their cells**, figures and
-captions, and so does the forecast's condition word. The indoor column stays
-at its left edge, heading, captions and values. The panel centres by the
+captions, and so do the indoor values and the forecast's condition word. The
+indoor heading and captions stay at the column's left edge. The panel centres by the
 widths the collector sends (`Z_<zone>_VADVW`, `_UADVW` and `_LADVW`,
 `FC_SUMMARY_ADVW`).
 On the wall page the panel centres a caption at 115 % of the collector's

@@ -1554,9 +1554,9 @@ check "$?" "the wall page draws hairlines between its outdoor places, the desk p
   exit 0 )
 check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind it, on its plate"
 
-# CENTRED ON THE WALL PAGE: a grid cell's caption and value in the cell. The
-# indoor column stays at its left edge, heading, captions and values, as
-# Petko asked after seeing it on the panel.
+# CENTRED ON THE WALL PAGE: a grid cell's caption and value in the cell, and
+# the indoor values in their column. The indoor heading and captions stay at
+# the column's left edge, as Petko asked after seeing them on the panel.
 ( flow_payload "$WORK/ly.txt" res=600 wall=1 chart=0 week=0
   load_kv "$DASH_TMP/data.txt" PAYLOAD
   ly_load "$WORK/ly.txt"
@@ -1572,15 +1572,15 @@ check "$?" "a wall grid place's own 24 h line is fetched for it and drawn behind
   grep -e "--${T}${lab}" "$FBINK_LOG" | grep -q "left=${lx}," || \
       { grep -e "${lab}" "$FBINK_LOG" >&2; echo "want $lx" >&2; exit 1; }
   grep -e "--${T}${Z_GROUP_IN}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," || exit 2
-  # The indoor values and captions (the first has none): at the left edge.
+  # The indoor captions (the first has none) at the left edge, the values not.
   n=0
   for z in $IN_ZONES; do
     eval "v=\$Z_${z}_VALUE; l=\$Z_${z}_LABEL"; n=$((n + 1))
-    grep -e "--${T}${v}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," || { echo "$z not at the edge" >&2; exit 3; }
+    grep -e "--${T}${v}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," && { echo "$z value at the edge" >&2; exit 3; }
     [ "$n" = 1 ] || [ -z "$l" ] || grep -e "--${T}${l}${T}" "$FBINK_LOG" | grep -q "left=${COL_R_X}," || { echo "$z caption not at the edge" >&2; exit 4; }
   done
   exit 0 )
-check "$?" "the wall page centres its grid cells, and keeps the indoor column at its left edge"
+check "$?" "the wall page centres its grid cells and indoor values, the indoor captions at the left edge"
 
 # THE READER'S OWN WIFI on the wall page's footer: five bars, as full as the
 # signal /proc/net/wireless gives, and wifid's name for the network. Not on

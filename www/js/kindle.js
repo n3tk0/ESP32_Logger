@@ -1265,8 +1265,9 @@ function kdRenderPreview() {
       x = big || L.inVcol ? IX : (L.inCol ? IX + w1 : IX + w1 + (i - 1) * cw2);
       v = kdPvValue(z);
       var px = x;
-      // Alone, it stands in the middle of the column.
-      if (ilive.length === 1) {
+      // Alone, it stands in the middle of the column; on the wall page every
+      // value does, under a caption at the column's left edge.
+      if (ilive.length === 1 || (L.wall && L.inVcol)) {
         var fw = kdTw(v, ivs) + kdTw(kdPvUnit(z), Math.round(ivs * (kdPvUnit(z) === "°" ? 0.34 : 0.42)));
         if (fw < IW) x = IX + Math.floor((IW - fw) / 2);
       }

@@ -4432,6 +4432,14 @@ draw_zones() {
                 cx=$(( rx + w1 + (i - 1) * cw )); vsz="$small"; y="$small_y"
                 in_caption "$cx" "$y" "$cw" "$vsz" "$lab"
             fi
+            # The wall page's column: the captions at its left edge, as the
+            # heading, and each value centred in it.
+            if [ "$vcol" = "1" ] && [ "${WALL:-0}" = "1" ] && [ -n "$val" ] &&
+               [ "$vadv" -gt 0 ] 2>/dev/null; then
+                field_w "$vsz" "$val" "$unit" "$arrow" "$vadv" "$uadv" "$bold"
+                centre_in "$rx" "$rw" "$FIELD_W"
+                cx="$CENTRE_X"
+            fi
             draw_field "$cx" "$y" "$vsz" "$bold" "$val" "$unit" "$arrow" \
                        "$vadv" "$uadv" "$ink"
             zone_done

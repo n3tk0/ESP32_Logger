@@ -2850,7 +2850,7 @@ static void appendWallBody(String& p, const KindleConfig& skin, uint32_t now,
                 appendEscaped(p, r.ok ? r.label : kdSlotLabel(sl));
                 p += F("</div>");
             }
-            kdWallAt(p, "cv", f.inX, y, f.inW);
+            kdWallAt(p, "cv ctr", f.inX, y, f.inW);
             const char* cls = i == 0 ? "iv iv-1" : "iv";
             appendValue(p, r, sl, cls);
             p += F("</div>");
