@@ -1,4 +1,5 @@
 #include "WebhookExporter.h"
+#include "UrlMask.h"       // the URL in log lines: host only
 #include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -24,8 +25,8 @@ bool WebhookExporter::init(JsonObjectConst cfg) {
         if (rule.sensorId[0] && rule.metric[0]) _ruleCount++;
     }
 
-    Log.printf("[Webhook] url=%s rules=%d cooldown=%ums\n",
-                  _url, _ruleCount, _cooldownMs);
+    Log.printf("[Webhook] url=%.*s%s rules=%d cooldown=%ums\n",
+                  urlHostLen(_url), _url, urlRestMark(_url), _ruleCount, _cooldownMs);
     return true;
 }
 

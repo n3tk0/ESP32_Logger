@@ -49,6 +49,12 @@ public:
     // interval and sensor selection do not apply to them.
     virtual bool        isStreaming() const { return false; }
 
+    // Whether send() would do anything with this reading. ExportManager
+    // leaves the others out of the snapshot (and so out of the spool): a
+    // snapshot is one malloc, and openSenseMap or sensor.community take a
+    // few metrics of the dozens a Collector has.
+    virtual bool        wants(const SensorReading&) const { return true; }
+
     // The server said "too many requests" (HTTP 429) on the last send().
     // ExportManager then stops: no retry, no spool, and the exporter waits
     // (see Throttle.h). retryAfterS() is the server's Retry-After, 0 if none.

@@ -100,6 +100,13 @@ static void describeActivities(uint32_t now, char* out, size_t cap) {
     if (!len) strlcpy(out, "none", cap);
 }
 
+// A low-heap line for the event log, held while the heap is too short to
+// write it: eventLogPrintf() opens LittleFS files and its rotation mallocs
+// 3 KB, which at that moment could be the allocation that fails. The RTC log
+// has the line at once; the file gets it once there is room again.
+static char s_heapPending[160];
+static constexpr uint32_t HEAP_WRITE_MIN_BLOCK = 4096;
+
 void heapWatchTick(uint32_t now) {
     if ((int32_t)(now - s_lastPoll) < (int32_t)POLL_MS) return;
     s_lastPoll = now;
@@ -109,16 +116,20 @@ void heapWatchTick(uint32_t now) {
         (!s_heapLogged || minFree + HEAP_STEP_BYTES <= s_heapLogged)) {
         s_heapLogged = minFree;
         s_heapLines++;
-        char acts[96], at[24];
+        // acts sized so the event-log line (160 B) keeps all of it.
+        char acts[88], at[24];
         describeActivities(now, acts, sizeof(acts));
         eventLogNow(at, sizeof(at));
         Log.printf("[heap] low: min=%u free=%u largest=%u during %s\n",
                       (unsigned)minFree, (unsigned)ESP.getFreeHeap(),
                       (unsigned)ESP.getMaxAllocHeap(), acts);
-        eventLogPrintf("low heap min=%u free=%u largest=%u at=%s up=%lus  %s",
-                       (unsigned)minFree, (unsigned)ESP.getFreeHeap(),
-                       (unsigned)ESP.getMaxAllocHeap(), at,
-                       (unsigned long)(now / 1000), acts);
+        snprintf(s_heapPending, sizeof(s_heapPending), "low heap min=%u free=%u big=%u at=%s %s",
+                 (unsigned)minFree, (unsigned)ESP.getFreeHeap(),
+                 (unsigned)ESP.getMaxAllocHeap(), at, acts);
+    }
+    if (s_heapPending[0] && ESP.getMaxAllocHeap() >= HEAP_WRITE_MIN_BLOCK) {
+        eventLogPrintf("%s", s_heapPending);
+        s_heapPending[0] = '\0';
     }
 
     if ((int32_t)(now - s_lastLost) < (int32_t)LOST_EVERY_MS && s_lastLost) return;

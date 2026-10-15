@@ -24,7 +24,7 @@ bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
         if (!sid || !*sid) continue;              // an empty field maps nothing
         if (_sensorIdCount >= OSM_MAX_SENSORS) { over++; continue; }
         SensorIdEntry& e = _sensorIds[_sensorIdCount++];
-        strlcpy(e.metric,   kv.key().c_str(), sizeof(e.metric));
+        strlcpy(e.key,      kv.key().c_str(), sizeof(e.key));
         strlcpy(e.sensorId, sid,              sizeof(e.sensorId));
     }
 
@@ -37,9 +37,9 @@ bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     return true;
 }
 
-const char* OpenSenseMapExporter::_lookupSensorId(const char* metric) const {
+const char* OpenSenseMapExporter::_lookupSensorId(const char* key) const {
     for (int i = 0; i < _sensorIdCount; i++) {
-        if (strcmp(_sensorIds[i].metric, metric) == 0) {
+        if (strcmp(_sensorIds[i].key, key) == 0) {
             return _sensorIds[i].sensorId;
         }
     }
@@ -51,7 +51,11 @@ const char* OpenSenseMapExporter::_lookupSensorId(const char* metric) const {
 // 422 for the WHOLE array, so one bad value would have cost every good one.
 const char* OpenSenseMapExporter::_sendableId(const SensorReading& r) const {
     if (r.quality == QUALITY_ERROR || !isfinite(r.value)) return nullptr;
-    const char* sid = _lookupSensorId(r.metric);
+    // This sensor's own mapping first, then the metric's (the old form).
+    char key[sizeof(SensorIdEntry::key)];
+    snprintf(key, sizeof(key), "%s/%s", r.sensorId, r.metric);
+    const char* sid = _lookupSensorId(key);
+    if (!sid) sid = _lookupSensorId(r.metric);
     return (sid && sid[0]) ? sid : nullptr;
 }
 

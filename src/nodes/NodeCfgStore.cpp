@@ -381,8 +381,21 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
     Work* w = new (std::nothrow) Work;
     if (!w) return;
     bool haveFile = e && loadEntry(*e, w->doc);
-    if (e && !haveFile) {                 // the file went; so does the entry
-        e->used = false;
+    if (e && !haveFile) {
+        // Gone only when the file is not there. A read that failed with the
+        // file still there (no heap for the parse, fsMutex busy) says nothing
+        // about it: dropping the entry then asked the node for its report
+        // (`cfg_want`) and the report overwrote the file, desired edits and
+        // all. Try again on the next POST instead.
+        char p[ncr::PATH_CAP];
+        pathOf(*e, p);
+        bool exists = true;
+        {
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+            if (!fsMutex || g.isLocked()) exists = LittleFS.exists(p);
+        }
+        if (exists) { delete w; return; }
+        e->used = false;                  // the file went; so does the entry
         e = nullptr;
         if (rep.isNull()) { reply["cfg_want"] = true; delete w; return; }
     }

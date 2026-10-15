@@ -9,8 +9,31 @@
 #include "../utils/JsonIO.h"
 #include "../core/HeapWatch.h"   // HeapActivity
 #include "Throttle.h"
+#include <esp_attr.h>       // RTC_NOINIT_ATTR
+#include <esp_system.h>     // esp_reset_reason
 
 ExportManager exportManager;
+
+// How far each spool has been sent, kept in RTC memory so a reboot (a panic,
+// an OTA, Save & Restart) carries on from there instead of sending the part
+// already sent again. A power cut clears it: that boot starts from the top,
+// a duplicate rather than a loss. The exporter's name is kept with it, so an
+// image that registers exporters in another order reads none of it.
+namespace {
+struct SpoolRtc {
+    uint32_t magic;
+    uint32_t nameHash[ExportManager::MAX_EXPORTERS];
+    uint32_t off[ExportManager::MAX_EXPORTERS];
+};
+constexpr uint32_t SPOOL_RTC_MAGIC = 0x53504F31u ^ (uint32_t)sizeof(SensorReading);
+RTC_NOINIT_ATTR SpoolRtc s_spoolRtc;
+
+uint32_t nameHash(const char* s) {        // FNV-1a
+    uint32_t h = 2166136261u;
+    for (; s && *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+    return h;
+}
+} // namespace
 
 // ---------------------------------------------------------------------------
 bool ExportManager::addExporter(IExporter* exporter) {
@@ -153,9 +176,9 @@ bool ExportManager::_accepts(int idx, const char* sensorId) const {
 }
 
 // A table slot exporter `idx` has yet to send: filled after `since`, by a
-// sensor selected for it.
+// sensor selected for it, and something the exporter sends at all.
 bool ExportManager::_pending(int idx, const LatestSlot& s, uint32_t since) const {
-    return s.seq > since && _accepts(idx, s.r.sensorId);
+    return s.seq > since && _accepts(idx, s.r.sensorId) && _exporters[idx]->wants(s.r);
 }
 
 // The table sequence every enabled periodic exporter has sent up to.
@@ -206,9 +229,19 @@ void ExportManager::ingest(const SensorReading& r) {
         // when every slot is still owed to someone, the least recently
         // updated one (and say so — that value is lost).
         slot = (empty >= 0) ? empty : (spare >= 0) ? spare : oldest;
-        if (empty < 0 && spare < 0 && slot >= 0)
-            Log.printf("[Export] table full, dropped %s/%s\n",
-                          latest[slot].r.sensorId, latest[slot].r.metric);
+        // Once a minute at most, with a count: the line went into the RTC
+        // log for every reading and pushed out what came before a crash.
+        if (empty < 0 && spare < 0 && slot >= 0) {
+            _tableFullDrops++;
+            const uint32_t now = millis();
+            if (!_lastTableFullMs || now - _lastTableFullMs >= 60000UL) {
+                Log.printf("[Export] table full, dropped %s/%s (%u since last line)\n",
+                              latest[slot].r.sensorId, latest[slot].r.metric,
+                              (unsigned)_tableFullDrops);
+                _tableFullDrops  = 0;
+                _lastTableFullMs = now ? now : 1;
+            }
+        }
     }
     if (store && slot >= 0) {
         latest[slot].r   = r;
@@ -236,7 +269,16 @@ SensorReading* ExportManager::_buildSnapshot(int idx, size_t& n) {
     if (!latest) return nullptr;
     for (int k = 0; k < EXPORT_LATEST_SLOTS; k++) n += _pending(idx, latest[k], since);
     if (n && !(out = static_cast<SensorReading*>(malloc(n * sizeof(SensorReading))))) {
-        n = 0;                        // no heap: stays unsent, tried next time
+        // No heap: stays unsent, tried next time. Said once a minute, so a
+        // heap squeeze that stops the exports shows in /api/log.
+        const uint32_t now = millis();
+        if (!_lastSnapFailMs || now - _lastSnapFailMs >= 60000UL) {
+            Log.printf("[ExportManager] '%s' no heap for %u values (%u B), send skipped\n",
+                          _exporters[idx]->getName(), (unsigned)n,
+                          (unsigned)(n * sizeof(SensorReading)));
+            _lastSnapFailMs = now ? now : 1;
+        }
+        n = 0;
         return nullptr;
     }
     // j < n: a reload on the web task may change the selection between the
@@ -307,6 +349,21 @@ static void spoolPath(char (&path)[48], const char* name) {
 void ExportManager::setSpoolFS(fs::FS* fs) {
     _spoolFS = fs;
     if (!fs) return;
+
+    // The offsets the previous boot got to (see SpoolRtc). RTC memory holds
+    // garbage after a power-on, hence the magic; the drain re-checks every
+    // offset against the file it is used on.
+    const esp_reset_reason_t why = esp_reset_reason();
+    const bool kept = s_spoolRtc.magic == SPOOL_RTC_MAGIC && why != ESP_RST_POWERON &&
+                      why != ESP_RST_BROWNOUT && why != ESP_RST_UNKNOWN;
+    for (int i = 0; i < MAX_EXPORTERS; i++) {
+        const uint32_t h = i < _count ? nameHash(_exporters[i]->getName()) : 0;
+        _spoolOff[i] = (kept && i < _count && s_spoolRtc.nameHash[i] == h) ? s_spoolRtc.off[i] : 0;
+        s_spoolRtc.nameHash[i] = h;
+        s_spoolRtc.off[i]      = _spoolOff[i];
+    }
+    s_spoolRtc.magic = SPOOL_RTC_MAGIC;
+
     char path[48];
     for (int i = 0; i < _count; i++) {
         snprintf(path, sizeof(path), "/spool/%s.jsonl", _exporters[i]->getName());
@@ -314,10 +371,21 @@ void ExportManager::setSpoolFS(fs::FS* fs) {
     }
 }
 
+int ExportManager::_indexOf(const IExporter* exp) const {
+    for (int i = 0; i < _count; i++)
+        if (_exporters[i] == exp) return i;
+    return -1;
+}
+
+void ExportManager::_setSpoolOff(int idx, uint32_t off) {
+    if (idx < 0 || idx >= MAX_EXPORTERS) return;
+    _spoolOff[idx]      = off;
+    s_spoolRtc.off[idx] = off;
+}
+
 // A spool file removed and started over: its drain starts at the top.
 void ExportManager::_forgetSpoolOffset(const IExporter* exp) {
-    for (int i = 0; i < _count; i++)
-        if (_exporters[i] == exp) _spoolOff[i] = 0;
+    _setSpoolOff(_indexOf(exp), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -354,8 +422,13 @@ void ExportManager::_spoolBatch(IExporter* exp,
         Log.printf("[ExportManager] Cannot open spool %s\n", path);
         return;
     }
-    // Size guard: don't grow spool beyond MAX_SPOOL_BYTES
-    if (f.size() >= MAX_SPOOL_BYTES) {
+    // Size guard: don't grow spool beyond MAX_SPOOL_BYTES of UNSENT records.
+    // The part before the drain offset has gone already; counting it made a
+    // spool that was mostly sent refuse new batches as "full".
+    const int      idx    = _indexOf(exp);
+    const uint32_t sz     = f.size();
+    const uint32_t sent   = idx >= 0 && _spoolOff[idx] <= sz ? _spoolOff[idx] : 0;
+    if (sz - sent >= MAX_SPOOL_BYTES || sz >= 2 * MAX_SPOOL_BYTES) {
         Log.printf("[ExportManager] Spool full for '%s' — dropping\n", exp->getName());
     } else {
         const size_t want = n * sizeof(SensorReading);
@@ -384,28 +457,36 @@ void ExportManager::_spoolBatch(IExporter* exp,
 // 32 KB spool replayed in one pass was a run of back-to-back POSTs, which is
 // what an API's rate limit counts. _spoolOff[] remembers how far it got; the
 // file is removed once everything in it has gone. After a reboot the offset
-// is 0 again and the part already sent goes again (a duplicate, not a loss).
+// comes back from RTC memory (see SpoolRtc); only a power cut starts it over.
 // ---------------------------------------------------------------------------
 bool ExportManager::_drainSpool(int idx, IExporter* exp) {
     if (!_spoolFS) return true;
 
     char path[48];
     spoolPath(path, exp->getName());
-    if (!_spoolFS->exists(path)) { _spoolOff[idx] = 0; return true; }
+    if (!_spoolFS->exists(path)) { _setSpoolOff(idx, 0); return true; }
 
     File f = _spoolFS->open(path, FILE_READ);
     if (!f) return true;
     const uint32_t size = f.size();
     // The file was replaced since (see _spoolBatch): start it from the top.
-    if (_spoolOff[idx] > size || _spoolOff[idx] % sizeof(SensorReading)) _spoolOff[idx] = 0;
+    if (_spoolOff[idx] > size || _spoolOff[idx] % sizeof(SensorReading)) _setSpoolOff(idx, 0);
 
     SensorReading batch[EXPORT_SPOOL_BATCH];
     size_t count = 0;
+    // Whole records left after the offset. When there are some and none
+    // could be read, LittleFS failed (seek/read): try again next time; only
+    // a spool with nothing left in it (or a torn tail) is removed below.
+    const bool left = size - _spoolOff[idx] >= sizeof(SensorReading);
     if (f.seek(_spoolOff[idx])) {
         const size_t got = f.read(reinterpret_cast<uint8_t*>(batch), sizeof(batch));
         count = got / sizeof(SensorReading);   // a torn tail record is dropped
     }
     f.close();
+    if (left && !count) {
+        Log.printf("[ExportManager] spool read failed for '%s', kept\n", exp->getName());
+        return false;
+    }
 
     bool ok = true;
     if (count) {
@@ -423,7 +504,7 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
         HeapActivity ha(HA_EXPORT, exp->getName());
         exp->clearThrottle();
         ok = exp->send(batch, count);          // false on a 429 too
-        if (ok) _spoolOff[idx] += count * sizeof(SensorReading);
+        if (ok) _setSpoolOff(idx, _spoolOff[idx] + count * sizeof(SensorReading));
     }
 
     // Everything sent (or nothing readable left): remove the file. Failing
@@ -436,7 +517,7 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
             if (g.isLocked()) {
                 _spoolFS->remove(path);
                 removed = true;
-                _spoolOff[idx] = 0;
+                _setSpoolOff(idx, 0);
                 Log.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
             } else if (attempt < 4) {
                 vTaskDelay(pdMS_TO_TICKS(200));
@@ -445,7 +526,7 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
         if (!removed) {
             Log.printf("[ExportManager] WARN: spool remove failed for '%s' — it will be sent again\n",
                           exp->getName());
-            _spoolOff[idx] = 0;
+            _setSpoolOff(idx, 0);
             return false;
         }
     }
@@ -484,6 +565,9 @@ void ExportManager::tick() {
         _nextDueMs[i] += iv;
         if ((int32_t)(now - _nextDueMs[i]) >= 0) _nextDueMs[i] = now + iv;
 
+        // A flag left from an earlier send must not read as this one's 429.
+        exp->clearThrottle();
+
         size_t n = 0;
         const uint32_t sentBefore = _sentSeq[i];
         SensorReading* snap = _buildSnapshot(i, n);
@@ -491,8 +575,7 @@ void ExportManager::tick() {
             // Nothing new: the slot goes to the backlog, still one batch.
             if (exp->spoolOnFailure()) {
                 g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
-                _drainSpool(i, exp);
-                if (exp->throttled()) _throttle(i, exp);
+                _drainSpoolStep(i, exp);
             }
             continue;
         }
@@ -505,19 +588,45 @@ void ExportManager::tick() {
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
 
         // New values first; then, only if they went through, one batch of
-        // the spooled backlog (#4.7, see _drainSpool).
-        if (_sendWithRetry(exp, snap, n)) {
+        // the spooled backlog (#4.7, see _drainSpool). The snapshot is freed
+        // before that second request: it is up to a few KB, and the spool
+        // batch's body and the socket want the heap too.
+        const bool sent = _sendWithRetry(exp, snap, n);
+        free(snap);
+        snap = nullptr;
+        if (sent) {
             _backoffMs[i] = 0;
-            if (exp->spoolOnFailure()) _drainSpool(i, exp);
+            if (exp->spoolOnFailure()) _drainSpoolStep(i, exp);
         } else if (exp->throttled()) {
             // A 429 on the live send: these values were not sent and stay
             // owed to this exporter; the next send after the back-off
             // carries them (or newer ones).
             _sentSeq[i] = sentBefore;
+            _throttle(i, exp);
         }
-        // A 429 on either send (a spool batch stays in the spool): wait.
-        if (exp->throttled()) _throttle(i, exp);
-        free(snap);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// _drainSpoolStep — one spool batch, unless the spool is backing off. A 429
+// on it backs off the spool alone (1, 2, 4, 8, 15 min, or Retry-After): live
+// values keep going every interval, and the backlog stops asking until the
+// limit has had time to clear.
+// ---------------------------------------------------------------------------
+void ExportManager::_drainSpoolStep(int idx, IExporter* exp) {
+    const uint32_t now = millis();
+    if (_spoolBackoffMs[idx] && (int32_t)(now - _spoolDueMs[idx]) < 0) return;
+    exp->clearThrottle();
+    const bool ok = _drainSpool(idx, exp);
+    if (exp->throttled()) {
+        _spoolBackoffMs[idx] = throttleNextBackoffMs(_spoolBackoffMs[idx]);
+        const uint32_t wait  = throttleWaitMs(_spoolBackoffMs[idx], exp->retryAfterS());
+        _spoolDueMs[idx]     = millis() + wait;
+        exp->clearThrottle();
+        Log.printf("[ExportManager] '%s' spool rate-limited, next batch in %lus\n",
+                      exp->getName(), (unsigned long)(wait / 1000));
+    } else if (ok) {
+        _spoolBackoffMs[idx] = 0;
     }
 }
 
