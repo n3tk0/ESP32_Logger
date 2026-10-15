@@ -28,6 +28,8 @@ I18n.register("common", {
     done: "Done",
     back: "Back",
     loading: "Loading…",
+    // A short age, in badges and "… ago" lines
+    ageS: "{n}s", ageM: "{n}m", ageH: "{n}h", ageD: "{n}d",
     apply: "Apply",
     retry: "Retry",
     unsaved: "Unsaved:",
@@ -55,6 +57,7 @@ I18n.register("common", {
     done: "Готово",
     back: "Назад",
     loading: "Зареждане…",
+    ageS: "{n} с", ageM: "{n} мин", ageH: "{n} ч", ageD: "{n} д",
     apply: "Приложи",
     retry: "Опитай пак",
     unsaved: "Незапазено:",

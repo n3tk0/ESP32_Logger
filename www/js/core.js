@@ -1315,6 +1315,19 @@ function emptyState(opts) {
   return wrap;
 }
 
+// A short age from seconds: "42s", "3m", "2h", "1d" (in Bulgarian "42 с",
+// "3 мин", "2 ч", "1 д"). Shared by the Sensors and Nodes pages.
+function fmtShortAge(sec) {
+  var t = function (k, n) { return window.I18n ? I18n.t("common." + k, { n: n }) : n + k.charAt(3).toLowerCase(); };
+  var s = Math.round(sec);
+  if (s < 60) return t("ageS", s);
+  var m = Math.round(s / 60);
+  if (m < 60) return t("ageM", m);
+  var h = Math.round(m / 60);
+  if (h < 24) return t("ageH", h);
+  return t("ageD", Math.round(h / 24));
+}
+
 // HTML-escape for safe insertion into innerHTML. Use textContent / DOM
 // construction where possible; reach for esc() only when string templates
 // are unavoidable. Defined in core.js so all later modules can call it.
@@ -1553,6 +1566,7 @@ function h(tag, attrs, children) {
 //
 // Field types: text | number | password | select | checkbox | pin
 // Per-field options: min, max, step, placeholder, hint, hidden, showWhen.
+// Per-section: title, hint, fields, hidden.
 //
 // Form.bind returns the rendered <form>; values can be re-applied later via
 // Form.fill(form, data). Submit is wired to settingsSave().
@@ -1655,7 +1669,9 @@ var Form = (function () {
     var form = h("form", {}, [
       h("div", { id: msgId }),
       schema.sections.map(function (sec) {
-        return h("div", { class: "card" }, [
+        // A hidden section is still rendered, so its fields post the values
+        // they hold and a save does not reset them.
+        var card = h("div", { class: "card" }, [
           sec.title
             ? h("div", { class: "card-head", text: sec.title })
             : null,
@@ -1664,6 +1680,8 @@ var Form = (function () {
             sec.fields.map(function (f) { return field(f, data); }),
           ]),
         ]);
+        if (sec.hidden) card.style.display = "none";
+        return card;
       }),
       h("button", {
         type: "submit", class: "btn primary",
