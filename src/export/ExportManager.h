@@ -93,6 +93,7 @@ private:
     volatile bool _anyStreaming = false;
     uint32_t     _sentSeq[MAX_EXPORTERS]     = {};   // last table seq sent
     uint32_t     _backoffMs[MAX_EXPORTERS]   = {};   // 429 back-off, 0 = none
+    uint32_t     _spoolOff[MAX_EXPORTERS]    = {};   // spool bytes already sent
 
     // ── Latest value per sensor+metric ─────────────────────────────────────
     // On the heap, allocated the first time a config enables a periodic
@@ -119,7 +120,8 @@ private:
                         const SensorReading* readings, size_t count);
     void _spoolBatch(IExporter* exp,
                      const SensorReading* readings, size_t count);
-    bool _drainSpool(IExporter* exp);
+    bool _drainSpool(int idx, IExporter* exp);
+    void _forgetSpoolOffset(const IExporter* exp);
     void _throttle(int idx, IExporter* exp);
 };
 

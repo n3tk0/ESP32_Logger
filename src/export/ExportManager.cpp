@@ -314,6 +314,12 @@ void ExportManager::setSpoolFS(fs::FS* fs) {
     }
 }
 
+// A spool file removed and started over: its drain starts at the top.
+void ExportManager::_forgetSpoolOffset(const IExporter* exp) {
+    for (int i = 0; i < _count; i++)
+        if (_exporters[i] == exp) _spoolOff[i] = 0;
+}
+
 // ---------------------------------------------------------------------------
 // _spoolBatch — append a failed batch to the exporter's spool file.
 // Caps spool file at MAX_SPOOL_BYTES to protect flash from runaway growth.
@@ -341,6 +347,7 @@ void ExportManager::_spoolBatch(IExporter* exp,
         // misalign every record that follows, so start the file over.
         f.close();
         _spoolFS->remove(path);
+        _forgetSpoolOffset(exp);
         f = _spoolFS->open(path, FILE_APPEND);
     }
     if (!f) {
@@ -362,6 +369,7 @@ void ExportManager::_spoolBatch(IExporter* exp,
             // the spool rather than keep a file that is wrong from here on.
             f.close();
             _spoolFS->remove(path);
+            _forgetSpoolOffset(exp);
             Log.printf("[Export] spool write short, dropped %s\n", path);
             return;
         }
@@ -370,28 +378,37 @@ void ExportManager::_spoolBatch(IExporter* exp,
 }
 
 // ---------------------------------------------------------------------------
-// _drainSpool — try to resend readings from spool file. Deletes file on
-// complete success; leaves it intact if send fails.
+// _drainSpool — send the next EXPORT_SPOOL_BATCH readings of the spool, one
+// batch per call. tick() calls it only after the live send went through, so
+// a backlog never holds up new values and is never sent as a burst: a full
+// 32 KB spool replayed in one pass was a run of back-to-back POSTs, which is
+// what an API's rate limit counts. _spoolOff[] remembers how far it got; the
+// file is removed once everything in it has gone. After a reboot the offset
+// is 0 again and the part already sent goes again (a duplicate, not a loss).
 // ---------------------------------------------------------------------------
-bool ExportManager::_drainSpool(IExporter* exp) {
+bool ExportManager::_drainSpool(int idx, IExporter* exp) {
     if (!_spoolFS) return true;
 
     char path[48];
     spoolPath(path, exp->getName());
-    if (!_spoolFS->exists(path)) return true;
+    if (!_spoolFS->exists(path)) { _spoolOff[idx] = 0; return true; }
 
     File f = _spoolFS->open(path, FILE_READ);
     if (!f) return true;
+    const uint32_t size = f.size();
+    // The file was replaced since (see _spoolBatch): start it from the top.
+    if (_spoolOff[idx] > size || _spoolOff[idx] % sizeof(SensorReading)) _spoolOff[idx] = 0;
 
-    // Read up to one batch at a time to bound memory use.
-    // EXPORT_SPOOL_BATCH is configured in setup.h.
     SensorReading batch[EXPORT_SPOOL_BATCH];
-    bool allOk = true;
+    size_t count = 0;
+    if (f.seek(_spoolOff[idx])) {
+        const size_t got = f.read(reinterpret_cast<uint8_t*>(batch), sizeof(batch));
+        count = got / sizeof(SensorReading);   // a torn tail record is dropped
+    }
+    f.close();
 
-    for (;;) {
-        size_t got   = f.read(reinterpret_cast<uint8_t*>(batch), sizeof(batch));
-        size_t count = got / sizeof(SensorReading);   // a torn tail record is dropped
-        if (count == 0) break;
+    bool ok = true;
+    if (count) {
         for (size_t i = 0; i < count; i++) {
             // The file is storage, not a promise: terminate every string and
             // clamp the quality to an enumerator (CM-5) before anyone reads it.
@@ -402,38 +419,37 @@ bool ExportManager::_drainSpool(IExporter* exp) {
             sr.unit[sizeof(sr.unit) - 1]             = '\0';
             if (sr.quality > QUALITY_ERROR) sr.quality = QUALITY_ERROR;
         }
-        // Same reason as _sendWithRetry: a spool backlog is many sends in
-        // one pass, each as slow as the network is, and the watchdog is
-        // counting.
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         HeapActivity ha(HA_EXPORT, exp->getName());
         exp->clearThrottle();
-        if (!exp->send(batch, count)) { allOk = false; break; }   // incl. 429
+        ok = exp->send(batch, count);          // false on a 429 too
+        if (ok) _spoolOff[idx] += count * sizeof(SensorReading);
     }
-    f.close();
 
-    if (allOk) {
-        // We've already sent — failing to remove here means the next drain
-        // cycle will re-send (duplicate delivery). Retry with backoff before
-        // giving up.
+    // Everything sent (or nothing readable left): remove the file. Failing
+    // to remove it means the next pass sends it again (a duplicate), so try
+    // a few times first.
+    if (ok && (!count || _spoolOff[idx] + sizeof(SensorReading) > size)) {
         bool removed = false;
         for (int attempt = 0; attempt < 5 && !removed; attempt++) {
             MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
             if (g.isLocked()) {
                 _spoolFS->remove(path);
                 removed = true;
+                _spoolOff[idx] = 0;
                 Log.printf("[ExportManager] Spool drained for '%s'\n", exp->getName());
             } else if (attempt < 4) {
                 vTaskDelay(pdMS_TO_TICKS(200));
             }
         }
         if (!removed) {
-            Log.printf("[ExportManager] WARN: sent OK but spool remove failed for '%s' — next cycle will duplicate\n",
+            Log.printf("[ExportManager] WARN: spool remove failed for '%s' — it will be sent again\n",
                           exp->getName());
+            _spoolOff[idx] = 0;
             return false;
         }
     }
-    return allOk;
+    return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -471,7 +487,15 @@ void ExportManager::tick() {
         size_t n = 0;
         const uint32_t sentBefore = _sentSeq[i];
         SensorReading* snap = _buildSnapshot(i, n);
-        if (!snap) continue;             // none of its sensors reported since last time
+        if (!snap) {                     // none of its sensors reported since last time
+            // Nothing new: the slot goes to the backlog, still one batch.
+            if (exp->spoolOnFailure()) {
+                g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
+                _drainSpool(i, exp);
+                if (exp->throttled()) _throttle(i, exp);
+            }
+            continue;
+        }
 
         // R14 / AUDIT 11.8: refresh ExportTask heartbeat BEFORE each
         // exporter's network call. With 5 enabled exporters × ~30 s TLS
@@ -480,17 +504,19 @@ void ExportManager::tick() {
         // restarts during legitimate WiFi outages or slow brokers.
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
 
-        // Drain any spooled backlog before sending new live data (#4.7)
-        exp->clearThrottle();
-        if (exp->spoolOnFailure()) _drainSpool(exp);
-
-        if (!exp->throttled() && _sendWithRetry(exp, snap, n)) _backoffMs[i] = 0;
-        if (exp->throttled()) {
-            // Not sent: these values stay owed to this exporter, and the
-            // next send after the back-off carries them (or newer ones).
+        // New values first; then, only if they went through, one batch of
+        // the spooled backlog (#4.7, see _drainSpool).
+        if (_sendWithRetry(exp, snap, n)) {
+            _backoffMs[i] = 0;
+            if (exp->spoolOnFailure()) _drainSpool(i, exp);
+        } else if (exp->throttled()) {
+            // A 429 on the live send: these values were not sent and stay
+            // owed to this exporter; the next send after the back-off
+            // carries them (or newer ones).
             _sentSeq[i] = sentBefore;
-            _throttle(i, exp);
         }
+        // A 429 on either send (a spool batch stays in the spool): wait.
+        if (exp->throttled()) _throttle(i, exp);
         free(snap);
     }
 }
