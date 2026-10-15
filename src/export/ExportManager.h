@@ -99,6 +99,7 @@ private:
     // or the back-off never grew past a minute and the spool never drained.
     uint32_t     _spoolBackoffMs[MAX_EXPORTERS] = {};
     uint32_t     _spoolDueMs[MAX_EXPORTERS]     = {};
+    uint8_t      _spoolReadFails[MAX_EXPORTERS] = {};   // reads in a row that failed
     uint32_t     _lastSnapFailMs = 0;                // rate-limits that log line
     uint32_t     _lastTableFullMs = 0;
     uint16_t     _tableFullDrops  = 0;

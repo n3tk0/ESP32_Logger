@@ -582,18 +582,7 @@
   }
 
   function ovFillEnvironment(data) {
-    var binding = _getBinding("environment");
-    var envSensor = null;
-    if (Array.isArray(data)) {
-      data.forEach(function (s) {
-        if (binding && s.id === binding) { envSensor = s; return; }
-        if (!binding && !envSensor && s.readings &&
-            (s.id.indexOf("bme") !== -1 || s.id.indexOf("env") !== -1 ||
-             s.type === "bme280" || s.type === "bme688" || s.type === "bme680")) {
-          envSensor = s;
-        }
-      });
-    }
+    var envSensor = _ovWidgetSensor("environment", data);
     if (!envSensor) return;
     var r = envSensor.readings || {};
     var t = document.getElementById("ov-temp");
@@ -627,19 +616,27 @@
   var OV_WIDGET_METRICS = {
     aqi:         ["pm25", "pm2_5", "pm10", "tvoc", "tvoc_est", "co2", "eco2", "iaq"],
     environment: ["temperature", "humidity", "pressure"],
-    energy:      ["voltage_vrms", "voltage", "current_arms", "current", "power"],
+    // Mains only: a plain "voltage" is as likely a battery as the grid.
+    energy:      ["voltage_vrms", "current_arms", "power"],
     outdoor:     ["rain_total", "rain", "wind_speed", "wind"],
   };
 
-  // The sensor a widget shows: the one assigned to it, else the first that
-  // reports any of its metrics.
+  // The sensor a widget shows: the one assigned to it (null while that one
+  // is not reporting, rather than another in its place), else the one that
+  // reports the most of its metrics, the first of those on a tie (a BME280
+  // before a lone DS18B20 for Environment).
   function _ovWidgetSensor(id, data) {
-    var binding = _getBinding(id), found = null;
+    var binding = _getBinding(id), found = null, best = 0;
     if (!Array.isArray(data)) return null;
-    data.forEach(function (s) { if (binding && s.id === binding) found = s; });
-    if (found) return found;
+    if (binding) {
+      data.forEach(function (s) { if (s.id === binding) found = s; });
+      return found;
+    }
+    var names = OV_WIDGET_METRICS[id];
     data.forEach(function (s) {
-      if (!found && _ovMetric(s, OV_WIDGET_METRICS[id]) !== undefined) found = s;
+      var n = 0;
+      for (var i = 0; i < names.length; i++) if (_ovMetric(s, [names[i]]) !== undefined) n++;
+      if (n > best) { best = n; found = s; }
     });
     return found;
   }
@@ -654,7 +651,9 @@
     Object.keys(OV_WIDGET_METRICS).forEach(function (id) {
       var slot = deck.querySelector('.deck-slot[data-id="' + id + '"]');
       if (!slot) return;
-      var hide = !_ovWidgetSensor(id, data);
+      // An assigned sensor that is not reporting leaves the widget up, empty:
+      // it was asked for, and the dashes say that sensor is quiet.
+      var hide = !_getBinding(id) && !_ovWidgetSensor(id, data);
       if (slot.hidden !== hide) { slot.hidden = hide; changed = true; }
     });
     if (changed && _overviewDeck && _overviewDeck.repack) _overviewDeck.repack();

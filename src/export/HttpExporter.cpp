@@ -137,7 +137,7 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
     if (!ok) {
         Log.printf("[HTTP] POST failed, code=%d\n", code);
     } else {
-        Log.printf("[HTTP] sent to %s\n", _url);
+        Log.printf("[HTTP] sent to %.*s%s\n", urlHostLen(_url), _url, urlRestMark(_url));
     }
     http.end();
     delete[] body;

@@ -10,15 +10,25 @@
 #include <string.h>
 
 /// Length of `url`'s scheme://host[:port] part: print it with "%.*s".
+/// A user:password@ in it stops the part at the scheme, so the
+/// credentials never reach the log.
 inline int urlHostLen(const char* url) {
     if (!url) return 0;
-    const char* p = strstr(url, "://");
-    p = p ? p + 3 : url;
-    while (*p && *p != '/' && *p != '?' && *p != '#') p++;
+    const char* s = strstr(url, "://");
+    const char* p = s ? s + 3 : url;
+    const char* h = p;
+    while (*p && *p != '/' && *p != '?' && *p != '#') {
+        if (*p == '@') return (int)(h - url);
+        p++;
+    }
     return (int)(p - url);
 }
 
-/// "/…" when anything follows the host, so the line still says there was a path.
+/// "…" for whatever the log leaves out ("/…" after a host), so the line
+/// still says there was more.
 inline const char* urlRestMark(const char* url) {
-    return url && url[urlHostLen(url)] ? "/…" : "";
+    if (!url) return "";
+    const int n = urlHostLen(url);
+    if (!url[n]) return "";
+    return (n && url[n - 1] == '/') ? "…" : "/…";
 }

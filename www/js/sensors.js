@@ -1877,12 +1877,18 @@ function _expOsmGrid(sensors, ids, haveSensors) {
       });
     });
   }
+  // No sensor list (still loading, failed, or sensors without metrics):
+  // the usual metrics as bare keys, so there is always a field to fill in.
+  if (!groups.length) {
+    ["temperature", "humidity", "pressure", "pm25", "pm10", "tvoc", "eco2", "iaq"]
+      .forEach(function (m) { if (!(m in ids)) ids[m] = ""; });
+  }
   // Saved keys no sensor above has: the old per-metric ones, and sensors
   // that are gone. Shown so they can be cleared, and saved as they are.
   var rest = Object.keys(ids).filter(function (k) { return !placed[k]; }).sort();
   if (rest.length) {
     groups.push({
-      title: haveSensors ? spT("osmOtherKeys", "Other (any sensor / removed sensors)") : "",
+      title: groups.length ? spT("osmOtherKeys", "Other (any sensor / removed sensors)") : "",
       fields: rest.map(function (k) {
         var i = k.indexOf("/");
         return { key: k, label: i === -1 ? label(k) : k.slice(0, i) + " · " + label(k.slice(i + 1)) };

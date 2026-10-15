@@ -483,10 +483,15 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
         count = got / sizeof(SensorReading);   // a torn tail record is dropped
     }
     f.close();
-    if (left && !count) {
+    // Three failed reads in a row is a damaged file, not a busy moment:
+    // drop it like an empty one below, or the backlog never drains and
+    // every later failed batch is refused as "spool full".
+    if (left && !count && ++_spoolReadFails[idx] < 3) {
         Log.printf("[ExportManager] spool read failed for '%s', kept\n", exp->getName());
         return false;
     }
+    if (left && !count) Log.printf("[ExportManager] spool for '%s' unreadable, removed\n", exp->getName());
+    _spoolReadFails[idx] = 0;
 
     bool ok = true;
     if (count) {
@@ -594,7 +599,13 @@ void ExportManager::tick() {
         const bool sent = _sendWithRetry(exp, snap, n);
         free(snap);
         snap = nullptr;
-        if (sent) {
+        if (sent && exp->throttled()) {
+            // Accepted in part with a 429 on the rest (Sensor.Community
+            // posts one request per sensor group): what went through stays
+            // sent, but the next send waits out the limit, and so does the
+            // backlog.
+            _throttle(i, exp);
+        } else if (sent) {
             _backoffMs[i] = 0;
             if (exp->spoolOnFailure()) _drainSpoolStep(i, exp);
         } else if (exp->throttled()) {
