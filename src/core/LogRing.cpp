@@ -47,6 +47,19 @@ void ringPut(const uint8_t* p, size_t n) {
 
 } // namespace
 
+// The panic handler's output, written lock-free: the panicking code may have
+// been inside ringPut() holding s_mux, and on the S3 the other core is
+// halted mid-whatever. Interrupts are off and nothing else runs, so plain
+// stores into RTC memory are safe. At most LOG_RING_PANIC_MAX bytes per boot:
+// the register dump comes first, the stack dump after it would push the
+// lines before the crash out of the previous-boot tail.
+void logRingPanicPut(const char* p, size_t n) {
+    static size_t s_panicBytes = 0;
+    if (!s_ready || !p) return;
+    for (; n && s_panicBytes < LOG_RING_PANIC_MAX; n--, s_panicBytes++)
+        s_log.live[s_log.total++ % LOG_RING_BYTES] = *p++;
+}
+
 LogPrint Log;
 
 size_t LogPrint::write(uint8_t c) {

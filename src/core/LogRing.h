@@ -12,8 +12,10 @@
 // before it. At boot the tail of the previous boot's ring is set aside
 // (LOG_RING_PREV bytes) before this boot's output overwrites it.
 //
-// What it cannot catch: the panic handler's own "Guru Meditation" report,
-// which the ROM prints straight to the UART/USB, past this code.
+// A panic's own report goes to the UART/USB from the IDF panic handler, past
+// Serial; PanicCapture.cpp copies it into the ring too (reason, address and
+// register dump, LOG_RING_PANIC_MAX bytes), so after the reset /api/log shows
+// it under "previous boot".
 //
 // The ring costs no heap: on the C3 the RTC fast memory (8 KB) was all but
 // unused (16 B).
@@ -33,6 +35,10 @@
 #  define LOG_RING_PREV  2048
 #endif
 
+#ifndef LOG_RING_PANIC_MAX
+#  define LOG_RING_PANIC_MAX 1280   // of the panic report, per boot
+#endif
+
 class LogPrint : public Print {
 public:
     size_t write(uint8_t c) override;
@@ -46,6 +52,9 @@ extern LogPrint Log;
 /// Call first thing in setup(), before anything logs: sets the previous
 /// boot's tail aside, or clears the ring after a power-on.
 void logRingBegin();
+
+/// From the panic handler only (PanicCapture.cpp): appends without locking.
+void logRingPanicPut(const char* p, size_t n);
 
 /// What GET /api/log returns, fixed when the request arrives: the previous
 /// boot's tail, then this boot's ring as it was at that moment, oldest first,
