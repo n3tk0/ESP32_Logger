@@ -1521,7 +1521,6 @@
       });
   }
 
-  // Format a unix timestamp as a relative time string ("3 min ago", "2 h ago").
   // An alert history entry's outcome ("fired") in the page's language; the
   // badge draws it in capitals.
   function _outcomeText(o) {
@@ -1530,6 +1529,7 @@
     return t !== k ? t : o;
   }
 
+  // Format a unix timestamp as a relative time string ("3 min ago", "2 h ago").
   function _relTime(ts) {
     if (!ts) return "—";
     var diff = Math.floor(Date.now() / 1000) - ts;
