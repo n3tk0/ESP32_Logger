@@ -1813,30 +1813,17 @@ function expLoad() {
     _setVal("exp-osm-boxid", osm.box_id || "");
     _setVal("exp-osm-token", osm.access_token || "");
 
-    // OSM sensor IDs grid. Drawn at once from the usual metrics plus every
-    // metric already mapped, so the mapping is on the page (and saved intact)
-    // whatever /api/sensors does; then widened to the metrics the configured
-    // sensors actually report, keeping anything typed in the meantime.
+    // OSM sensor IDs: one field per metric of each sensor, keyed
+    // "<sensor id>/<metric>", so two sensors with a temperature map to two
+    // senseBox sensors. Drawn at once from what is saved (so the mapping is
+    // on the page, and saved intact, whatever /api/sensors does), then again
+    // with the sensors' own metrics, keeping anything typed meanwhile.
     var osmIds = osm.sensor_ids || {};
-    var osmSet = {};
-    [
-      "temperature", "humidity", "pressure", "pm25", "pm10",
-      "tvoc", "tvoc_est", "eco2", "iaq", "gas_resistance",
-      "dew_point", "flow_rate", "rain_total", "wind_speed",
-    ].concat(Object.keys(osmIds)).forEach(function (m) { osmSet[m] = true; });
-    _expOsmGrid(osmSet, osmIds);
+    _expOsmGrid([], osmIds);
     if (typeof getSensors === "function") {
       getSensors({ maxAgeMs: 0 }).then(function (d) {
-        var added = false;
-        ((d && d.sensors) || []).forEach(function (s) {
-          (s.metrics || []).forEach(function (m) {
-            // /api/sensors lists metric names as plain strings.
-            var id = typeof m === "string" ? m : m && m.id;
-            if (id && !osmSet[id]) { osmSet[id] = true; added = true; }
-          });
-        });
-        if (added) _expOsmGrid(osmSet, _expOsmRead());
-      }).catch(function () { /* the static grid is already there */ });
+        _expOsmGrid((d && d.sensors) || [], _expOsmRead(), true);
+      }).catch(function () { /* the saved mapping is already there */ });
     }
 
     // Common schedule + sensor selection, and each exporter's override.
@@ -1852,34 +1839,77 @@ function expLoad() {
   });
 }
 
-// openSenseMap: one text field per metric, the box's sensor id for it.
-function _expOsmGrid(set, ids) {
+// openSenseMap: a text field per sensor and metric, the box's sensor id for
+// it. A key of the old form (the bare metric, for any sensor) moves to the
+// one sensor that reports that metric; with none or several it stays, in its
+// own group, and the firmware still uses it for any sensor without its own.
+function _expOsmGrid(sensors, ids, haveSensors) {
   var osmDiv = document.getElementById("exp-osm-ids");
   if (!osmDiv) return;
+  var MT = window.MetricText || {};
+  var label = function (m) { return MT.label ? MT.label(m) : m; };
   var ph = esc(spT("osmSensorIdPh", "sensor ID…"));
-  osmDiv.innerHTML =
-    '<div class="form-grid" style="flex-wrap:wrap">' +
-    Object.keys(set)
-      .sort()
-      .map(function (m) {
-        return (
-          '<div class="field" style="min-width:180px">' +
-          '<label class="field-label">' + esc(m) + "</label>" +
-          '<input type="text" class="input exp-osm-metric-input" data-metric="' + esc(m) +
-          '" value="' + esc(ids[m] || "") + '" placeholder="' + ph + '">' +
-          "</div>"
-        );
-      })
-      .join("") +
-    "</div>";
+  ids = Object.assign({}, ids || {});
+
+  var groups = [];
+  var placed = {};
+  if (haveSensors) {
+    var reporters = {};
+    sensors.forEach(function (s) {
+      (s.metrics || []).forEach(function (m) {
+        var id = typeof m === "string" ? m : m && m.id;
+        if (id) (reporters[id] = reporters[id] || []).push(s.id);
+      });
+    });
+    Object.keys(ids).forEach(function (k) {
+      if (k.indexOf("/") !== -1 || !reporters[k] || reporters[k].length !== 1) return;
+      var to = reporters[k][0] + "/" + k;
+      if (!ids[to]) ids[to] = ids[k];
+      delete ids[k];
+    });
+    sensors.forEach(function (s) {
+      var ms = (s.metrics || []).map(function (m) { return typeof m === "string" ? m : m && m.id; })
+        .filter(Boolean);
+      if (!ms.length) return;
+      groups.push({
+        title: (s.name && s.name.toLowerCase() !== s.id.toLowerCase() ? s.name + " · " : "") + s.id,
+        fields: ms.map(function (m) { placed[s.id + "/" + m] = true; return { key: s.id + "/" + m, label: label(m) }; }),
+      });
+    });
+  }
+  // Saved keys no sensor above has: the old per-metric ones, and sensors
+  // that are gone. Shown so they can be cleared, and saved as they are.
+  var rest = Object.keys(ids).filter(function (k) { return !placed[k]; }).sort();
+  if (rest.length) {
+    groups.push({
+      title: haveSensors ? spT("osmOtherKeys", "Other (any sensor / removed sensors)") : "",
+      fields: rest.map(function (k) {
+        var i = k.indexOf("/");
+        return { key: k, label: i === -1 ? label(k) : k.slice(0, i) + " · " + label(k.slice(i + 1)) };
+      }),
+    });
+  }
+
+  osmDiv.innerHTML = groups.map(function (g) {
+    return (g.title ? '<div class="form-label" style="margin:10px 0 4px">' + esc(g.title) + "</div>" : "") +
+      '<div class="form-grid" style="flex-wrap:wrap">' +
+      g.fields.map(function (f) {
+        return '<div class="field" style="min-width:180px">' +
+          '<label class="field-label">' + esc(f.label) + "</label>" +
+          '<input type="text" class="input exp-osm-metric-input" data-key="' + esc(f.key) +
+          '" value="' + esc(ids[f.key] || "") + '" placeholder="' + ph + '">' +
+          "</div>";
+      }).join("") +
+      "</div>";
+  }).join("");
 }
 
 function _expOsmRead() {
   var ids = {};
   document.querySelectorAll("#exp-osm-ids .exp-osm-metric-input").forEach(function (el) {
     var v = (el.value || "").trim();
-    var m = el.getAttribute("data-metric");
-    if (v && m) ids[m] = v;
+    var k = el.getAttribute("data-key");
+    if (v && k) ids[k] = v;
   });
   return ids;
 }

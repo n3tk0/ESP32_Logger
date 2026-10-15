@@ -92,7 +92,9 @@
   // Result: a tall card never leaves a row-height gap below short neighbours.
   function packMasonry(container) {
     var slots = Array.prototype.slice.call(container.children).filter(function (n) {
-      return n.classList && n.classList.contains("deck-slot");
+      // A hidden slot (a card with nothing to show, see the page's own
+      // code) takes no place in the layout.
+      return n.classList && n.classList.contains("deck-slot") && !n.hidden;
     });
     if (!slots.length) {
       container.style.height = "0px";

@@ -389,6 +389,7 @@
       refBtn.disabled = true;
       refBtn.classList.add("busy");
       // Sparklines are drawn once per card; forget that so they refetch too.
+      _ovSparkCache = {};
       [].forEach.call(document.querySelectorAll("#page-overview svg.metric-spark-bg"), function (svg) { svg.dataset.drawnFor = ""; });
       populateOverview(true).then(function () {
         refBtn.disabled = false;
@@ -439,6 +440,7 @@
     ovFillEnergy(normalized);
     ovFillAQI(normalized);
     ovFillOutdoor(normalized);
+    _ovHideEmpty(normalized);
     ovFillSensorList(normalized);
     ovFillSensorCards(data);
   }
@@ -511,13 +513,29 @@
     }
   }
 
+  // The last answer per sensor::metric, reused for a minute. The deck is
+  // drawn more than once while the page loads (the sensor list arriving
+  // re-renders it), and every drawing made new <svg>s that asked the device
+  // for the same hour again.
+  var _ovSparkCache = {};
+  var OV_SPARK_REUSE_MS = 60000;
+
   function _ovFetchSpark(svg, sensorId, metric) {
+    var key = sensorId + "::" + metric;
+    var hit = _ovSparkCache[key];
     var now = Math.floor(Date.now() / 1000), from = now - 3600;
     var url = "/api/data?sensor=" + encodeURIComponent(sensorId) +
               "&metric=" + encodeURIComponent(metric) +
               "&from=" + from + "&to=" + now + "&agg=raw&mode=lttb&limit=40";
-    return fetchWithTimeout(url, {}, 6000)
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    var got = (hit && Date.now() - hit.at < OV_SPARK_REUSE_MS)
+      ? hit.p
+      : fetchWithTimeout(url, {}, 6000)
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); });
+    if (got !== (hit && hit.p)) {
+      _ovSparkCache[key] = { at: Date.now(), p: got };
+      got.catch(function () { if (_ovSparkCache[key] && _ovSparkCache[key].p === got) delete _ovSparkCache[key]; });
+    }
+    return got
       .then(function (res) {
         if (!res || !Array.isArray(res.data) || res.data.length < 2) return;
         var min = Infinity, max = -Infinity, ys = [];
@@ -593,28 +611,65 @@
     }
   }
 
+  // The first of `names` the sensor reports, as a number; undefined if none.
+  // The firmware's metric names are what the sensors call them
+  // (voltage_vrms, current_arms, rain_total, wind_speed); the short ones are
+  // kept for other sources.
+  function _ovMetric(s, names) {
+    var r = (s && s.readings) || {};
+    for (var i = 0; i < names.length; i++) if (typeof r[names[i]] === "number") return r[names[i]];
+    return undefined;
+  }
+
+  // Which metrics feed each Overview widget. A widget none of the sensors
+  // has data for is hidden (see _ovHideEmpty), and a sensor is picked for a
+  // widget by these, not by its id or type.
+  var OV_WIDGET_METRICS = {
+    aqi:         ["pm25", "pm2_5", "pm10", "tvoc", "tvoc_est", "co2", "eco2", "iaq"],
+    environment: ["temperature", "humidity", "pressure"],
+    energy:      ["voltage_vrms", "voltage", "current_arms", "current", "power"],
+    outdoor:     ["rain_total", "rain", "wind_speed", "wind"],
+  };
+
+  // The sensor a widget shows: the one assigned to it, else the first that
+  // reports any of its metrics.
+  function _ovWidgetSensor(id, data) {
+    var binding = _getBinding(id), found = null;
+    if (!Array.isArray(data)) return null;
+    data.forEach(function (s) { if (binding && s.id === binding) found = s; });
+    if (found) return found;
+    data.forEach(function (s) {
+      if (!found && _ovMetric(s, OV_WIDGET_METRICS[id]) !== undefined) found = s;
+    });
+    return found;
+  }
+
+  // Hide the widgets with nothing to show (no sensor assigned and none
+  // reporting their metrics), and show them again once one does. Only from
+  // a /api/latest that answered: while it loads, everything stays.
+  function _ovHideEmpty(data) {
+    var deck = document.getElementById("overview-deck");
+    if (!deck || deck.classList.contains("editing")) return;
+    var changed = false;
+    Object.keys(OV_WIDGET_METRICS).forEach(function (id) {
+      var slot = deck.querySelector('.deck-slot[data-id="' + id + '"]');
+      if (!slot) return;
+      var hide = !_ovWidgetSensor(id, data);
+      if (slot.hidden !== hide) { slot.hidden = hide; changed = true; }
+    });
+    if (changed && _overviewDeck && _overviewDeck.repack) _overviewDeck.repack();
+  }
+
   function ovFillEnergy(data) {
-    var binding = _getBinding("energy");
-    var energySensor = null;
-    if (Array.isArray(data)) {
-      data.forEach(function (s) {
-        if (binding && s.id === binding) { energySensor = s; return; }
-        if (!binding && !energySensor && s.readings &&
-            (s.type === "zmct103c" || s.type === "zmpt101b" ||
-             s.id.indexOf("power") !== -1 || s.id.indexOf("energy") !== -1)) {
-          energySensor = s;
-        }
-      });
-    }
+    var energySensor = _ovWidgetSensor("energy", data);
     if (!energySensor) return;
-    var r = energySensor.readings || {};
     var setE = function (id, v, suffix) {
       var el = document.getElementById(id);
       if (el && v !== undefined) el.textContent = (typeof v === "number" ? v.toFixed(1) : v) + (suffix || "");
     };
-    setE("ov-volt",  r.voltage,  "");
-    setE("ov-amp",   r.current,  "");
-    setE("ov-power", r.power,    "");
+    setE("ov-volt",  _ovMetric(energySensor, ["voltage_vrms", "voltage"]), "");
+    setE("ov-amp",   _ovMetric(energySensor, ["current_arms", "current"]), "");
+    setE("ov-power", _ovMetric(energySensor, ["power"]),                   "");
   }
 
   function ovFillAQI(data) {
@@ -704,23 +759,14 @@
   }
 
   function ovFillOutdoor(data) {
-    var binding = _getBinding("outdoor");
-    var outdoorSensor = null;
-    if (Array.isArray(data)) {
-      data.forEach(function (s) {
-        if (binding && s.id === binding) { outdoorSensor = s; return; }
-        if (!binding && !outdoorSensor && s.readings &&
-            (s.id.indexOf("out") !== -1 || s.id.indexOf("weather") !== -1 || s.id.indexOf("rain") !== -1)) {
-          outdoorSensor = s;
-        }
-      });
-    }
+    var outdoorSensor = _ovWidgetSensor("outdoor", data);
     if (!outdoorSensor) return;
-    var r = outdoorSensor.readings || {};
+    var rain = _ovMetric(outdoorSensor, ["rain_total", "rain"]);
+    var wind = _ovMetric(outdoorSensor, ["wind_speed", "wind"]);
     var rainEl = document.getElementById("ov-rain");
     var windEl = document.getElementById("ov-wind");
-    if (rainEl && r.rain !== undefined) rainEl.textContent = typeof r.rain === "number" ? r.rain.toFixed(1) : r.rain;
-    if (windEl && r.wind !== undefined) windEl.textContent = typeof r.wind === "number" ? r.wind.toFixed(1) : r.wind;
+    if (rainEl && rain !== undefined) rainEl.textContent = rain.toFixed(1);
+    if (windEl && wind !== undefined) windEl.textContent = wind.toFixed(1);
   }
 
   function ovFillWater() {
@@ -870,6 +916,9 @@
     var s = n.toFixed(2);
     return s.indexOf(".") !== -1 ? s.replace(/\.?0+$/, "") : s;
   }
+  // For the other pages (the Export page's openSenseMap fields).
+  window.MetricText = { label: ovMetricLabel, unit: ovUnit, fmt: ovFmtValue };
+
   function _metricIcon(metric) {
     var meta = ovMetricMeta((metric || "").toLowerCase());
     return meta.i || "activity";

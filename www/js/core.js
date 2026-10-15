@@ -372,13 +372,24 @@ window.addEventListener("DOMContentLoaded", function () {
     CFG = results[1];
     _stFetchedAt = Date.now();   // seed the cache used by getStatus()
     applyStatus(ST);
-    var hash = location.hash.replace("#", "") || "dashboard";
+    var hash = location.hash.replace("#", "") || homePage();
     navigateTo(hash);
   });
 });
 
+// The page an address without #page opens: the mode's own first page. It
+// was "dashboard" always, which in continuous mode is hidden: the device
+// served that page's /api/data and /api/latest requests, and then the mode
+// switch moved on to Overview, which asked again (iot-extensions.js
+// routeToModeDefault). On a C3 a page load is where the heap runs lowest.
+function homePage() {
+  var m = window.CFG && CFG.platform && CFG.platform.mode;
+  if (!m) { try { m = localStorage.getItem("platformMode"); } catch (e) {} }
+  return m === "legacy" ? "dashboard" : "overview";
+}
+
 window.addEventListener("hashchange", function () {
-  var hash = location.hash.replace("#", "") || "dashboard";
+  var hash = location.hash.replace("#", "") || homePage();
   navigateTo(hash);
 });
 
@@ -1709,7 +1720,7 @@ function confirmRestart() {
       postWithCsrf("/restart", { method: "POST" }, 10000)
         .catch(function () { /* device is rebooting — the dropped connection is expected */ })
         .finally(function () {
-          location.hash = "dashboard";
+          location.hash = homePage();
           location.reload();
         });
     } else {
