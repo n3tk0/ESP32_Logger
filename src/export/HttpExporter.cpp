@@ -1,4 +1,5 @@
 #include "HttpExporter.h"
+#include "UrlMask.h"       // the URL in log lines: host only
 #include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include <new>            // std::nothrow
 #include <HTTPClient.h>
@@ -51,7 +52,7 @@ bool HttpExporter::init(JsonObjectConst cfg) {
         }
     }
 
-    Log.printf("[HTTP] url=%s method=%s\n", _url, _method);
+    Log.printf("[HTTP] url=%.*s%s method=%s\n", urlHostLen(_url), _url, urlRestMark(_url), _method);
     return true;
 }
 
@@ -136,7 +137,7 @@ bool HttpExporter::send(const SensorReading* readings, size_t count) {
     if (!ok) {
         Log.printf("[HTTP] POST failed, code=%d\n", code);
     } else {
-        Log.printf("[HTTP] sent to %s\n", _url);
+        Log.printf("[HTTP] sent to %.*s%s\n", urlHostLen(_url), _url, urlRestMark(_url));
     }
     http.end();
     delete[] body;

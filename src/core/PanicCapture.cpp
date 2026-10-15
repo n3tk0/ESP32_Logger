@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include <esp_attr.h>
+#include <esp_arduino_version.h>
 #include <esp_private/panic_internal.h>
 
 #include "LogRing.h"
@@ -33,7 +34,9 @@ extern "C" {
 void __real_panic_print_str(const char* str);
 void __real_panic_print_hex(int h);
 void __real_panic_print_dec(int d);
+#if ESP_ARDUINO_VERSION_MAJOR < 3
 void __real_esp_panic_handler(panic_info_t* info);
+#endif
 void __real_panic_abort(const char* details) __attribute__((noreturn));
 
 // abort()'s message, kept until the handler runs (see __wrap_panic_abort).
@@ -65,6 +68,11 @@ void __wrap_panic_print_dec(int d) {         // 2 digits, as panic_print_dec
     __real_panic_print_dec(d);
 }
 
+// Arduino core 3.x defines __wrap_esp_panic_handler itself (its own panic
+// hook, set_arduino_panic_handler) and links with the same --wrap: a second
+// definition here would not link. Under core 3 the [PANIC] line is not
+// written; the register dump still is.
+#if ESP_ARDUINO_VERSION_MAJOR < 3
 void __wrap_esp_panic_handler(panic_info_t* info) {
     if (info) {
         put("\n[PANIC] core ");
@@ -84,6 +92,7 @@ void __wrap_esp_panic_handler(panic_info_t* info) {
     }
     __real_esp_panic_handler(info);
 }
+#endif
 
 // abort(), assert(), a stack overflow: the message is handed to panic_abort()
 // and printed later inside panic.c. panic_abort() is in IRAM because it can

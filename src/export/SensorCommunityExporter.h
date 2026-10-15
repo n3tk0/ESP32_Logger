@@ -24,9 +24,10 @@ public:
     // The upload protocol has no timestamp field: a replayed spool would put
     // old values at "now", so failed batches are dropped, not spooled.
     bool        spoolOnFailure() const override { return false; }
+    bool        wants(const SensorReading& r) const override;
 
 private:
-    bool _postPin(const char* pin, const char* sensorName,
+    int  _postPin(const char* pin, const char* sensorName,
                   const char* body);
 
     char     _deviceId[13]  = {};

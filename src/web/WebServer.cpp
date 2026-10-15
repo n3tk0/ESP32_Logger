@@ -2471,6 +2471,9 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
             // like shaActive above, so the destructor below is a no-op on
             // every path that finished properly.
             bool otaOpen      = false;
+            // Update.write() failed once: the rest of the upload fails the
+            // same way, and one line per chunk filled the log ring.
+            bool writeErrLogged = false;
             String expectedSha;
             mbedtls_sha256_context sha;
             ~OtaCtx() {
@@ -2661,7 +2664,10 @@ server.on("/save_hardware", HTTP_POST, h_post_save_hardware);
                 OtaCtx* ctx = static_cast<OtaCtx*>(req->_tempObject);
                 if (!ctx || ctx->authFailed || ctx->rejected) return;
 
-                if (Update.write(data, len) != len) Update.printError(Log);
+                if (Update.write(data, len) != len && !ctx->writeErrLogged) {
+                    ctx->writeErrLogged = true;
+                    Update.printError(Log);
+                }
                 if (ctx->shaActive) {
                     mbedtls_sha256_update(&ctx->sha, data, len);
                 }

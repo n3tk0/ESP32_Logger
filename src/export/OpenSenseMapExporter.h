@@ -30,7 +30,11 @@
 //
 // Config keys:
 //   enabled, box_id, access_token,
-//   sensor_ids: {"temperature":"ID1","humidity":"ID2","pm25":"ID3",...}
+//   sensor_ids: {"env_indoor/temperature":"ID1","outside/temperature":"ID2",
+//                "pm25":"ID3",...}
+//   A key is "<sensor id>/<metric>", so two sensors that both report a
+//   temperature go to two openSenseMap sensors. A bare "<metric>" key (how
+//   it was before) still maps that metric of any sensor without its own key.
 // ============================================================================
 class OpenSenseMapExporter : public IExporter {
 public:
@@ -38,6 +42,7 @@ public:
     bool        send(const SensorReading* readings, size_t count) override;
     const char* getName()   const override { return "opensensemap"; }
     bool        isEnabled() const override { return _enabled; }
+    bool        wants(const SensorReading& r) const override { return _sendableId(r) != nullptr; }
 
 private:
     char _boxId[33]  = {};
@@ -48,12 +53,12 @@ private:
     // 12, and the IDs past it were dropped without a word.
     static constexpr int OSM_MAX_SENSORS = 20;
     struct SensorIdEntry {
-        char metric[16];
+        char key[34];        // "<sensor id>/<metric>" or "<metric>"
         char sensorId[25];
     };
     SensorIdEntry _sensorIds[OSM_MAX_SENSORS];
     int           _sensorIdCount = 0;
 
-    const char* _lookupSensorId(const char* metric) const;
+    const char* _lookupSensorId(const char* key) const;
     const char* _sendableId(const SensorReading& r) const;
 };

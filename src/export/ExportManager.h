@@ -94,6 +94,15 @@ private:
     uint32_t     _sentSeq[MAX_EXPORTERS]     = {};   // last table seq sent
     uint32_t     _backoffMs[MAX_EXPORTERS]   = {};   // 429 back-off, 0 = none
     uint32_t     _spoolOff[MAX_EXPORTERS]    = {};   // spool bytes already sent
+    // The spool's own 429 back-off. A 429 on a spool batch delays only the
+    // backlog: the live send that went through before it must not reset it,
+    // or the back-off never grew past a minute and the spool never drained.
+    uint32_t     _spoolBackoffMs[MAX_EXPORTERS] = {};
+    uint32_t     _spoolDueMs[MAX_EXPORTERS]     = {};
+    uint8_t      _spoolReadFails[MAX_EXPORTERS] = {};   // reads in a row that failed
+    uint32_t     _lastSnapFailMs = 0;                // rate-limits that log line
+    uint32_t     _lastTableFullMs = 0;
+    uint16_t     _tableFullDrops  = 0;
 
     // ── Latest value per sensor+metric ─────────────────────────────────────
     // On the heap, allocated the first time a config enables a periodic
@@ -121,7 +130,10 @@ private:
     void _spoolBatch(IExporter* exp,
                      const SensorReading* readings, size_t count);
     bool _drainSpool(int idx, IExporter* exp);
+    void _drainSpoolStep(int idx, IExporter* exp);
     void _forgetSpoolOffset(const IExporter* exp);
+    void _setSpoolOff(int idx, uint32_t off);
+    int  _indexOf(const IExporter* exp) const;
     void _throttle(int idx, IExporter* exp);
 };
 

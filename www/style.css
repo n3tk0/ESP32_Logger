@@ -1726,6 +1726,7 @@ body.cmd-palette-open, body.qsp-open { overflow: hidden; }
   display: flex;
   flex-direction: column;
 }
+.deck.live > .deck-slot[hidden] { display: none; }
 .deck.live > .deck-slot > .card,
 .deck.live > .deck-slot > .kpi {
   flex: 1;

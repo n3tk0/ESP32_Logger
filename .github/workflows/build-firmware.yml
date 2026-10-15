@@ -518,3 +518,9 @@ jobs:
             firmware/firmware-esp32c3_supermini.bin
             firmware/firmware-lolin_c3_pico.bin
             firmware/firmware-esp32s3.bin
+            # The .elf of the same builds: a [PANIC] address from /api/log is
+            # decoded against it (addr2line), and artifacts expire after 90 days.
+            firmware/firmware-esp32c3.elf
+            firmware/firmware-esp32c3_supermini.elf
+            firmware/firmware-lolin_c3_pico.elf
+            firmware/firmware-esp32s3.elf

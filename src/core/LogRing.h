@@ -17,26 +17,47 @@
 // register dump, LOG_RING_PANIC_MAX bytes), so after the reset /api/log shows
 // it under "previous boot".
 //
-// The ring costs no heap: on the C3 the RTC fast memory (8 KB) was all but
-// unused (16 B).
+// What it costs depends on the chip. On the C3, RTC_NOINIT goes into the RTC
+// fast memory, and those 8 KB are also a heap region: every byte of the ring
+// is a byte less for malloc. The C3's ring is therefore small (about 2.3 KB);
+// the full 4 KB + 2 KB ring went 6 KB into a heap that had 6-8 KB free. On the
+// ESP32 and S3, RTC_NOINIT is RTC slow memory, which is not heap.
 // ============================================================================
 #pragma once
 
 #include <Arduino.h>
+#ifndef LOG_RING_HOST_SHIM
+#  include <sdkconfig.h>
+#endif
 
 // The host tests' Arduino shim defines Log itself (a no-op sink like its
 // Serial); everything below is the device's.
 #ifndef LOG_RING_HOST_SHIM
 
-#ifndef LOG_RING_BYTES
-#  define LOG_RING_BYTES 4096
-#endif
-#ifndef LOG_RING_PREV
-#  define LOG_RING_PREV  2048
-#endif
-
-#ifndef LOG_RING_PANIC_MAX
-#  define LOG_RING_PANIC_MAX 1280   // of the panic report, per boot
+#if CONFIG_IDF_TARGET_ESP32C3
+// About 25 lines of this boot, and the previous boot's last ~768 B, which
+// after a panic is its report: the [PANIC] line with the address, then the
+// first lines of the register dump (MEPC, RA, SP...). The report is capped so
+// it does not push those out.
+#  ifndef LOG_RING_BYTES
+#    define LOG_RING_BYTES 1536
+#  endif
+#  ifndef LOG_RING_PREV
+#    define LOG_RING_PREV  768
+#  endif
+#  ifndef LOG_RING_PANIC_MAX
+#    define LOG_RING_PANIC_MAX 512
+#  endif
+#else
+#  ifndef LOG_RING_BYTES
+#    define LOG_RING_BYTES 4096
+#  endif
+#  ifndef LOG_RING_PREV
+#    define LOG_RING_PREV  2048
+#  endif
+#  ifndef LOG_RING_PANIC_MAX
+#    define LOG_RING_PANIC_MAX 1280   // of the panic report, per boot
+#  endif
 #endif
 
 class LogPrint : public Print {

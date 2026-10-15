@@ -31,6 +31,7 @@ struct Entry {
     bool           haveProbes;    ///< a reported config has been seen
     uint32_t       seenMs;        ///< WiFi: millis()|1 of its last POST; 0 = none since boot
     uint16_t       told;          ///< highest rev the node was told or ran (ncr::revAfter)
+    uint8_t        loadFails;     ///< POSTs in a row whose file was there but would not load
     char           name[NODE_NAME_MAX + 1];    ///< WiFi: the key
     char           dname[NODE_NAME_MAX + 1];   ///< desired name (a WiFi rename)
     char           sname[NODE_NAME_MAX + 1];   ///< WiFi: name in the last full reply
@@ -381,8 +382,26 @@ void nodeCfgIngest(const char* node, JsonObjectConst body, JsonObject reply) {
     Work* w = new (std::nothrow) Work;
     if (!w) return;
     bool haveFile = e && loadEntry(*e, w->doc);
-    if (e && !haveFile) {                 // the file went; so does the entry
-        e->used = false;
+    if (haveFile) e->loadFails = 0;
+    if (e && !haveFile) {
+        // Gone only when the file is not there. A read that failed with the
+        // file still there (no heap for the parse, fsMutex busy) says nothing
+        // about it: dropping the entry then asked the node for its report
+        // (`cfg_want`) and the report overwrote the file, desired edits and
+        // all. Try again on the next POST instead.
+        char p[ncr::PATH_CAP];
+        pathOf(*e, p);
+        bool exists = true;
+        {
+            MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
+            if (!fsMutex || g.isLocked()) exists = LittleFS.exists(p);
+        }
+        // Three in a row is not a busy moment: the file is damaged (torn
+        // write, bad JSON). Then it goes the old way, rebuilt from the
+        // node's report, rather than shutting the node out for good.
+        if (exists && ++e->loadFails < 3) { delete w; return; }
+        if (exists) Log.printf("[nodecfg] %s would not load, rebuilding\n", p);
+        e->used = false;                  // the file went; so does the entry
         e = nullptr;
         if (rep.isNull()) { reply["cfg_want"] = true; delete w; return; }
     }
