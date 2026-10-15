@@ -8,6 +8,7 @@
 #include <time.h>
 #include "../utils/JsonIO.h"
 #include "../core/HeapWatch.h"   // HeapActivity
+#include "Throttle.h"
 
 ExportManager exportManager;
 
@@ -274,11 +275,16 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
             g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         }
         HeapActivity ha(HA_EXPORT, exp->getName());
+        exp->clearThrottle();
         if (exp->send(r, n)) return true;
-        Log.printf("[ExportManager] '%s' retry %d/%d\n",
-                      exp->getName(), attempt + 1, maxRetries);
+        // Rate-limited: another attempt is another request against the same
+        // limit, and so would the spool be, replayed next time. tick() backs
+        // off and keeps these values in the table for the next send.
+        if (exp->throttled()) return false;
+        Log.printf("[ExportManager] '%s' attempt %d/%d failed\n",
+                      exp->getName(), attempt + 1, maxRetries + 1);
     }
-    // All retries exhausted — spool for later retry (#4.7), where replaying
+    // All attempts failed — spool for later retry (#4.7), where replaying
     // makes sense (see IExporter::spoolOnFailure).
     if (exp->spoolOnFailure()) _spoolBatch(exp, r, n);
     return false;
@@ -401,7 +407,8 @@ bool ExportManager::_drainSpool(IExporter* exp) {
         // counting.
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         HeapActivity ha(HA_EXPORT, exp->getName());
-        if (!exp->send(batch, count)) { allOk = false; break; }
+        exp->clearThrottle();
+        if (!exp->send(batch, count)) { allOk = false; break; }   // incl. 429
     }
     f.close();
 
@@ -462,6 +469,7 @@ void ExportManager::tick() {
         if ((int32_t)(now - _nextDueMs[i]) >= 0) _nextDueMs[i] = now + iv;
 
         size_t n = 0;
+        const uint32_t sentBefore = _sentSeq[i];
         SensorReading* snap = _buildSnapshot(i, n);
         if (!snap) continue;             // none of its sensors reported since last time
 
@@ -473,11 +481,31 @@ void ExportManager::tick() {
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
 
         // Drain any spooled backlog before sending new live data (#4.7)
+        exp->clearThrottle();
         if (exp->spoolOnFailure()) _drainSpool(exp);
 
-        _sendWithRetry(exp, snap, n);
+        if (!exp->throttled() && _sendWithRetry(exp, snap, n)) _backoffMs[i] = 0;
+        if (exp->throttled()) {
+            // Not sent: these values stay owed to this exporter, and the
+            // next send after the back-off carries them (or newer ones).
+            _sentSeq[i] = sentBefore;
+            _throttle(i, exp);
+        }
         free(snap);
     }
+}
+
+// ---------------------------------------------------------------------------
+// _throttle — exporter `idx` got a 429: move its next send out by the
+// back-off (Throttle.h), or by Retry-After when the server asks for longer.
+// ---------------------------------------------------------------------------
+void ExportManager::_throttle(int idx, IExporter* exp) {
+    _backoffMs[idx] = throttleNextBackoffMs(_backoffMs[idx]);
+    const uint32_t wait  = throttleWaitMs(_backoffMs[idx], exp->retryAfterS());
+    const uint32_t until = millis() + wait;
+    if ((int32_t)(until - _nextDueMs[idx]) > 0) _nextDueMs[idx] = until;
+    Log.printf("[ExportManager] '%s' rate-limited, next send in %lus\n",
+                  exp->getName(), (unsigned long)(wait / 1000));
 }
 
 // ---------------------------------------------------------------------------

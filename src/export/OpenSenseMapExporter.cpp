@@ -7,6 +7,7 @@
 #include <math.h>          // isfinite
 #include <memory>          // std::unique_ptr
 #include <time.h>          // gmtime_r / strftime for createdAt
+#include "Throttle.h"      // parseRetryAfterS
 
 bool OpenSenseMapExporter::init(JsonObjectConst cfg) {
     _enabled = cfg["enabled"] | false;
@@ -146,9 +147,19 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
             http.addHeader("Authorization", authHeader);
         }
 
+        const char* headers[] = {"Retry-After"};   // collectHeaders copies them
+        http.collectHeaders(headers, 1);
+
         int code = http.POST((uint8_t*)body, pos);
         ok = (code >= 200 && code < 300);
-        if (!ok && code >= 400 && code < 500 && code != 408 && code != 429) {
+        if (code == 429) {
+            // Rate-limited: ExportManager backs off instead of retrying (a
+            // retry is one more request against the same limit).
+            _throttled   = true;
+            _retryAfterS = parseRetryAfterS(http.header("Retry-After").c_str());
+            Log.printf("[OSM] POST rate-limited (429) retry-after=%lus\n",
+                       (unsigned long)_retryAfterS);
+        } else if (!ok && code >= 400 && code < 500 && code != 408) {
             // Rejected, not lost: a wrong box id/token (401/403/404) or data
             // the API refuses (422, e.g. a createdAt it deems in the future).
             // Sending it again gets the same answer, and spooling it would

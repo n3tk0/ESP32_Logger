@@ -49,9 +49,19 @@ public:
     // interval and sensor selection do not apply to them.
     virtual bool        isStreaming() const { return false; }
 
+    // The server said "too many requests" (HTTP 429) on the last send().
+    // ExportManager then stops: no retry, no spool, and the exporter waits
+    // (see Throttle.h). retryAfterS() is the server's Retry-After, 0 if none.
+    // ExportManager clears it before each send().
+    bool                throttled()   const { return _throttled; }
+    uint32_t            retryAfterS() const { return _retryAfterS; }
+    void                clearThrottle()     { _throttled = false; _retryAfterS = 0; }
+
 protected:
     bool     _enabled    = false;
     uint32_t _intervalMs = 0;
+    bool     _throttled   = false;   // send() sets these on a 429
+    uint32_t _retryAfterS = 0;
 };
 
 using ExporterFactory = IExporter* (*)();
