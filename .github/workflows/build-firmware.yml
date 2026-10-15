@@ -103,6 +103,8 @@ jobs:
         run: |
           mkdir -p output
           cp .pio/build/${{ matrix.env }}/firmware.bin output/firmware-${{ matrix.name }}.bin
+          # For decoding a [PANIC] address from /api/log; never flashed.
+          cp .pio/build/${{ matrix.env }}/firmware.elf output/firmware-${{ matrix.name }}.elf
 
           # Report firmware size vs partition limit
           SIZE=$(stat -c%s output/firmware-${{ matrix.name }}.bin)
@@ -125,7 +127,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.name }}
-          path: output/firmware-${{ matrix.name }}.bin
+          path: |
+            output/firmware-${{ matrix.name }}.bin
+            output/firmware-${{ matrix.name }}.elf
 
   # Builds with the optional features turned ON, and turns them on the way
   # setup.h documents rather than with -D flags.  That distinction is the
