@@ -23,9 +23,10 @@
 #
 #   Actions -> Build OTA Firmware -> Run workflow
 #
-# The artifact holds firmware.bin and its SHA-256. The device verifies that
-# digest when the upload URL carries ?sha256=, so it is published beside the
-# image rather than left for somebody to work out.
+# The artifact holds firmware.bin, its SHA-256 and the matching .elf (to
+# decode a crash address from /api/log; it is not flashed). The device
+# verifies that digest when the upload URL carries ?sha256=, so it is
+# published beside the image rather than left for somebody to work out.
 
 name: Build OTA Firmware
 
@@ -273,6 +274,11 @@ jobs:
 
           mkdir -p out
           cp "$BUILD/firmware.bin" "out/$NAME"
+          # The ELF of this exact build: a [PANIC] line in /api/log gives an
+          # address, and only this file turns it into a function and line
+          # (riscv32-esp-elf-addr2line -pfiaC -e <elf> 0x4200…). A rebuild
+          # elsewhere links at slightly different addresses.
+          cp "$BUILD/firmware.elf" "out/${NAME%.bin}.elf"
           ( cd out && sha256sum "$NAME" > "$NAME.sha256" )
           SHA=$(cut -d' ' -f1 < "out/$NAME.sha256")
           SIZE=$(stat -c%s "out/$NAME")
@@ -362,4 +368,5 @@ jobs:
           path: |
             out/*.bin
             out/*.sha256
+            out/*.elf
           if-no-files-found: error
