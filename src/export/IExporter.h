@@ -61,13 +61,22 @@ public:
     // ExportManager clears it before each send().
     bool                throttled()   const { return _throttled; }
     uint32_t            retryAfterS() const { return _retryAfterS; }
-    void                clearThrottle()     { _throttled = false; _retryAfterS = 0; }
+
+    // The request went out but no answer came back in time (HTTP read
+    // timeout). The server most likely stored it and was only slow to say
+    // so: sending it again, or spooling it, puts the same values in twice.
+    // ExportManager then neither retries nor spools, and counts it as sent.
+    bool                unconfirmed() const { return _unconfirmed; }
+
+    // Clears both flags above; ExportManager calls it before each send().
+    void                clearThrottle()     { _throttled = false; _retryAfterS = 0; _unconfirmed = false; }
 
 protected:
     bool     _enabled    = false;
     uint32_t _intervalMs = 0;
     bool     _throttled   = false;   // send() sets these on a 429
     uint32_t _retryAfterS = 0;
+    bool     _unconfirmed = false;   // send() sets this on a read timeout
 };
 
 using ExporterFactory = IExporter* (*)();

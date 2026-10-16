@@ -141,9 +141,11 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
     HTTPClient http;   // declared after the clients: destroyed before them
     bool ok = false;
     if (http.begin(secure ? static_cast<WiFiClient&>(*secure) : plain, url)) {
-        // Bounded so four attempts plus backoff stay inside the ExportTask
-        // watchdog window (see ExportManager::_sendWithRetry).
-        http.setTimeout(5000);
+        // openSenseMap often takes longer than 5 s to answer a POST it has
+        // already stored. 15 s still fits the ExportTask watchdog: the
+        // heartbeat is fed before every attempt, and a read timeout is not
+        // retried (see ExportManager::_sendWithRetry).
+        http.setTimeout(15000);
         http.addHeader("Content-Type",  "application/json");
         if (_token[0]) {
             char authHeader[80];
@@ -163,6 +165,11 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
             _retryAfterS = parseRetryAfterS(http.header("Retry-After").c_str());
             Log.printf("[OSM] POST rate-limited (429) retry-after=%lus\n",
                        (unsigned long)_retryAfterS);
+        } else if (code == HTTPC_ERROR_READ_TIMEOUT) {
+            // Sent, no answer: most likely stored (duplicates on the box
+            // showed it). Not resent and not spooled.
+            _unconfirmed = true;
+            Log.println("[OSM] POST sent, no reply in 15 s — not resent");
         } else if (!ok && code >= 400 && code < 500 && code != 408) {
             // Rejected, not lost: a wrong box id/token (401/403/404) or data
             // the API refuses (422, e.g. a createdAt it deems in the future).

@@ -323,6 +323,11 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
         // limit, and so would the spool be, replayed next time. tick() backs
         // off and keeps these values in the table for the next send.
         if (exp->throttled()) return false;
+        // No answer in time, but the request went out: the server has most
+        // likely stored it (openSenseMap stores, then answers late). Another
+        // attempt or the spool would store it a second time; the next
+        // interval sends newer values anyway.
+        if (exp->unconfirmed()) return false;
         Log.printf("[ExportManager] '%s' attempt %d/%d failed\n",
                       exp->getName(), attempt + 1, maxRetries + 1);
     }
@@ -509,6 +514,9 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
         HeapActivity ha(HA_EXPORT, exp->getName());
         exp->clearThrottle();
         ok = exp->send(batch, count);          // false on a 429 too
+        // Sent but unanswered: most likely stored, so move past it instead
+        // of sending the same batch again next time (see _sendWithRetry).
+        if (!ok && exp->unconfirmed()) ok = true;
         if (ok) _setSpoolOff(idx, _spoolOff[idx] + count * sizeof(SensorReading));
     }
 
