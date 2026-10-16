@@ -386,9 +386,11 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     size_t replyLen = strlen(out) + 1;
     for (JsonPairConst kv : cfg.as<JsonObjectConst>())
         replyLen += strlen(kv.key().c_str()) + 4 + measureJson(kv.value());
+    // No unit in the budget (HeapBudget.h) goes the same way.
     std::shared_ptr<BlockPrint> pay;
-    if (!cfg.overflowed()) {
-        BlockPrint* p = new (std::nothrow) BlockPrint(replyLen);
+    WebUnit unit;
+    if (!cfg.overflowed() && unit.ok()) {
+        BlockPrint* p = new (std::nothrow) BlockPrint(replyLen, std::move(unit));
         if (p) pay.reset(p);
     }
     if (pay) {

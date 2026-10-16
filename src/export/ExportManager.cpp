@@ -8,6 +8,7 @@
 #include <time.h>
 #include "../utils/JsonIO.h"
 #include "../core/HeapWatch.h"   // HeapActivity
+#include "../core/HeapBudget.h"  // HeavyLease
 #include "Throttle.h"
 #include <esp_attr.h>       // RTC_NOINIT_ATTR
 #include <esp_system.h>     // esp_reset_reason
@@ -318,6 +319,8 @@ bool ExportManager::_sendWithRetry(int idx, IExporter* exp,
             g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         }
         HeapActivity ha(HA_EXPORT, exp->getName());
+        HeavyLease lease;    // no web reply alongside a TLS session (HeapBudget.h)
+        g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         exp->clearThrottle();
         if (exp->send(r, n)) { _unconfirmedRun[idx] = 0; return true; }
         // Rate-limited: another attempt is another request against the same
@@ -522,6 +525,8 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
         }
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         HeapActivity ha(HA_EXPORT, exp->getName());
+        HeavyLease lease;    // no web reply alongside a TLS session (HeapBudget.h)
+        g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         exp->clearThrottle();
         ok = exp->send(batch, count);          // false on a 429 too
         // Sent but unanswered: most likely stored, so move past it instead

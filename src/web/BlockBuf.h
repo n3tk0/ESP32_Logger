@@ -13,15 +13,28 @@
 #include <string.h>
 #include <new>
 
+// Where blocks come from. The firmware installs a fixed pool (ReplyPool.cpp)
+// so replies do not compete with the rest of the heap; alloc() returns
+// nullptr when the pool is empty and the block comes from the heap instead,
+// and release() returns false for a block that is not the pool's. Unset (the
+// host tests), every block is the heap's.
+struct BlockBufSource {
+    void* (*alloc)()          = nullptr;
+    bool  (*release)(void* p) = nullptr;
+};
+inline BlockBufSource& blockBufSource() { static BlockBufSource s; return s; }
+
 class BlockBuf {
 public:
     static constexpr size_t BLOCK = 512;
+    struct Blk { Blk* next; size_t len; uint8_t data[BLOCK]; };
+    static constexpr size_t BLK_BYTES = sizeof(Blk);
 
     BlockBuf() = default;
     BlockBuf(const BlockBuf&) = delete;
     BlockBuf& operator=(const BlockBuf&) = delete;
     ~BlockBuf() {
-        while (_head) { Blk* n = _head->next; delete _head; _head = n; }
+        while (_head) { Blk* n = _head->next; freeBlk(_head); _head = n; }
     }
 
     // All of it, or nothing more from here on: once a block cannot be had
@@ -31,7 +44,7 @@ public:
         size_t done = 0;
         while (done < n) {
             if (!_tail || _tail->len == BLOCK) {
-                Blk* b = new (std::nothrow) Blk;
+                Blk* b = allocBlk();
                 if (!b) { _failed = true; return done; }
                 b->next = nullptr;
                 b->len  = 0;
@@ -63,7 +76,7 @@ public:
             if (_off == _head->len) {
                 Blk* n = _head->next;
                 if (_head == _tail) _tail = nullptr;
-                delete _head;
+                freeBlk(_head);
                 _head = n;
                 _off  = 0;
             }
@@ -72,7 +85,18 @@ public:
     }
 
 private:
-    struct Blk { Blk* next; size_t len; uint8_t data[BLOCK]; };
+    static Blk* allocBlk() {
+        const BlockBufSource& src = blockBufSource();
+        void* m = src.alloc ? src.alloc() : nullptr;
+        if (!m) m = ::operator new(sizeof(Blk), std::nothrow);
+        return static_cast<Blk*>(m);
+    }
+    static void freeBlk(Blk* b) {
+        const BlockBufSource& src = blockBufSource();
+        if (src.release && src.release(b)) return;
+        ::operator delete(b);
+    }
+
     Blk*   _head = nullptr;
     Blk*   _tail = nullptr;
     size_t _off  = 0;

@@ -45,6 +45,8 @@
 #include "../tasks/TaskManager.h"      // applyLoggerConfig after a data log save
 #include "../utils/MutexGuard.h"
 #include "../core/PanicCapture.h"         // TASK_WDT: where async_tcp was
+#include "../core/HeapBudget.h"           // web replies vs TLS jobs
+#include "ReplyPool.h"                   // the reply blocks, set aside at boot
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
 #include "../utils/WifiTxPower.h"       // wifiTxPowerValid
 #include "../utils/PosixTz.h"           // dstRuleClamp, tzOffsetAt
@@ -197,6 +199,10 @@ static void buildLiveSnapshot(JsonDocument& doc) {
 // ---------------------------------------------------------------------------
 void publishLiveEvent() {
     if (liveEvents.count() == 0) return;
+    // A second without a unit of the heap budget is skipped: the page keeps
+    // the last snapshot, and the next follows in a second.
+    WebUnit unit;
+    if (!unit.ok()) return;
     JsonDocument doc;
     buildLiveSnapshot(doc);
     String buf;
@@ -1667,6 +1673,21 @@ void setupWebServer() {
         heapActivityEnd(HA_WEB);
     });
 
+    // The heap budget's front door (HeapBudget.h): a GET for a dynamic reply
+    // that would get no unit is answered 503 here, before its handler builds
+    // anything. The handlers take the unit themselves; this only saves them
+    // the work. Static files, the SSE channel and POSTs pass: a static file
+    // is not retried by the browser, and a POST is the user's own action.
+    server.addMiddleware([](AsyncWebServerRequest* r, ArMiddlewareNext next) {
+        if (r->method() == HTTP_GET) {
+            const String& u = r->url();
+            const bool dynamic = (u.startsWith("/api/") && u != "/api/events") ||
+                                 u.startsWith("/kindle/data") || u == "/export_settings";
+            if (dynamic && !heapBudgetWebAdmissible()) { sendBusyResponse(r); return; }
+        }
+        next();
+    });
+
     // Defense-in-depth headers applied to every response.
     //
     // WHAT THIS DOES NOT DO, stated plainly because the comment here used to
@@ -2983,6 +3004,10 @@ void startWebServer() {
           .setDefaultFile("index.html")
           .setCacheControl("public, max-age=300, must-revalidate");
 
+    // The heap budget and the reply blocks (HeapBudget.h, ReplyPool.h).
+    // With PSRAM there is heap enough for everything at once: no budget.
+    heapBudgetBegin(!psramFound());
+    replyPoolBegin();
     server.begin();
     // The AsyncTCP task exists from here on, and the task watchdog watches
     // it: a request handler that blocks it 5 s resets the device (TASK_WDT).

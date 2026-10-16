@@ -45,6 +45,8 @@
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../utils/JsonResponse.h"     // R9: sendJsonResponse helper
 #include "DataReply.h"                 // /api/data, chunked
+#include "ReplyPool.h"                 // /api/diag: the reply blocks
+#include "../core/HeapBudget.h"        // WebUnit; /api/diag: the budget
 #include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
 #include <Wire.h>                     // POST /api/i2c_scan
 #include "../sensors/I2CBus.h"        // bus registry for /api/i2c_scan
@@ -71,6 +73,11 @@ extern MqttExporter* g_mqttExporter;
 //   limit=   max output points (default 500)
 // ---------------------------------------------------------------------------
 static void handleApiData(AsyncWebServerRequest* req) {
+    // A unit of the heap budget (HeapBudget.h) before the reading copies are
+    // made: they are the big allocations here. Held until the reply is out.
+    WebUnit unit;
+    if (!unit.ok()) { sendBusyResponse(req); return; }
+
     // THE SAME CLOCK THE READINGS WERE STAMPED WITH. This was millis()/1000,
     // which is not an epoch — so the defaults it computed could not match any
     // stored timestamp: `to` defaulted to a few thousand while every reading
@@ -291,11 +298,121 @@ static void handleApiData(AsyncWebServerRequest* req) {
                          ? ",\"warning\":\"multiple metrics in response; add metric= "
                            "param for single-series queries\"" : "");
     if (rep->headLen >= sizeof(rep->head)) rep->headLen = sizeof(rep->head) - 1;
-    std::shared_ptr<DataReply> st(rep);
+    struct Held { DataReply* rep; WebUnit unit; ~Held() { delete rep; } };
+    Held* h = new (std::nothrow) Held{rep, std::move(unit)};
+    if (!h) { delete rep; sendBusyResponse(req); return; }
+    std::shared_ptr<Held> st(h);
     AsyncWebServerResponse* response = req->beginChunkedResponse("application/json",
-        [st](uint8_t* buf, size_t maxLen, size_t) -> size_t { return st->fill(buf, maxLen); });
+        [st](uint8_t* buf, size_t maxLen, size_t) -> size_t { return st->rep->fill(buf, maxLen); });
     if (!response) { sendBusyResponse(req); return; }
     req->send(response);
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/sparks?s=<sensor>:<metric>,...&from=&to=&limit=40
+// ---------------------------------------------------------------------------
+// The Overview's sparklines in one request, where it made one /api/data
+// request per card (nine on a two-sensor Collector, each with its own
+// connection and reply). Each series is what /api/data?agg=raw&mode=lttb
+// gives for it, values only, in time order:
+//   {"from":F,"to":T,"series":[{"sensor":"BME680","metric":"temperature",
+//                               "v":[21.4,21.5,...]}, ...]}
+// Series are read one at a time, so the heap holds one series' readings at
+// once. A name with anything but letters, digits, '_', '-' or '.' is left
+// out rather than echoed.
+static bool sparkName(const char* p, size_t n) {
+    if (!n) return false;
+    for (size_t i = 0; i < n; i++) {
+        const char c = p[i];
+        if (!isalnum((unsigned char)c) && c != '_' && c != '-' && c != '.') return false;
+    }
+    return true;
+}
+
+static void handleApiSparks(AsyncWebServerRequest* req) {
+    WebUnit unit;
+    if (!unit.ok()) { sendBusyResponse(req); return; }
+
+    constexpr size_t MAX_SERIES = 12;
+    constexpr size_t MAX_RAW    = 300;
+    const String* sArg = queryArg(req, "s");
+    if (!sArg || !sArg->length()) {
+        req->send(400, "application/json", "{\"ok\":false,\"error\":\"s= required\"}");
+        return;
+    }
+    const time_t   sysT = time(nullptr);
+    const uint32_t now  = sysT > 1000000000L ? (uint32_t)sysT : 0u;
+    const String* fromArg = queryArg(req, "from");
+    const String* toArg   = queryArg(req, "to");
+    const uint32_t fromTs = fromArg ? (uint32_t)fromArg->toInt() : (now > 3600u ? now - 3600u : 0u);
+    const uint32_t toTs   = toArg   ? (uint32_t)toArg->toInt()   : (now ? now : UINT32_MAX);
+    const String* limitArg = queryArg(req, "limit");
+    long limit = limitArg ? limitArg->toInt() : 40;
+    if (limit < 2)   limit = 40;
+    if (limit > 100) limit = 100;
+
+    BlockPrint* p = new (std::nothrow) BlockPrint(SIZE_MAX, std::move(unit));
+    if (!p) { sendBusyResponse(req); return; }
+    std::shared_ptr<BlockPrint> pay(p);
+    SensorReading* agg = new (std::nothrow) SensorReading[(size_t)limit + 1];
+    if (!agg) { sendBusyResponse(req); return; }
+    pay->printf("{\"from\":%u,\"to\":%u,\"series\":[", (unsigned)fromTs, (unsigned)toTs);
+
+    const char* list = sArg->c_str();
+    size_t series = 0;
+    bool oom = false;
+    while (*list && series < MAX_SERIES && !oom) {
+        const char* end = strchr(list, ',');
+        const size_t len = end ? (size_t)(end - list) : strlen(list);
+        const char* colon = nullptr;
+        for (size_t i = len; i-- > 0; ) if (list[i] == ':') { colon = list + i; break; }
+        char sensor[sizeof(SensorReading::sensorId)] = "";
+        char metric[sizeof(SensorReading::metric)]   = "";
+        if (colon) {
+            const size_t sl = (size_t)(colon - list), ml = len - sl - 1;
+            if (sl < sizeof(sensor) && ml < sizeof(metric) &&
+                sparkName(list, sl) && sparkName(colon + 1, ml)) {
+                memcpy(sensor, list, sl);       sensor[sl] = '\0';
+                memcpy(metric, colon + 1, ml);  metric[ml] = '\0';
+            }
+        }
+        list += len + (end ? 1 : 0);
+        if (!sensor[0]) continue;
+
+        size_t want = 0, got = 0;
+        if (webDataMutex && xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            want = webRingBuf.copyMatching(nullptr, 0, MAX_RAW, fromTs, toTs, sensor, metric, true);
+            xSemaphoreGive(webDataMutex);
+        }
+        size_t aggCount = 0;
+        if (want) {
+            SensorReading* raw = new (std::nothrow) SensorReading[want];
+            if (!raw) { oom = true; break; }
+            if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                got = webRingBuf.copyMatching(raw, want, MAX_RAW, fromTs, toTs, sensor, metric);
+                xSemaphoreGive(webDataMutex);
+            }
+            // The same call /api/data makes for agg=raw&mode=lttb&limit=N.
+            const size_t outCap = got < (size_t)limit ? got : (size_t)limit;
+            if (got) aggCount = AggregationEngine::aggregate(raw, got, agg, outCap,
+                                                             BUCKET_RAW, AGG_LTTB, outCap);
+            delete[] raw;
+        }
+        pay->printf("%s{\"sensor\":\"%s\",\"metric\":\"%s\",\"v\":[",
+                    series ? "," : "", sensor, metric);
+        for (size_t i = 0; i < aggCount; i++) {
+            char v[16];
+            snprintf(v, sizeof(v), "%.4g", agg[i].value);
+            pay->printf("%s%s", i ? "," : "", v);
+        }
+        pay->print("]}");
+        series++;
+    }
+    delete[] agg;
+    pay->print("]}");
+    if (oom || pay->buf.failed()) { sendBusyResponse(req); return; }
+    pay->seal();
+    if (!sendBlockPrint(req, pay, "application/json")) sendBusyResponse(req);
 }
 
 // ---------------------------------------------------------------------------
@@ -1103,6 +1220,26 @@ static void handleApiDiag(AsyncWebServerRequest* req) {
     // almost always means the build is compiled for the wrong SPI mode
     // (octal parts need board_build.arduino.memory_type = qio_opi), and the
     // ring then silently falls back to the small internal-RAM budget.
+    // The heap budget (HeapBudget.h) and the reply blocks (ReplyPool.h):
+    // how often a reply was refused, how long TLS jobs waited, and whether
+    // the pool ever ran dry. tools/webstress.py reads these.
+    {
+        const HeapBudgetStats b = heapBudgetStats();
+        JsonObject hb = doc["budget"].to<JsonObject>();
+        hb["enabled"]       = b.enabled;
+        hb["units"]         = b.total;
+        hb["used"]          = b.used;
+        hb["web_refused"]   = b.webRefused;
+        hb["heavy_runs"]    = b.heavyRuns;
+        hb["heavy_forced"]  = b.heavyForced;
+        hb["heavy_wait_max_ms"] = b.heavyWaitMaxMs;
+        const ReplyPoolStats rp = replyPoolStats();
+        JsonObject pool = doc["reply_pool"].to<JsonObject>();
+        pool["blocks"]      = rp.blocks;
+        pool["free"]        = rp.free;
+        pool["min_free"]    = rp.minFree;
+        pool["heap_blocks"] = rp.heapBlocks;
+    }
     {
         JsonObject psram = doc["psram"].to<JsonObject>();
         psram["size"] = (uint32_t)ESP.getPsramSize();
@@ -2029,6 +2166,7 @@ void registerApiRoutes(AsyncWebServer& server) {
     registerIngestHandler(server);
 #endif
     server.on("/api/data",              HTTP_GET,  handleApiData);
+    server.on("/api/sparks",            HTTP_GET,  handleApiSparks);
     server.on("/api/latest",            HTTP_GET,  handleApiLatest);
     server.on("/api/sensors",           HTTP_GET,  handleApiSensors);
     server.on("/api/sensors/read_now",  HTTP_GET,  handleApiSensorReadNow);

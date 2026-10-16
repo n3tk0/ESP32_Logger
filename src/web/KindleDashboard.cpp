@@ -47,6 +47,8 @@ static_assert(ForecastModule::OUTLOOK_N == KD_FC_COLS, "outlook columns");
 // The shell payload's sink: Print over a BlockBuf (handleKindleData).
 struct KdPayload : public Print {
     BlockBuf buf;
+    WebUnit  unit;      // one of the replies in flight (HeapBudget.h)
+    explicit KdPayload(WebUnit&& u) : unit(std::move(u)) {}
     size_t write(uint8_t c) override { return buf.write(&c, 1); }
     size_t write(const uint8_t* p, size_t n) override { return buf.write(p, n); }
 };
@@ -1953,6 +1955,11 @@ static void appendTopBlock(String& p, const KindleConfig& skin, uint32_t now,
 }
 
 static void handleKindleData(AsyncWebServerRequest* req) {
+    // A unit of the heap budget first, before anything is built: no unit,
+    // a 503, and the reader keeps its last page.
+    WebUnit unit;
+    if (!unit.ok()) { sendBusyResponse(req); return; }
+
     // THE LANGUAGE, FIRST, BEFORE ANYTHING IS WORDED. kdT() and the weekday and
     // month tables read one ambient value rather than taking a parameter each —
     // see DashboardStrings.h for why — and this is where it is set. Every page
@@ -1993,7 +2000,7 @@ static void handleKindleData(AsyncWebServerRequest* req) {
 
     // Assembled in small blocks, then sent with its length (BlockBuf.h): a
     // growing stream reallocated the whole payload on every byte past 1460.
-    KdPayload* pay = new (std::nothrow) KdPayload();
+    KdPayload* pay = new (std::nothrow) KdPayload(std::move(unit));
     if (!pay) { sendBusyResponse(req); return; }
     std::shared_ptr<KdPayload> owner(pay);
     Print* s = pay;

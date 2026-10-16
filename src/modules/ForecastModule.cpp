@@ -8,6 +8,7 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include "../core/HeapBudget.h"
 #include <math.h>
 #include <memory>
 #include "../core/Globals.h"        // config.kindle: whether the week strip wants the days
@@ -368,6 +369,10 @@ bool ForecastModule::_fetch() {
 // so a plain fetch never touches mbedTLS.
 static String httpGet(const char* url) {
     const bool tls = strncmp(url, "https://", 8) == 0;
+    // A TLS session wants most of a C3's heap: no web reply alongside it
+    // (HeapBudget.h). Declared first, so it is released after the clients.
+    std::unique_ptr<HeavyLease> lease;
+    if (tls) lease.reset(new (std::nothrow) HeavyLease);
     WiFiClient plain;
     std::unique_ptr<WiFiClientSecure> secure;
     if (tls) {

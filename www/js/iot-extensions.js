@@ -499,29 +499,59 @@
   }
 
   // ── Background sparkline drawer for Overview metric tiles ──────────────────
-  // Throttled worker pool — the ESP's connection pool is tiny, so we keep at
-  // most OV_SPARK_MAX /api/data requests in flight. Each placeholder is drawn
-  // once per (sensor::metric); the dataset guard avoids refetching on every poll.
-  var _ovSparkQueue = [];
-  var _ovSparkActive = 0;
-  var OV_SPARK_MAX = 2;
-
+  // Every card asking in the same turn shares ONE /api/sparks request (the
+  // device answers one series after another, one connection and one reply),
+  // where each card used to make its own /api/data request: nine on a
+  // two-sensor Collector, the larger part of what an Overview load asked a
+  // C3 for. Each placeholder is drawn once per (sensor::metric); the dataset
+  // guard avoids refetching on every poll.
   function _ovQueueSpark(svg, sensorId, metric) {
     if (!svg || !sensorId || !metric) return;
     var key = sensorId + "::" + metric;
     if (svg.dataset.drawnFor === key) return;  // already drawn for this binding
     svg.dataset.drawnFor = key;
-    _ovSparkQueue.push({ svg: svg, sensorId: sensorId, metric: metric });
-    _ovSparkPump();
+    _ovFetchSpark(svg, sensorId, metric);
   }
 
-  function _ovSparkPump() {
-    while (_ovSparkActive < OV_SPARK_MAX && _ovSparkQueue.length) {
-      var job = _ovSparkQueue.shift();
-      _ovSparkActive++;
-      _ovFetchSpark(job.svg, job.sensorId, job.metric)
-        .then(function () { _ovSparkActive--; _ovSparkPump(); });
+  // Series asked for in this turn, sent together on the next one.
+  var _ovSparkBatch = null;
+  var OV_SPARK_BATCH_MAX = 12;   // the device's limit per request
+  function _ovSparkSeries(sensorId, metric, from, now) {
+    if (!_ovSparkBatch) {
+      _ovSparkBatch = { from: from, to: now, items: [] };
+      setTimeout(_ovSparkFlush, 0);
     }
+    var b = _ovSparkBatch;
+    return new Promise(function (resolve, reject) {
+      b.items.push({ sensor: sensorId, metric: metric, resolve: resolve, reject: reject });
+    });
+  }
+  function _ovSparkFlush() {
+    var b = _ovSparkBatch;
+    _ovSparkBatch = null;
+    if (!b) return;
+    for (var i = 0; i < b.items.length; i += OV_SPARK_BATCH_MAX) {
+      _ovSparkSend(b.from, b.to, b.items.slice(i, i + OV_SPARK_BATCH_MAX));
+    }
+  }
+  function _ovSparkSend(from, to, items) {
+    var s = items.map(function (it) {
+      return encodeURIComponent(it.sensor) + ":" + encodeURIComponent(it.metric);
+    }).join(",");
+    fetchWithTimeout("/api/sparks?s=" + s + "&from=" + from + "&to=" + to + "&limit=40", {}, 8000)
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (res) {
+        var by = {};
+        (res && Array.isArray(res.series) ? res.series : []).forEach(function (se) {
+          by[se.sensor + "::" + se.metric] = se.v;
+        });
+        items.forEach(function (it) {
+          var v = by[it.sensor + "::" + it.metric];
+          // The shape the drawing below reads, as /api/data gives it.
+          it.resolve({ data: (Array.isArray(v) ? v : []).map(function (x) { return { v: x }; }) });
+        });
+      })
+      .catch(function (e) { items.forEach(function (it) { it.reject(e); }); });
   }
 
   // The last answer per sensor::metric, reused for a minute. The deck is
@@ -535,13 +565,9 @@
     var key = sensorId + "::" + metric;
     var hit = _ovSparkCache[key];
     var now = Math.floor(Date.now() / 1000), from = now - 3600;
-    var url = "/api/data?sensor=" + encodeURIComponent(sensorId) +
-              "&metric=" + encodeURIComponent(metric) +
-              "&from=" + from + "&to=" + now + "&agg=raw&mode=lttb&limit=40";
     var got = (hit && Date.now() - hit.at < OV_SPARK_REUSE_MS)
       ? hit.p
-      : fetchWithTimeout(url, {}, 6000)
-          .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); });
+      : _ovSparkSeries(sensorId, metric, from, now);
     if (got !== (hit && hit.p)) {
       _ovSparkCache[key] = { at: Date.now(), p: got };
       got.catch(function () { if (_ovSparkCache[key] && _ovSparkCache[key].p === got) delete _ovSparkCache[key]; });
