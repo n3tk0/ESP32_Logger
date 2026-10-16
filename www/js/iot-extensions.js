@@ -2,8 +2,8 @@
  * /www/js/iot-extensions.js  —  IoT-first UI extensions
  *
  * Adds platform-mode awareness, Overview + Alerts pages (built as editable
- * card decks), sensor-diagnostics card (formerly the Health page), sensor
- * zone grouping, compare-mode chips, the 4-step Add-Sensor wizard, and a
+ * card decks), sensor-diagnostics card (formerly the Health page),
+ * compare-mode chips, the 4-step Add-Sensor wizard, and a
  * live-cycle section injected into the Sensors page when a flow-meter is
  * wired (legacy / hybrid modes).
  *
@@ -93,8 +93,6 @@
     applyMode(m);
     // Build dynamic pages now that we know the mode
     buildPages(m);
-    // Post-load: re-group sensor grid if already rendered
-    rebuildSensorZones();
     // Inject compare-mode strip into sensor chart card
     injectCompareChips();
   }
@@ -473,6 +471,7 @@
         _populateSensorPickers(sensors);
         _registerDynamicSensorCards(sensors);
         renderHealthGrid(sensors);
+        ovFillSensorList();
         // Update subtitle now that we know the real sensor count
         var sub = document.getElementById("ov-sub");
         if (sub) sub.textContent = ieT(sensors.length === 1 ? "iotExt.overviewSubCount" : "iotExt.overviewSubCountPlural", { n: sensors.length });
@@ -789,28 +788,52 @@
     if (pulses && d.totalPulses !== undefined)       pulses.textContent = d.totalPulses;
   }
 
+  // One row per sensor: its name and status from /api/sensors, and every
+  // metric it reported in /api/latest. The status is the sensor's own — the
+  // readings carry none, so a sensor in error used to read OK here.
+  var _ovSensorReadings = null;   // last _normalizeLatest() result
+
   function ovFillSensorList(data) {
+    if (data) _ovSensorReadings = data;
     var list = document.getElementById("ov-sensors-list");
     if (!list) return;
-    if (!Array.isArray(data) || data.length === 0) {
+    var byId = {};
+    (_ovSensorReadings || []).forEach(function (s) { if (s) byId[s.id] = s; });
+    var rows = _overviewSensorList
+      ? _overviewSensorList.filter(function (s) { return s && s.status !== "disabled"; })
+      : (_ovSensorReadings || []);
+    if (!rows.length) {
       list.innerHTML = "";
       list.appendChild(emptyState({ icon: "thermometer", title: ieT("iotExt.noSensors"), msg: ieT("iotExt.addSensorToStart") }));
       return;
     }
-    list.innerHTML = data.slice(0, 8).map(function (s) {
-      var r = s.readings || {};
-      var keys = Object.keys(r);
-      var firstVal = keys.length ? r[keys[0]] : null;
-      var valStr = firstVal !== null && firstVal !== undefined
-        ? (typeof firstVal === "number" ? firstVal.toFixed(2) : String(firstVal)) + " " + (s.units && s.units[keys[0]] || "")
-        : "—";
-      var st = s.error ? "err" : s.stale ? "warn" : "ok";
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">' +
-               '<span class="mono" style="color:var(--text-2)">' + esc(s.id) + '</span>' +
-               '<span style="display:flex;align-items:center;gap:8px">' +
-                 '<span class="mono" style="font-weight:600">' + esc(valStr) + '</span>' +
-                 '<span class="badge ' + st + '">' + st.toUpperCase() + '</span>' +
-               '</span>' +
+    list.innerHTML = rows.map(function (s) {
+      var got = byId[s.id] || {};
+      var r = got.readings || {}, u = got.units || {};
+      var metrics = (s.metrics && s.metrics.length) ? s.metrics.map(function (m) { return typeof m === "string" ? m : m && m.id; })
+                                                    : Object.keys(r);
+      var cells = metrics.filter(function (m) { return m; }).map(function (m) {
+        var has = r[m] !== undefined && r[m] !== null;
+        return '<span class="ov-sl-m" title="' + esc(m) + '">' +
+                 '<span class="ov-sl-l">' + esc(ovMetricLabel(m)) + '</span> ' +
+                 '<span class="ov-sl-v">' + (has ? esc(ovFmtValue(m, r[m])) : "—") + '</span>' +
+                 (has ? '<span class="ov-sl-u">' + esc(ovUnit(m, u[m])) + '</span>' : '') +
+               '</span>';
+      }).join("");
+      var badge = "";
+      if (s.status) {
+        var st = s.status === "ok" ? "ok" : "err";
+        var txt = s.status === "ok" ? "OK" : "ERR";
+        badge = '<span class="badge ' + st + '"' + (s.status_detail ? ' title="' + esc(s.status_detail) + '"' : '') + '>' + txt + '</span>';
+      }
+      var sub = s.id && s.name && s.name !== s.id ? s.id + (s.type ? " · " + s.type : "") : (s.type || "");
+      return '<div class="ov-sl-row">' +
+               '<div class="ov-sl-head">' +
+                 '<span class="ov-sl-name">' + esc(s.name || s.id) + '</span>' +
+                 (sub ? '<span class="ov-sl-id">' + esc(sub) + '</span>' : '') +
+                 badge +
+               '</div>' +
+               (cells ? '<div class="ov-sl-ms">' + cells + '</div>' : '') +
              '</div>';
     }).join("");
   }
@@ -848,8 +871,7 @@
         '<span class="af-time">' + esc(_relTime(h.ts)) + '</span>' +
         '<div><div class="af-name">' + esc(h.rule_id || "") + '</div>' +
           '<div class="af-val">' + esc(h.value !== undefined ? String(h.value) : "") + '</div></div>' +
-        '<span class="badge ' + esc(h.outcome || "ok") + '">' +
-          esc((h.outcome || "ok").toUpperCase()) + '</span>' +
+        '<span class="badge ' + esc(h.outcome || "ok") + '">' + esc(_outcomeText(h.outcome)) + '</span>' +
       '</div>';
     }).join("");
   }
@@ -884,6 +906,14 @@
     wind_speed:      { i: "wind",        d: 1, u: "m/s", z: 1 },
     wind_direction:  { i: "wind",        d: 0, u: "°" },
     moisture_pct:    { i: "droplets",    d: 0, u: "%" },
+    moisture_raw:    { i: "droplets",    d: 0, u: "" },
+    distance:        { i: "activity",    d: 1, u: "cm" },
+    uva:             { i: "sun",         d: 0, u: "",    z: 1 },
+    uvb:             { i: "sun",         d: 0, u: "",    z: 1 },
+    white:           { i: "sun",         d: 0, u: "",    z: 1 },
+    voltage_raw:     { i: "zap",         d: 0, u: "" },
+    current_raw:     { i: "zap",         d: 0, u: "" },
+    device_status:   { i: "activity",    d: 0, u: "" },
     flow_rate:       { i: "droplets",    d: 1, u: "L/min", z: 1 },
     volume:          { i: "droplets",    d: 1, u: "L",   z: 1 },
     voltage_vrms:    { i: "zap",         d: 1, u: "V" },
@@ -1328,7 +1358,7 @@
         '<span class="af-time">' + esc(_relTime(h.ts)) + '</span>' +
         '<div><div class="af-name">' + esc(h.rule_id || "") + '</div>' +
           '<div class="af-val">' + esc(h.value !== undefined ? h.value : "") + '</div></div>' +
-        '<span class="badge ' + esc(h.outcome || "ok") + '">' + esc((h.outcome || "ok").toUpperCase()) + '</span>' +
+        '<span class="badge ' + esc(h.outcome || "ok") + '">' + esc(_outcomeText(h.outcome)) + '</span>' +
       '</div>';
     }).join("");
   }
@@ -1489,6 +1519,14 @@
         if (btn) btn.disabled = false;
         showToast(ieT("iotExt.saveFailed"), (e && e.message) || ieT("iotExt.couldNotReachDevice"), "err");
       });
+  }
+
+  // An alert history entry's outcome ("fired") in the page's language; the
+  // badge draws it in capitals.
+  function _outcomeText(o) {
+    o = o || "ok";
+    var k = "iotExt.outcome_" + o, t = ieT(k);
+    return t !== k ? t : o;
   }
 
   // Format a unix timestamp as a relative time string ("3 min ago", "2 h ago").
@@ -1760,122 +1798,6 @@
       });
       mo.observe(main, { attributes: true, subtree: true, attributeFilter: ["class"] });
     }
-  }
-
-  // ─── Sensor zone grouping ─────────────────────────────────────────────────
-  // Called after sensors have been rendered into #sensors-grid.
-  function rebuildSensorZones() {
-    // Hook into sensorsLoad completion: watch for mutations on #sensors-grid
-    var grid = document.getElementById("sensors-grid");
-    if (!grid) return;
-
-    // Stays connected: the Refresh button clears the grid and fills it again
-    // once /api/sensors answers, two separate mutations. Disconnecting for a
-    // while after the first (the empty grid) missed the second whenever the
-    // answer came back sooner, and the cards stayed ungrouped in a grid that
-    // grouping had switched to display:block — one full-width card per row.
-    // The records of the grouping's own rebuild are dropped instead.
-    var mo = new MutationObserver(function () {
-      doZoneGrouping();
-      mo.takeRecords();
-    });
-    mo.observe(grid, { childList: true });
-    // Also group if already populated
-    if (grid.children.length > 0) doZoneGrouping();
-  }
-
-  function doZoneGrouping() {
-    var grid = document.getElementById("sensors-grid");
-    if (!grid) return;
-    // The cards lie in the grid itself until they are grouped: keep it a grid.
-    if (!grid.querySelector(".zone-section")) grid.style.display = "";
-    if (!window.CFG) return;
-
-    // Build zone map from platform_config sensors
-    var sensors = (CFG.platform && CFG.platform.sensors) || [];
-    var zoneMap = {};
-    sensors.forEach(function (s) {
-      var z = s.zone || "other";
-      if (!zoneMap[z]) zoneMap[z] = [];
-      zoneMap[z].push(s.id);
-    });
-
-    // Collect existing sensor cards by data-sid attribute.
-    // Multiple cards can share the same data-sid (one per metric), so keep an array.
-    var existing = {};
-    grid.querySelectorAll("[data-sid]").forEach(function (c) {
-      var sid = c.dataset.sid;
-      if (!existing[sid]) existing[sid] = [];
-      existing[sid].push(c);
-    });
-
-    if (!Object.keys(existing).length) return;
-    // Already grouped (the observer also sees the grouping's own rebuild).
-    if (!grid.querySelector(":scope > [data-sid]")) return;
-
-    // Rebuild
-    grid.innerHTML = "";
-    grid.style.display = "block";
-
-    var ZONE_ICONS = { indoor:"home", outdoor:"sun", utility:"wrench", other:"grid" };
-    var ZONE_LABEL_KEYS = { indoor:"iotExt.zoneIndoor", outdoor:"iotExt.zoneOutdoor", utility:"iotExt.zoneUtility", other:"iotExt.zoneOther" };
-    function zoneLabel(zone) {
-      var key = ZONE_LABEL_KEYS[zone];
-      return key ? ieT(key) : zone.charAt(0).toUpperCase() + zone.slice(1);
-    }
-
-    // Helper: flatten arrays of cards for a list of sensor ids
-    function _cardsFor(ids) {
-      return ids.reduce(function (acc, id) {
-        return existing[id] ? acc.concat(existing[id]) : acc;
-      }, []);
-    }
-
-    Object.keys(zoneMap).forEach(function (zone) {
-      var cards = _cardsFor(zoneMap[zone]);
-      if (!cards.length) return;
-
-      // Sensor count = unique data-sid values in this zone
-      var uniqueIds = zoneMap[zone].filter(function (id) { return existing[id]; });
-
-      var sec = document.createElement("div");
-      sec.className = "zone-section";
-      sec.innerHTML =
-        '<div class="zone-head">' +
-          '<div class="zone-title">' +
-            '<span data-icon="' + (ZONE_ICONS[zone] || "grid") + '"></span>' +
-            esc(zoneLabel(zone)) +
-          '</div>' +
-          '<div class="zone-meta">' + esc(ieT(uniqueIds.length === 1 ? "iotExt.zoneSensorCount" : "iotExt.zoneSensorCountPlural", { n: uniqueIds.length })) + '</div>' +
-        '</div>' +
-        '<div class="sensors-grid zone-cards"></div>';
-
-      var cardGrid = sec.querySelector(".zone-cards");
-      cards.forEach(function (c) { cardGrid.appendChild(c); });
-
-      grid.appendChild(sec);
-    });
-
-    // Any cards not assigned to any zone
-    var unzonedIds = Object.keys(existing).filter(function (id) {
-      return !sensors.find(function (s) { return s && s.id === id; });
-    });
-    var unzoned = _cardsFor(unzonedIds);
-    if (unzoned.length) {
-      var sec2 = document.createElement("div");
-      sec2.className = "zone-section";
-      sec2.innerHTML =
-        '<div class="zone-head">' +
-          '<div class="zone-title"><span data-icon="grid"></span> ' + esc(ieT("iotExt.zoneOther")) + '</div>' +
-          '<div class="zone-meta">' + esc(ieT(unzonedIds.length === 1 ? "iotExt.zoneSensorCount" : "iotExt.zoneSensorCountPlural", { n: unzonedIds.length })) + '</div>' +
-        '</div>' +
-        '<div class="sensors-grid zone-cards"></div>';
-      var cg2 = sec2.querySelector(".zone-cards");
-      unzoned.forEach(function (c) { cg2.appendChild(c); });
-      grid.appendChild(sec2);
-    }
-
-    reIcons(grid);
   }
 
   // ─── Compare-mode chips in sensor chart card ──────────────────────────────

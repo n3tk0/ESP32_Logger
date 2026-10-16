@@ -154,7 +154,7 @@ button, a, [role="button"] { min-height: 24px; }
   padding:14px 10px 6px;
 }
 /* Mono caption — small, dim, tabular figures (timestamps, trends) */
-.ev-meta .l2, .zone-meta, .energy-tile-trend, .ar-trips, .af-time {
+.ev-meta .l2, .energy-tile-trend, .ar-trips, .af-time {
   font-family:var(--mono); font-size:11px; color:var(--text-3);
 }
 /* 14px inline lucide icon inside text rows */
@@ -546,11 +546,9 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .sensor .s-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
 .sensor .s-name { font-weight:600; font-size:13px; display:flex; align-items:center; gap:8px; }
 .sensor .s-name [data-lucide] { width:14px; height:14px; color:var(--accent); }
-.sensor .s-id { font-family:var(--mono); font-size:10.5px; color:var(--text-3); margin-top:2px; }
 .sensor .s-val { display:flex; align-items:baseline; gap:5px; font-family:var(--mono); }
 .sensor .s-val .n { font-size:24px; font-weight:600; letter-spacing:-.02em; }
 .sensor .s-val .u { color:var(--text-3); font-size:12px; font-family:var(--sans); }
-.sensor .s-metrics { display:flex; flex-wrap:wrap; gap:4px; }
 .sensor .s-spark { width:100%; height:36px; color:var(--accent); margin:0 -4px; opacity:.7; }
 .sensor .s-foot { display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-3); font-family:var(--mono); }
 
@@ -1184,21 +1182,30 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 }
 .mode-pill [data-icon] { width:11px; height:11px; }
 
-/* ── Sensor zone sections ── */
-.zone-section { margin-bottom:var(--gap); }
-.zone-head {
-  display:flex; align-items:center; justify-content:space-between;
-  padding:6px 4px 8px;
-  margin-bottom:8px;
+/* ── Sensors page: a section per sensor, a card per metric ── */
+#sensors-grid { display:block; }
+.s-group { margin-bottom:var(--gap); }
+.s-group-head {
+  display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px;
+  padding:6px 4px 8px; margin-bottom:8px;
   border-bottom:1px solid var(--border);
 }
-.zone-title {
-  display:flex; align-items:center; gap:8px;
-  font-size:11px; font-weight:700;
-  text-transform:uppercase; letter-spacing:.06em;
-  color:var(--text-2);
-}
-.zone-title [data-icon] { width:13px; height:13px; color:var(--accent); }
+.s-group-name { font-weight:600; font-size:14px; }
+.s-group-id { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.s-group-head > .badge:last-child { margin-left:auto; }
+.s-group-detail { font-size:10px; }
+
+/* ── Overview "Active sensors": one row per sensor, every metric ── */
+.ov-sl-row { padding:8px 0; border-bottom:1px solid var(--border); }
+.ov-sl-row:last-child { border-bottom:0; }
+.ov-sl-head { display:flex; align-items:center; gap:8px; }
+.ov-sl-name { font-weight:600; font-size:13px; }
+.ov-sl-id { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.ov-sl-head .badge { margin-left:auto; }
+.ov-sl-ms { display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:4px; font-size:12px; }
+.ov-sl-l { color:var(--text-2); }
+.ov-sl-v { font-family:var(--mono); font-weight:600; }
+.ov-sl-u { color:var(--text-3); margin-left:2px; }
 
 /* ── Air Quality composite gauge ── */
 .aqi-card { display:grid; grid-template-columns:140px 1fr; gap:18px; padding:18px; }

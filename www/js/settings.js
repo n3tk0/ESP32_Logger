@@ -193,8 +193,18 @@ function changelogLoad() {
 // Built by a function (not a static object) so the labels/hints pick up
 // the current I18n language every time hwInit() runs (Form.bind re-renders
 // from scratch on every page visit — same pattern as hubStatusInit()).
-function hwSchema(ctx, cpuMaxMHz) {
+// `noFlow`: a build without the flow meter hides what only the water logger
+// uses: the flush buttons and flow sensor pins, the flow LED test, and the
+// button level once no button is wired. Hidden, not left out: the fields
+// still post what they hold. A pin that holds a GPIO stays in view whatever
+// the build, since the firmware still sets its pull-up (initHardware) and it
+// can only be cleared where it is seen.
+function hwSchema(ctx, cpuMaxMHz, noFlow, hw) {
   var t = window.I18n ? I18n.t : function (k) { return k; };
+  hw = hw || {};
+  var wired = function (k) { var v = parseInt(hw[k], 10); return v >= 0 && v < 255; };
+  var hidePin = function (k) { return !!noFlow && !wired(k); };
+  var noButtons = !wired("pinWifiTrigger") && !wired("pinWakeupFF") && !wired("pinWakeupPF");
   // 240 MHz only where the chip runs it (S3); the firmware says which.
   var cpuOpts = [["80", "80 MHz"], ["160", "160 MHz"]];
   if (cpuMaxMHz >= 240) cpuOpts.push(["240", "240 MHz"]);
@@ -216,7 +226,7 @@ function hwSchema(ctx, cpuMaxMHz) {
               { name: "pinSdSCK",  label: t("settingsPages.hwSck"),  type: "pin", pinCtx: ctx, showWhen: { storageType: "1" } },
           ]},
       ]},
-      { title: "😴 " + t("settingsPages.hwSectionWakeup"), fields: [
+      { title: "😴 " + t("settingsPages.hwSectionWakeup"), hidden: !!noFlow && noButtons, fields: [
           { name: "wakeupMode", label: t("settingsPages.hwButtonActiveLevel"), type: "select",
             hint: t("settingsPages.hwWakeupHint"),
             options: [
@@ -232,9 +242,9 @@ function hwSchema(ctx, cpuMaxMHz) {
         fields: [
           { row: [
               { name: "pinWifiTrigger", label: t("settingsPages.hwWifiTrigger"),  type: "pin", pinCtx: ctx },
-              { name: "pinWakeupFF",    label: t("settingsPages.hwFullFlushBtn"), type: "pin", pinCtx: ctx },
-              { name: "pinWakeupPF",    label: t("settingsPages.hwPartFlushBtn"), type: "pin", pinCtx: ctx },
-              { name: "pinFlowSensor",  label: t("settingsPages.hwFlowSensor"),   type: "pin", pinCtx: ctx },
+              { name: "pinWakeupFF", hidden: hidePin("pinWakeupFF"),    label: t("settingsPages.hwFullFlushBtn"), type: "pin", pinCtx: ctx },
+              { name: "pinWakeupPF", hidden: hidePin("pinWakeupPF"),    label: t("settingsPages.hwPartFlushBtn"), type: "pin", pinCtx: ctx },
+              { name: "pinFlowSensor", hidden: hidePin("pinFlowSensor"),  label: t("settingsPages.hwFlowSensor"),   type: "pin", pinCtx: ctx },
           ]},
       ]},
       { title: "🕐 " + t("settingsPages.hwSectionRtc"), fields: [
@@ -255,7 +265,7 @@ function hwSchema(ctx, cpuMaxMHz) {
       // Flow-meter LED diagnostics, migrated here when the standalone
       // settings_flowmeter page was retired (PR #105 follow-up). The fields
       // live on config.flowMeter; hwInit() merges them into the binding object.
-      { title: "💧 " + t("settingsPages.hwFmSectionTitle"), fields: [
+      { title: "💧 " + t("settingsPages.hwFmSectionTitle"), hidden: noFlow, fields: [
           { name: "testMode", label: t("settingsPages.hwFmEnableBlink"), type: "checkbox",
             hint: t("settingsPages.hwFmEnableBlinkHint") },
           { name: "blinkDuration", label: t("settingsPages.hwBlinkDuration"), type: "number",
@@ -273,8 +283,10 @@ function hwInit() {
   Promise.all([
     fetchWithTimeout("/export_settings", {}, 15000).then(function (r) { return r.json(); }),
     pinsReady,
+    // Which features this build has (caps): the form hides what it lacks.
+    getStatus().catch(function () { return null; }),
   ]).then(function (res) {
-      var d = res[0], pdata = res[1];
+      var d = res[0], pdata = res[1], st = res[2];
       CFG = d;
       var hw = d.hardware || {};
       var defaults = {
@@ -297,7 +309,8 @@ function hwInit() {
       // typed pin into the hidden input the form POSTs, so skipping it when
       // the profile list failed to load sent the old GPIOs and said "saved".
       var ctx = pdata ? Pins.ctx(pdata, pdata.active) : { profile: null, board: null };
-      var form = Form.bind("hw-host", hwSchema(ctx, hw.cpuMaxMHz), hw);
+      var noFlow = !!(st && st.caps && st.caps.flowmeter === false);
+      var form = Form.bind("hw-host", hwSchema(ctx, hw.cpuMaxMHz, noFlow, hw), hw);
       if (form && window.Pins) hwWirePins(form, ctx);
 
       var th = (ST && ST.theme) || (CFG && CFG.theme) || {};

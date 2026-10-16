@@ -54,12 +54,7 @@ function ndMsg(text, kind) {
 // Seconds-based age formatter — shared by both transports. Remote reports
 // age in ms; callers convert before calling this.
 function ndFmtAge(s) {
-  if (s < 60) return s + "s";
-  var m = Math.round(s / 60);
-  if (m < 60) return m + "m";
-  var h = Math.round(m / 60);
-  if (h < 24) return h + "h";
-  return Math.round(h / 24) + "d";
+  return fmtShortAge(s);
 }
 
 // How far an ESP-NOW node's clock is from the collector's, as a badge.
@@ -70,7 +65,7 @@ function ndSkew(n) {
   }
   var s = n.skew_s;
   var mag = Math.abs(s);
-  var txt = mag < 60 ? mag + "s" : ndFmtAge(mag);
+  var txt = ndFmtAge(mag);
   if (s !== 0) txt = (s > 0 ? "-" : "+") + txt; // node behind us reads as negative
   return {
     text: txt,

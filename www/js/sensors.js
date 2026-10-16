@@ -67,14 +67,7 @@ function sensorsLoad() {
   // Falls through "5s" → "3m" → "2h" → "1d" so the staleness signal stays
   // legible at a glance.
   function _sensorFmtAge(ms) {
-    var s = Math.round(ms / 1000);
-    if (s < 60)   return s + "s";
-    var m = Math.round(s / 60);
-    if (m < 60)   return m + "m";
-    var h = Math.round(m / 60);
-    if (h < 24)   return h + "h";
-    var d = Math.round(h / 24);
-    return d + "d";
+    return fmtShortAge(Math.round(ms / 1000));
   }
 
   // Force a fresh fetch here — this is the Sensors page main load, the
@@ -106,10 +99,18 @@ function sensorsLoad() {
       }
 
       if (grid) {
+        // One section per sensor: its name, id and status in the heading,
+        // a card per metric under it. Names, units and decimals are the
+        // Overview's (window.MetricText), so a reading reads the same on both.
+        var MT = window.MetricText || {};
+        var mLabel = function (m) { return MT.label ? MT.label(m) : m; };
+        var mUnit = function (m, u) { return MT.unit ? MT.unit(m, u) : u; };
+        var mFmt = function (m, v) { return MT.fmt ? MT.fmt(m, v) : String(v); };
         var html = [];
         d.sensors.forEach(function (s) {
           if (!s) return;
           var metrics = (s.metrics && s.metrics.length > 0) ? s.metrics : [""];
+          var cardsHtml = [];
           
           metrics.forEach(function (m, mIdx) {
             // Sparkline path from `s.spark` for primary metric.
@@ -148,11 +149,12 @@ function sensorsLoad() {
             var val = "", unit = "", ts = 0;
             if (lv !== undefined && lv !== null) {
               if (typeof lv === "object") {
-                val  = lv.v !== undefined ? String(lv.v) : "";
-                unit = lv.u || "";
+                val  = lv.v !== undefined && lv.v !== null ? mFmt(m, lv.v) : "";
+                unit = mUnit(m, lv.u || "");
                 ts   = lv.ts || 0;
               } else {
-                val = String(lv);
+                val = mFmt(m, lv);
+                unit = mUnit(m, "");
               }
             }
 
@@ -180,26 +182,6 @@ function sensorsLoad() {
             if (s.status === "err" || s.status === "error") stateClass = " err";
             if (s.status === "disabled") stateClass = " dis";
 
-            var badgeClass =
-              s.status === "ok" ? "ok" :
-              s.status === "disabled" ? "dim" : "err";
-            var badgeText =
-              s.status === "ok" ? "OK" :
-              s.status === "disabled" ? "OFF" : "ERR";
-
-            // Only show transport if it adds information beyond the type/id the
-            // user already sees.  "sds011 · sds011" is redundant; "sds011 · UART1" is useful.
-            var rawTransport = s.transport || "";
-            var transport = (rawTransport && rawTransport !== s.id && rawTransport !== s.type)
-                            ? rawTransport : "";
-
-            // s-metrics: error detail chip only (each metric is its own card)
-            var errChip = "";
-            if ((s.status === "err" || s.status === "error") && s.status_detail) {
-              errChip = '<div class="s-metrics"><span class="badge err" style="font-size:10px">' +
-                        esc(s.status_detail) + '</span></div>';
-            }
-
             var ageRefMs = s.last_read_ms || 0;
             var ageIcon = "", ageColor = "inherit";
             if (stateClass === " err")        { ageIcon = "⊘"; ageColor = "var(--err)"; }
@@ -207,31 +189,51 @@ function sensorsLoad() {
             else if (sleeping)                { ageIcon = "☾"; ageColor = "var(--text-3)"; }
             else if (ageRefMs && stateClass !== " dis") { ageIcon = "✓"; ageColor = "var(--ok)"; }
 
-            var cardName = esc(s.name) + (m && metrics.length > 1 ? " (" + esc(m) + ")" : "");
-            
-            html.push(
-              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc((cardName + ' ' + (s.id || '')).toLowerCase().trim()) + '" data-sid="' + esc(s.id || '') + '">' +
+            var cardName = m ? mLabel(m) : (s.name || s.id);
+            var findText = [s.name, s.id, s.type, m, m && mLabel(m)].join(" ").toLowerCase();
+
+            cardsHtml.push(
+              '<div class="sensor' + stateClass + '" data-sensor-name="' + esc(findText) + '" data-sid="' + esc(s.id || '') + '">' +
                 '<div class="s-head">' +
-                  '<div>' +
-                    '<div class="s-name">' + cardName + '</div>' +
-                    '<div class="s-id">' + esc(s.id) +
-                      (transport ? ' · ' + esc(transport) : (s.type && s.type !== s.id ? ' · ' + esc(s.type) : '')) + '</div>' +
-                  '</div>' +
-                  '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
+                  '<div class="s-name"' + (m ? ' title="' + esc(m) + '"' : '') + '>' + esc(cardName) + '</div>' +
                 '</div>' +
                 '<div class="s-val">' +
                   '<span class="n">' + (val ? esc(val) : "—") + '</span>' +
                   (unit ? '<span class="u">' + esc(unit) + '</span>' : '') +
                 '</div>' +
                 sparkSvg +
-                errChip +
                 '<div class="s-foot">' +
                   '<span style="color:' + ageColor + '">' + ageIcon + ' ' + ageStr + '</span>' +
-                  (transport ? '<span>' + esc(transport) + '</span>' : '') +
                 '</div>' +
               '</div>'
             );
           });
+
+          var badgeClass =
+            s.status === "ok" ? "ok" :
+            s.status === "disabled" ? "dim" : "err";
+          var badgeText =
+            s.status === "ok" ? "OK" :
+            s.status === "disabled" ? "OFF" : "ERR";
+          // The transport only when it says more than the type ("sds011 · UART1").
+          var rawTransport = s.transport || "";
+          var transport = (rawTransport && rawTransport !== s.id && rawTransport !== s.type)
+                          ? rawTransport : "";
+          var sub = [s.name && s.name !== s.id ? s.id : "", s.type && s.type !== s.id ? s.type : "", transport]
+                    .filter(function (x) { return x; }).join(" · ");
+          var detail = (s.status === "err" || s.status === "error") && s.status_detail
+                       ? '<span class="badge err s-group-detail">' + esc(s.status_detail) + '</span>' : "";
+          html.push(
+            '<section class="s-group" data-sid="' + esc(s.id || '') + '">' +
+              '<div class="s-group-head">' +
+                '<span class="s-group-name">' + esc(s.name || s.id) + '</span>' +
+                (sub ? '<span class="s-group-id">' + esc(sub) + '</span>' : '') +
+                detail +
+                '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
+              '</div>' +
+              '<div class="sensors-grid s-group-cards">' + cardsHtml.join("") + '</div>' +
+            '</section>'
+          );
         });
         grid.innerHTML = html.join("");
 
@@ -310,6 +312,10 @@ function sensorsFilter() {
   cards.forEach(function (card) {
     var name = card.getAttribute("data-sensor-name") || "";
     card.style.display = (!q || name.indexOf(q) !== -1) ? "" : "none";
+  });
+  // A sensor's heading goes with its last visible card.
+  document.querySelectorAll("#sensors-grid .s-group").forEach(function (g) {
+    g.style.display = g.querySelector('.sensor:not([style*="none"])') ? "" : "none";
   });
 }
 

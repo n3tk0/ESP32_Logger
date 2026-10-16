@@ -1,7 +1,7 @@
 /**
  * /www/i18n/iot-extensions.js — strings for iot-extensions.js:
  * Overview + Alerts pages (built entirely in JS), sensor diagnostics,
- * sensor zone grouping, compare-mode chips, and the 4-step Add-Sensor wizard.
+ * compare-mode chips, and the 4-step Add-Sensor wizard.
  */
 "use strict";
 
@@ -125,6 +125,7 @@ I18n.register("iotExt", {
     minutesAgo: "{n} min ago",
     hoursAgo: "{n} h ago",
     daysAgo: "{n} d ago",
+    outcome_fired: "fired",
 
     // Sensors page: live-cycle section
     volume: "Volume",
@@ -134,13 +135,6 @@ I18n.register("iotExt", {
     stateMachine: "State machine",
     liveCycleHint: 'Live feed from the legacy flow-meter pipeline. Open <a href="#live" data-click="navPage" data-page="live" data-args="[]">the full Live page</a> for the timer + log.',
 
-    // Sensor zone grouping
-    zoneIndoor: "Indoor",
-    zoneOutdoor: "Outdoor",
-    zoneUtility: "Utility",
-    zoneOther: "Other",
-    zoneSensorCount: "{n} sensor",
-    zoneSensorCountPlural: "{n} sensors",
 
     // Compare-mode chips
     compareLabel: "Compare:",
@@ -210,6 +204,14 @@ I18n.register("iotExt", {
     m_wind_speed: "Wind speed",
     m_wind_direction: "Wind direction",
     m_moisture_pct: "Soil moisture",
+    m_moisture_raw: "Soil moisture (raw)",
+    m_distance: "Distance",
+    m_uva: "UVA",
+    m_uvb: "UVB",
+    m_white: "White light",
+    m_voltage_raw: "Voltage (raw)",
+    m_current_raw: "Current (raw)",
+    m_device_status: "Device status",
     m_flow_rate: "Flow rate",
     m_volume: "Volume",
     m_distance: "Distance",
@@ -335,10 +337,11 @@ I18n.register("iotExt", {
 
     // Relative time
     justNow: "току-що",
-    secondsAgo: "преди {n}s",
+    secondsAgo: "преди {n} с",
     minutesAgo: "преди {n} мин",
     hoursAgo: "преди {n} ч",
     daysAgo: "преди {n} д",
+    outcome_fired: "задействана",
 
     // Sensors page: live-cycle section
     volume: "Обем",
@@ -348,13 +351,6 @@ I18n.register("iotExt", {
     stateMachine: "Машина на състоянията",
     liveCycleHint: 'Поток на живо от старата верига за разходомер. Отворете <a href="#live" data-click="navPage" data-page="live" data-args="[]">пълната страница На живо</a> за таймера и дневника.',
 
-    // Sensor zone grouping
-    zoneIndoor: "Вътре",
-    zoneOutdoor: "Навън",
-    zoneUtility: "Помощни",
-    zoneOther: "Други",
-    zoneSensorCount: "{n} сензор",
-    zoneSensorCountPlural: "{n} сензора",
 
     // Compare-mode chips
     compareLabel: "Сравни:",
@@ -424,6 +420,14 @@ I18n.register("iotExt", {
     m_wind_speed: "Скорост на вятъра",
     m_wind_direction: "Посока на вятъра",
     m_moisture_pct: "Влажност на почвата",
+    m_moisture_raw: "Влажност на почвата (сурова)",
+    m_distance: "Разстояние",
+    m_uva: "UVA",
+    m_uvb: "UVB",
+    m_white: "Бяла светлина",
+    m_voltage_raw: "Напрежение (сурово)",
+    m_current_raw: "Ток (суров)",
+    m_device_status: "Състояние на устройството",
     m_flow_rate: "Дебит",
     m_volume: "Обем",
     m_distance: "Разстояние",

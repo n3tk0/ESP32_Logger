@@ -179,7 +179,7 @@ with sync_playwright() as p:
             const g = document.getElementById('sensors-grid');
             const cards = [...g.querySelectorAll('.sensor')];
             return {
-              zones: g.querySelectorAll('.zone-section').length,
+              groups: g.querySelectorAll('.s-group').length,
               loose: g.querySelectorAll(':scope > .sensor').length,
               cards: cards.length,
               gridW: g.getBoundingClientRect().width,
@@ -190,14 +190,14 @@ with sync_playwright() as p:
     print("Cards on first load:")
     l0 = layout()
     check(l0["cards"] == 3, f"one card per metric ({l0['cards']})")
-    check(l0["zones"] == 2, f"grouped into the two zones ({l0['zones']})")
+    check(l0["groups"] == 2, f"grouped under the two sensors ({l0['groups']})")
 
     print("\nCards after the page's Refresh button:")
     for i in range(3):
         pg.locator('#page-sensors button[data-click="sensorsLoad"]').click()
         pg.wait_for_timeout(700)
         l1 = layout()
-        check(l1["cards"] == 3 and l1["zones"] == 2 and l1["loose"] == 0,
+        check(l1["cards"] == 3 and l1["groups"] == 2 and l1["loose"] == 0,
               f"refresh {i + 1}: still grouped ({l1})")
         check(l1["maxW"] < l1["gridW"] / 2,
               f"refresh {i + 1}: cards are tiles, not full-width rows "
