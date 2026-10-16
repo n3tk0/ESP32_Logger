@@ -44,6 +44,7 @@
 #include "../export/ExportManager.h"    // caps.exporters: what this build registered
 #include "../tasks/TaskManager.h"      // applyLoggerConfig after a data log save
 #include "../utils/MutexGuard.h"
+#include "../core/PanicCapture.h"         // TASK_WDT: where async_tcp was
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
 #include "../utils/WifiTxPower.h"       // wifiTxPowerValid
 #include "../utils/PosixTz.h"           // dstRuleClamp, tzOffsetAt
@@ -2986,5 +2987,9 @@ void startWebServer() {
           .setCacheControl("public, max-age=300, must-revalidate");
 
     server.begin();
+    // The AsyncTCP task exists from here on, and the task watchdog watches
+    // it: a request handler that blocks it 5 s resets the device (TASK_WDT).
+    // Name where it was stuck in the RTC log when that happens.
+    panicCaptureWatchTask(xTaskGetHandle("async_tcp"));
     DBGF("Web server started. Free heap: %d\n", ESP.getFreeHeap());
 }
