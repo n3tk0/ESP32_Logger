@@ -23,6 +23,8 @@
 #include "KindleFlow.h"                 // where everything goes, for what is on the page
 #include "FormArgs.h"                   // queryArg
 #include "KindlePkg.h"                  // PKG_* — the reader's own update
+#include "BlockBuf.h"                   // the payload, in small blocks
+#include "../utils/JsonResponse.h"      // sendBusyResponse
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
 #endif
@@ -42,7 +44,14 @@ static_assert(ForecastModule::OUTLOOK_N == KD_FC_COLS, "outlook columns");
 // page drawn in standalone — and they have to send the same set: a key that
 // one of them omits is a key the panel keeps from the LAST payload, which is
 // how a forecast that is no longer being drawn goes on being remembered.
-static void kdForecastKeysEmpty(AsyncResponseStream* s) {
+// The shell payload's sink: Print over a BlockBuf (handleKindleData).
+struct KdPayload : public Print {
+    BlockBuf buf;
+    size_t write(uint8_t c) override { return buf.write(&c, 1); }
+    size_t write(const uint8_t* p, size_t n) override { return buf.write(p, n); }
+};
+
+static void kdForecastKeysEmpty(Print* s) {
     s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_ICON=-1\nFC_HIGH=\nFC_LOW=\n"
              "FC_WIND=\nFC_AGE=\"\"\nFC_SUMMARY_ADVW=0\n");
     for (int i = 0; i < KD_FC_COLS; i++)
@@ -1125,7 +1134,7 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
 // quotes ("  \  $  `) makes the value inert; control characters are dropped
 // outright because a newline would end the assignment whatever is escaped, and
 // none of them belong in a label.
-static void kdShellVar(AsyncResponseStream* s, const char* key, const char* val) {
+static void kdShellVar(Print* s, const char* key, const char* val) {
     s->print(key);
     s->print("=\"");
     for (const char* p = val; p && *p; p++) {
@@ -1151,21 +1160,21 @@ static void kdShellVar(AsyncResponseStream* s, const char* key, const char* val)
 /// 96 bytes because a label is 24 (KindleSlot::label) and Cyrillic is two bytes
 /// a letter; kdUpperUtf8() truncates on a character boundary rather than inside
 /// one, so a longer string loses whole letters instead of gaining a box glyph.
-static void kdShellVarUpper(AsyncResponseStream* s, const char* key,
+static void kdShellVarUpper(Print* s, const char* key,
                             const char* val) {
     char up[96];
     kdUpperUtf8(up, sizeof(up), val);
     kdShellVar(s, key, up);
 }
 
-static void kdShellVarN(AsyncResponseStream* s, const char* fmt, int i, const char* val) {
+static void kdShellVarN(Print* s, const char* fmt, int i, const char* val) {
     char key[24];
     snprintf(key, sizeof(key), fmt, i);
     kdShellVar(s, key, val);
 }
 
 /// KEY="G1 G2…": the places in `used`, upper case, in order.
-static void kdShellZoneList(AsyncResponseStream* s, const char* key,
+static void kdShellZoneList(Print* s, const char* key,
                             const uint8_t* used, int n) {
     s->print(key);
     s->print("=\"");
@@ -1179,7 +1188,7 @@ static void kdShellZoneList(AsyncResponseStream* s, const char* key,
 
 /// KEY=<number> and a newline, unquoted: the same bytes a printf with "%d"
 /// wrote, without a format string per key and a vsnprintf behind each one.
-static void kdShellInt(AsyncResponseStream* s, const char* key, long v) {
+static void kdShellInt(Print* s, const char* key, long v) {
     s->print(key);
     s->print('=');
     s->print(v);
@@ -1187,7 +1196,7 @@ static void kdShellInt(AsyncResponseStream* s, const char* key, long v) {
 }
 
 /// The same for the unsigned values (%u, %lu) — advance widths, epoch seconds.
-static void kdShellUint(AsyncResponseStream* s, const char* key, unsigned long v) {
+static void kdShellUint(Print* s, const char* key, unsigned long v) {
     s->print(key);
     s->print('=');
     s->print(v);
@@ -1528,7 +1537,7 @@ static void kdWallSkin(KindleConfig& skin) {
     if (!skin.rules) skin.rules = kdRulesPack(KRULE_THICK, KRULE_BLACK, KRULE_SOLID);
 }
 
-static void emitZones(AsyncResponseStream* s, const KindleConfig& skin,
+static void emitZones(Print* s, const KindleConfig& skin,
                       KdRender& rd) {
     // IN PLACE, not a copy: seven hundred bytes of places on the web server's
     // stack is enough once. Nothing reads them after this but the layout keys,
@@ -1982,7 +1991,12 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     kdRenderBegin(rd, skin, now, standalone, false, kdRotLandscape(rot),
                   req->hasParam("col"), wall);
 
-    AsyncResponseStream* s = req->beginResponseStream("text/plain");
+    // Assembled in small blocks, then sent with its length (BlockBuf.h): a
+    // growing stream reallocated the whole payload on every byte past 1460.
+    KdPayload* pay = new (std::nothrow) KdPayload();
+    if (!pay) { sendBusyResponse(req); return; }
+    std::shared_ptr<KdPayload> owner(pay);
+    Print* s = pay;
     // The line behind the headline, fetched as /kindle/graph.bmp?line=1.
     kdShellInt(s, "HERO_LINE", heroLine ? 1 : 0);
 
@@ -2562,7 +2576,13 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // reader running an older script ignores it like any key it does not know.
     s->print("END=1\n");
 
-    req->send(s);
+    // Cut short is worse than not sent: the reader keeps its last payload on
+    // a 503, and would refuse one without END=1 anyway.
+    if (pay->buf.failed()) { sendBusyResponse(req); return; }
+    AsyncWebServerResponse* res = req->beginResponse("text/plain", pay->buf.size(),
+        [owner](uint8_t* out, size_t maxLen, size_t) -> size_t { return owner->buf.read(out, maxLen); });
+    if (!res) { sendBusyResponse(req); return; }
+    req->send(res);
 }
 
 /// Appends `sheet` to `p`, replacing every "$n" / "$-n" with kdPx(n). The
