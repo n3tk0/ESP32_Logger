@@ -19,6 +19,7 @@
 
 #include "WebServer.h"
 #include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
+#include "../utils/JsonCopy.h"   // jsonCopy
 #include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
 #include "../core/SdCompat.h"           // sdFs() — SD.h only when FEATURE_SD_STORAGE
@@ -1867,7 +1868,7 @@ void setupWebServer() {
     auto fillIdentity = [](JsonObject o) {
         o["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
         o["deviceName"]     = o["device"];   // alias – sdInit uses both
-        o["deviceId"]       = config.deviceId;
+        o["deviceId"]       = jsonCopy(config.deviceId);
         o["version"]        = getVersionString();
         o["forceWebServer"] = config.forceWebServer;
         o["network"]        = getNetworkDisplay();
@@ -1955,22 +1956,22 @@ void setupWebServer() {
 
     auto fillTheme = [](JsonObject o) {
         o["mode"]              = (int)config.theme.mode;
-        o["primaryColor"]      = config.theme.primaryColor;
-        o["secondaryColor"]    = config.theme.secondaryColor;
-        o["lightBgColor"]      = config.theme.lightBgColor;
-        o["lightTextColor"]    = config.theme.lightTextColor;
-        o["darkBgColor"]       = config.theme.darkBgColor;
-        o["darkTextColor"]     = config.theme.darkTextColor;
-        o["ffColor"]           = config.theme.ffColor;
-        o["pfColor"]           = config.theme.pfColor;
-        o["otherColor"]        = config.theme.otherColor;
-        o["storageBarColor"]   = config.theme.storageBarColor;
-        o["storageBar70Color"] = config.theme.storageBar70Color;
-        o["storageBar90Color"] = config.theme.storageBar90Color;
-        o["storageBarBorder"]  = config.theme.storageBarBorder;
-        o["logoSource"]        = config.theme.logoSource;
-        o["faviconPath"]       = config.theme.faviconPath;
-        o["boardDiagramPath"]  = config.theme.boardDiagramPath;
+        o["primaryColor"]      = jsonCopy(config.theme.primaryColor);
+        o["secondaryColor"]    = jsonCopy(config.theme.secondaryColor);
+        o["lightBgColor"]      = jsonCopy(config.theme.lightBgColor);
+        o["lightTextColor"]    = jsonCopy(config.theme.lightTextColor);
+        o["darkBgColor"]       = jsonCopy(config.theme.darkBgColor);
+        o["darkTextColor"]     = jsonCopy(config.theme.darkTextColor);
+        o["ffColor"]           = jsonCopy(config.theme.ffColor);
+        o["pfColor"]           = jsonCopy(config.theme.pfColor);
+        o["otherColor"]        = jsonCopy(config.theme.otherColor);
+        o["storageBarColor"]   = jsonCopy(config.theme.storageBarColor);
+        o["storageBar70Color"] = jsonCopy(config.theme.storageBar70Color);
+        o["storageBar90Color"] = jsonCopy(config.theme.storageBar90Color);
+        o["storageBarBorder"]  = jsonCopy(config.theme.storageBarBorder);
+        o["logoSource"]        = jsonCopy(config.theme.logoSource);
+        o["faviconPath"]       = jsonCopy(config.theme.faviconPath);
+        o["boardDiagramPath"]  = jsonCopy(config.theme.boardDiagramPath);
         o["chartSource"]       = (int)config.theme.chartSource;
         o["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/uPlot.iife.min.js";
         o["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;

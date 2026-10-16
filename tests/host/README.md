@@ -47,6 +47,7 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_data_reply.cpp` | `src/web/DataReply.h` — `/api/data` written in pieces gives the old reply byte for byte at every piece size, and more metric/unit pairs than `KINDS` are refused (`kindsOver`) |
 | `test_block_buf.cpp` | `src/web/BlockBuf.h` — the web replies' 512 B blocks: what goes in comes out in order at every read size, `size()` counts it, and blocks come from the installed source (the reply pool) before the heap and go back to it |
 | `test_heap_budget.cpp` | `src/core/HeapBudgetCore.h` — the heap budget: web replies up to the total, a waiting TLS job closes the door to new replies and gets its units once they drain, a forced one runs over the total until all are done |
+| `test_json_copy.cpp` | `src/utils/JsonCopy.h` — ArduinoJson keeps only a pointer to a const char array, and `jsonCopy()` makes the document keep its own copy, so a struct freed or rewritten before serializing does not change the reply |
 
 Fuzz targets (random-input property checks):
 

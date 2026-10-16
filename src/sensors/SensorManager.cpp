@@ -11,6 +11,7 @@
 #include "ReadingCache.h"              // latest-value table (cross-sensor lookups)
 #include "I2CBus.h"                    // per-bus arbitration + reset on reload
 #include "../utils/JsonIO.h"
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 SensorManager sensorManager;
 
@@ -569,7 +570,7 @@ void SensorManager::toJson(JsonArray arr) const {
             _formatValue(r.value, vBuf, sizeof(vBuf));
             JsonObject mv = vals[sl.metrics[m]].to<JsonObject>();
             mv["v"]  = serialized(String(vBuf));
-            mv["u"]  = r.unit;
+            mv["u"]  = jsonCopy(r.unit);
             mv["ts"] = r.timestamp;
         }
 

@@ -65,7 +65,7 @@ void handleGetBoardProfiles(AsyncWebServerRequest* req) {
         const BoardProfile* p = list[i];
         JsonObject o    = arr.add<JsonObject>();
         o["id"]         = p->shortId;
-        o["name"]       = p->name;
+        o["name"]       = p->name;   // a const char*: copied (check_json_char_arrays)
         o["maxGpio"]    = p->maxGpio;
 
         auto fill = [&](const char* key, const uint8_t* src) {

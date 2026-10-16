@@ -5,6 +5,7 @@
 #include "../core/Config.h"
 #include "../utils/Utils.h"
 #include "../utils/JsonEnum.h"
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 namespace {
 
@@ -84,15 +85,15 @@ bool ThemeModule::save(JsonObject cfg) const {
     cfg["showIcons"]        = t.showIcons;
     cfg["chartSource"]      = (int)t.chartSource;
     cfg["chartLabelFormat"] = (int)t.chartLabelFormat;
-    cfg["primaryColor"]     = t.primaryColor;
-    cfg["secondaryColor"]   = t.secondaryColor;
-    cfg["lightBgColor"]     = t.lightBgColor;
-    cfg["lightTextColor"]   = t.lightTextColor;
-    cfg["darkBgColor"]      = t.darkBgColor;
-    cfg["darkTextColor"]    = t.darkTextColor;
-    cfg["chartLocalPath"]   = t.chartLocalPath;
-    cfg["logoSource"]       = t.logoSource;
-    cfg["faviconPath"]      = t.faviconPath;
+    cfg["primaryColor"]     = jsonCopy(t.primaryColor);
+    cfg["secondaryColor"]   = jsonCopy(t.secondaryColor);
+    cfg["lightBgColor"]     = jsonCopy(t.lightBgColor);
+    cfg["lightTextColor"]   = jsonCopy(t.lightTextColor);
+    cfg["darkBgColor"]      = jsonCopy(t.darkBgColor);
+    cfg["darkTextColor"]    = jsonCopy(t.darkTextColor);
+    cfg["chartLocalPath"]   = jsonCopy(t.chartLocalPath);
+    cfg["logoSource"]       = jsonCopy(t.logoSource);
+    cfg["faviconPath"]      = jsonCopy(t.faviconPath);
     return true;
 }
 

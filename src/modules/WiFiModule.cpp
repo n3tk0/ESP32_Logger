@@ -6,6 +6,7 @@
 #include "../utils/Ipv4Parse.h"
 #include "../utils/JsonEnum.h"
 #include "../utils/WifiTxPower.h"
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 namespace {
 
@@ -53,7 +54,7 @@ bool WiFiModule::load(JsonObjectConst cfg) {
 bool WiFiModule::save(JsonObject cfg) const {
     const NetworkConfig& n = config.network;
     cfg["wifiMode"]       = (int)n.wifiMode;
-    cfg["clientSSID"]     = n.clientSSID;
+    cfg["clientSSID"]     = jsonCopy(n.clientSSID);
     // Intentionally omit clientPassword from the shadow file (phase 2) —
     // storing it in two places without encryption is worse than one.  The
     // real password continues to live in config.bin only.

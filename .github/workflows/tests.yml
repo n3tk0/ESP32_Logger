@@ -46,6 +46,7 @@ on:
       - 'tools/check_sse_lock.py'
       - 'tools/check_tempobject_cleanup.py'
       - 'tools/check_web_replies.py'
+      - 'tools/check_json_char_arrays.py'
       - 'tools/check_kindle_payload_keys.py'
       - 'tools/check_kindle_flow_parity.py'
       - 'tools/kindle_preview/**'
@@ -94,6 +95,7 @@ on:
       - 'tools/check_sse_lock.py'
       - 'tools/check_tempobject_cleanup.py'
       - 'tools/check_web_replies.py'
+      - 'tools/check_json_char_arrays.py'
       - 'tools/check_kindle_payload_keys.py'
       - 'tools/check_kindle_flow_parity.py'
       - 'tools/kindle_preview/**'
@@ -792,6 +794,26 @@ jobs:
         # raise was for, silently. /api/ingest went to 4 KB for buffered node
         # batches and every batch large enough to need it was answered 413.
         run: python3 tools/check_body_handlers.py
+
+      - name: Char-array members go into JSON copied
+        # ArduinoJson 7.3+ keeps only a pointer to a const char[N] (it takes
+        # it for a string literal). /api/latest freed its readings before the
+        # reply was written and sent what was in that memory by then.
+        run: python3 tools/check_json_char_arrays.py
+
+      - name: Verify that checker fails on an uncast member
+        run: |
+          set -e
+          cp src/web/IngestHandler.cpp /tmp/ijc.orig
+          printf '\nstatic void probe(JsonObject o, const SensorReading& r) { o["id"] = r.sensorId; }\n' >> src/web/IngestHandler.cpp
+          if python3 tools/check_json_char_arrays.py > /dev/null 2>&1; then
+            echo "::error::check_json_char_arrays.py passed an uncast char-array member"
+            cp /tmp/ijc.orig src/web/IngestHandler.cpp
+            exit 1
+          fi
+          cp /tmp/ijc.orig src/web/IngestHandler.cpp
+          rm /tmp/ijc.orig
+          echo "the checker fails on an uncast member, as it should"
 
       - name: No web reply is an AsyncResponseStream
         # A growing (or wrongly sized) stream retried malloc for every byte

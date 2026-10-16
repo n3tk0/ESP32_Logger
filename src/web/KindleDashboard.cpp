@@ -501,7 +501,7 @@ static void kdChartPick(const KindleConfig& skin, KdChartPick& p) {
         p.on[s]     = !(s && v == KCHART_NONE);
         if (v >= 1 && v <= KZ_COUNT && kdSlots().z[v - 1].used()) {
             const KindleSlot& sl = kdSlots().z[v - 1];
-            p.id[s] = sl.sensorId; p.metric[s] = sl.metric; p.label[s] = kdSlotLabel(sl);
+            p.id[s] = sl.sensorId; p.metric[s] = sl.metric; p.label[s] = kdSlotLabel(sl);   // pointers, no JSON (check_json_char_arrays)
         }
     }
     p.own = p.on[1] && strcmp(p.metric[0], p.metric[1]) != 0;

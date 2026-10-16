@@ -474,7 +474,7 @@ void handleKindlePkgUploadDone(AsyncWebServerRequest* req) {
     JsonDocument out;
     if (u->err) {
         out["ok"]    = false;
-        out["error"] = u->err;
+        out["error"] = u->err;   // a const char* (check_json_char_arrays)
         if (u->owner) {                // ours: do not leave half a package behind
             MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
             if (!fsMutex || g.isLocked()) sdFs()->remove(KINDLEPKG_TMP);

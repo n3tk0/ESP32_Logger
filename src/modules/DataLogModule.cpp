@@ -4,6 +4,7 @@
 #include "../core/Config.h"
 #include <stdlib.h>
 #include <string.h>
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 namespace {
 
@@ -88,8 +89,8 @@ bool DataLogModule::load(JsonObjectConst cfg) {
 // ---------------------------------------------------------------------------
 bool DataLogModule::save(JsonObject cfg) const {
     const DatalogConfig& d = config.datalog;
-    cfg["prefix"]                 = d.prefix;
-    cfg["folder"]                 = d.folder;
+    cfg["prefix"]                 = jsonCopy(d.prefix);
+    cfg["folder"]                 = jsonCopy(d.folder);
     cfg["rotation"]               = (int)d.rotation;
     cfg["maxSizeKB"]              = (uint32_t)d.maxSizeKB;   // by value: see load()
     cfg["maxEntries"]             = (uint16_t)d.maxEntries;

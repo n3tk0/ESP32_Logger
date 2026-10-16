@@ -61,6 +61,7 @@ extern MqttExporter* g_mqttExporter;
 #include "../core/EventLog.h"      // EVENT_LOG_PATH
 #include "../core/SdCompat.h"      // sdSupportCompiledIn() for /api/diag
 #include "../utils/JsonIO.h"
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 // ---------------------------------------------------------------------------
 // GET /api/data
@@ -464,11 +465,11 @@ static void handleApiLatest(AsyncWebServerRequest* req) {
     for (size_t k = 0; k < nPairs; k++) {
         const SensorReading& r = latest[k];
         JsonObject o = arr.add<JsonObject>();
-        o["id"]     = r.sensorId;
-        o["type"]   = r.sensorType;
-        o["metric"] = r.metric;
+        o["id"]     = jsonCopy(r.sensorId);
+        o["type"]   = jsonCopy(r.sensorType);
+        o["metric"] = jsonCopy(r.metric);
         o["value"]  = r.value;
-        o["unit"]   = r.unit;
+        o["unit"]   = jsonCopy(r.unit);
         o["ts"]     = r.timestamp;
         o["q"]      = (uint8_t)r.quality;
     }
@@ -523,8 +524,8 @@ static void handleEspnowStatus(AsyncWebServerRequest* req) {
     for (int i = 0; i < n; i++) {
         const EspNowNode& e = nodes[i];
         JsonObject o = arr.add<JsonObject>();
-        o["id"]        = e.id;
-        o["node_id"]   = e.nodeId;
+        o["id"]        = jsonCopy(e.id);
+        o["node_id"]   = e.nodeId;   // a number (check_json_char_arrays)
         o["interval"]  = e.intervalS;
         nodeCfgPutSummary(o, true, nullptr, e.nodeId);   // docs/NODE_CONFIG.md §7
         o["frames"]    = e.framesRx;
@@ -926,9 +927,9 @@ static void handleApiRemoteStatus(AsyncWebServerRequest* req) {
         JsonArray mArr = n["metrics"].to<JsonArray>();
         for (int m = 0; m < mCount; m++) {
             JsonObject mObj = mArr.add<JsonObject>();
-            mObj["metric"] = readings[m].metric;
+            mObj["metric"] = jsonCopy(readings[m].metric);
             mObj["value"]  = readings[m].value;
-            mObj["unit"]   = readings[m].unit;
+            mObj["unit"]   = jsonCopy(readings[m].unit);
             // Per-metric, because a node can go on reporting temperature after
             // its humidity sensor has stopped, and one aggregate freshness
             // figure for the node would hide that.
@@ -1031,9 +1032,9 @@ static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
     for (int i = 0; i < KZ_COUNT; i++) {
         const KindleSlot& s = zones.z[i];
         JsonObject o = zo[kdZoneKey((uint8_t)i)].to<JsonObject>();
-        o["sensor"]   = s.sensorId;
-        o["metric"]   = s.metric;
-        o["label"]    = s.label;                 // "" means "use the default"
+        o["sensor"]   = jsonCopy(s.sensorId);
+        o["metric"]   = jsonCopy(s.metric);
+        o["label"]    = jsonCopy(s.label);                 // "" means "use the default"
         o["shown"]    = kdSlotLabel(s);          // what will actually be drawn
         o["flags"]    = s.flags;
         o["decimals"] = s.decimals;
@@ -1056,8 +1057,8 @@ static void handleKindleSlotsGet(AsyncWebServerRequest* req) {
 
     doc["group_out"]  = kdGroupOutLabel(zones);
     doc["group_in"]   = kdGroupInLabel(zones);
-    doc["group_out_set"] = zones.groupOut;      // "" = showing the built-in
-    doc["group_in_set"]  = zones.groupIn;
+    doc["group_out_set"] = jsonCopy(zones.groupOut);      // "" = showing the built-in
+    doc["group_in_set"]  = jsonCopy(zones.groupIn);
 
     // The grey levels, generated from the firmware's own enum so a level added
     // later appears in the form without anyone remembering to add it twice.
@@ -1458,9 +1459,9 @@ static void handleApiSensorReadNow(AsyncWebServerRequest* req) {
     JsonArray arr = doc["readings"].to<JsonArray>();
     for (int i = 0; i < n; i++) {
         JsonObject r = arr.add<JsonObject>();
-        r["metric"] = readings[i].metric;
+        r["metric"] = jsonCopy(readings[i].metric);
         r["value"]  = readings[i].value;
-        r["unit"]   = readings[i].unit;
+        r["unit"]   = jsonCopy(readings[i].unit);
     }
     delete[] readings;
     sendJsonResponse(req, doc);
@@ -1970,7 +1971,7 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
 
     JsonObject dev = doc["device"].to<JsonObject>();
     dev["name"]       = config.deviceName[0] ? config.deviceName : "Water Logger";
-    dev["id"]         = config.deviceId;
+    dev["id"]         = jsonCopy(config.deviceId);
     dev["firmware"]   = getVersionString();
     dev["boot_count"] = bootCount;
 
@@ -2083,8 +2084,8 @@ static void handleApiAlertsToasts(AsyncWebServerRequest* req) {
     AlertToast toast;
     while (alertEngine.popToast(toast)) {
         JsonObject o = arr.add<JsonObject>();
-        o["rule_id"] = toast.rule_id;
-        o["name"]    = toast.name;
+        o["rule_id"] = jsonCopy(toast.rule_id);
+        o["name"]    = jsonCopy(toast.name);
         o["value"]   = toast.value;
         o["ts"]      = toast.ts;
     }
