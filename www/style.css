@@ -1346,12 +1346,20 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .health-stat-v { font-family:var(--mono); font-weight:600; color:var(--text-2); }
 .health-stat-v.warn { color:var(--warn); }
 .health-stat-v.err  { color:var(--err); }
-.health-uptime-bar { height:24px; display:flex; gap:2px; border-radius:3px; overflow:hidden; background:var(--panel-3); }
-.health-uptime-bar > span { flex:1; min-width:2px; }
+/* One segment per hour. The bar itself has no background, so the 2px gaps
+   show the tile and an hour without data stays a separate grey segment. */
+.health-uptime-bar { height:20px; display:flex; gap:2px; border-radius:3px; overflow:hidden; }
+.health-uptime-bar > span { flex:1; min-width:2px; border-radius:1px; }
 .health-uptime-bar > span.ok      { background:var(--ok); }
 .health-uptime-bar > span.warn    { background:var(--warn); }
 .health-uptime-bar > span.err     { background:var(--err); }
 .health-uptime-bar > span.unknown { background:var(--panel-3); }
+.health-uptime-axis { display:flex; justify-content:space-between; margin-top:3px;
+  font-family:var(--mono); font-size:10px; color:var(--text-3); }
+/* The summary drops under the title when both don't fit on one line. */
+.card-head:has(#hl-summary) { flex-wrap:wrap; gap:4px 12px; }
+#hl-summary { white-space:nowrap; }
+@media (max-width:480px) { #hl-summary { white-space:normal; } }
 
 /* ── Quick-add Sensor Wizard (modal) ── */
 .modal-backdrop {
