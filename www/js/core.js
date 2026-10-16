@@ -26,12 +26,32 @@
 // ============================================================================
 // FETCH WITH TIMEOUT (R13 4.8)
 // ============================================================================
+// At most FETCH_MAX requests to the device are in flight; the rest wait in
+// order. Every connection costs the device ~9 KB of heap (it closes each one
+// after the reply), and a page load asking five things at once ran a C3 out:
+// /api/latest came back as a 200 with no body. The timeout starts when a
+// request is sent, not while it waits its turn. The slot is freed when the
+// response headers arrive; the small JSON bodies follow at once.
+var FETCH_MAX = 3;
+var _fetchActive = 0;
+var _fetchQueue = [];
+function _fetchPump() {
+  while (_fetchActive < FETCH_MAX && _fetchQueue.length) _fetchQueue.shift()();
+}
 function fetchWithTimeout(url, opts, timeoutMs) {
   opts = opts || {};
-  var ctrl = new AbortController();
-  var t = setTimeout(function () { ctrl.abort(); }, timeoutMs || 15000);
-  opts.signal = ctrl.signal;
-  return fetch(url, opts).finally(function () { clearTimeout(t); });
+  return new Promise(function (resolve, reject) {
+    _fetchQueue.push(function () {
+      _fetchActive++;
+      var ctrl = new AbortController();
+      var t = setTimeout(function () { ctrl.abort(); }, timeoutMs || 15000);
+      opts.signal = ctrl.signal;
+      fetch(url, opts)
+        .finally(function () { clearTimeout(t); _fetchActive--; _fetchPump(); })
+        .then(resolve, reject);
+    });
+    _fetchPump();
+  });
 }
 window.fetchWithTimeout = fetchWithTimeout;
 
@@ -864,8 +884,8 @@ function getCsrfToken() {
     .finally(function () { _csrfFetch = null; });
   return _csrfFetch;
 }
-// Warm the cache early so the first mutating request doesn't pay a round-trip.
-getCsrfToken();
+// Fetched on the first mutating request, not at load: a page load is when
+// the device has least heap, and most loads never post anything.
 
 // Mutating helper: appends ?csrf=<token> to url and retries once on 403.
 // Usage: postWithCsrf(url, opts, timeoutMs).then(r => r.json())

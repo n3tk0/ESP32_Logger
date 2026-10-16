@@ -450,8 +450,18 @@
     // Subtitle is updated below once getSensors() resolves — /api/status does
     // not include a sensorCount field so we cannot read it here up-front.
 
-    var pLatest = fetchWithTimeout("/api/latest", {}, 15000)
-      .then(function (r) { return r.ok ? r.json() : null; })
+    // One more try when the device answers 503 (no heap for the reply while
+    // the page loads) or a body that does not parse: otherwise the Overview
+    // stays empty until the next Refresh.
+    function getLatest() {
+      return fetchWithTimeout("/api/latest", {}, 15000)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; });
+    }
+    var pLatest = getLatest()
+      .then(function (data) {
+        return data || new Promise(function (res) { setTimeout(res, 1500); }).then(getLatest);
+      })
       .then(function (data) {
         if (!data) return;
         _overviewLastData = data;
@@ -459,7 +469,9 @@
       })
       .catch(function () {});
 
-    ovFillWater();
+    // /api/live only feeds the Water card, which shows in legacy and hybrid
+    // mode alone (data-mode-show): in continuous mode nothing reads it.
+    if (document.documentElement.dataset.mode !== "continuous") ovFillWater();
     ovFillAlertFeed();
 
     // Fetch sensor list — populates pickers, dynamic cards, AND diagnostics
@@ -847,8 +859,7 @@
     if (history) {
       _renderOverviewAlertFeed(feed, history);
     } else {
-      fetchWithTimeout("/api/alerts", {}, 10000)
-        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      _fetchAlerts()
         .then(function (data) {
           if (data) {
             _alertsData = data;
@@ -1199,10 +1210,22 @@
     });
   }
 
+  // GET /api/alerts, one request for every caller while it is in flight: the
+  // Alerts page (built with the others at load) and the Overview's feed both
+  // ask for it during the same page load. Rejects with the status on non-ok.
+  var _alertsInflight = null;
+  function _fetchAlerts() {
+    if (_alertsInflight) return _alertsInflight;
+    var p = _alertsInflight = fetchWithTimeout("/api/alerts", {}, 15000)
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); });
+    p.then(clear, clear);
+    function clear() { if (_alertsInflight === p) _alertsInflight = null; }
+    return p;
+  }
+
   // Fetch GET /api/alerts and render rules + history from real firmware data.
   function _loadAlertsData() {
-    fetchWithTimeout("/api/alerts", {}, 15000)
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    _fetchAlerts()
       .then(function (data) {
         _alertsData = data;
         _renderAlertRules(data.rules  || []);
@@ -2011,8 +2034,6 @@
     var ifaceSel = wiz.querySelector("#wiz-iface");
     if (ifaceSel) ifaceSel.addEventListener("change", wizUpdateIfaceFields);
     wizUpdateIfaceFields();
-    // Live hints under each pin, once the board context is in.
-    wizWirePins(wiz);
 
     wiz.querySelector("#wizClose").addEventListener("click", closeWizard);
     wiz.addEventListener("click", function (e) { if (e.target === wiz) closeWizard(); });
@@ -2238,6 +2259,10 @@
 
   function openWizard() {
     if (!_wizardEl) buildWizardModal();
+    // Live hints under each pin, once the board context is in. On the first
+    // open, not when the modal is built with the pages: that was three device
+    // requests (board profiles, pins, platform config) on every page load.
+    if (!_wizardEl._pinsWired) { _wizardEl._pinsWired = true; wizWirePins(_wizardEl); }
     _wizStep = 1;
     updateWizard();
     _wizardEl.classList.add("visible");

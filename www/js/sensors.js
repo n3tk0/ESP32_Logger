@@ -989,6 +989,9 @@ var CL_SLEEP_DEFAULTS = {
 };
 
 function clLoad() {
+  // The board context for the pin fields: asked for when the Sensors page
+  // opens, not when the script loads on every page.
+  if (window.Pins) clPinsReady();
   var msg = document.getElementById("cl-msg");
   if (msg) {
     msg.textContent = "";
@@ -1451,7 +1454,6 @@ function clPinsReady() {
     });
   return CL_PINS.ready;
 }
-if (typeof window !== "undefined" && window.Pins) clPinsReady();
 
 // One pin field. The text box shows the board's label; the hidden input
 // under `name` carries the GPIO, so FormData reads a number as before.

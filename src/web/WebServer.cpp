@@ -199,7 +199,9 @@ void publishLiveEvent() {
     JsonDocument doc;
     buildLiveSnapshot(doc);
     String buf;
-    jsonToString(doc, buf);
+    // Out of heap: skip this tick rather than push an empty event the page
+    // cannot parse. The next snapshot follows in a second.
+    if (!buf.reserve(measureJson(doc) + 1) || jsonToString(doc, buf) == 0) return;
     liveEvents.send(buf.c_str(), "live", millis());
 }
 
