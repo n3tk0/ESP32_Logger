@@ -1562,7 +1562,16 @@
       });
   }
 
-  function uptimeBar(uptime, state) {
+  // One segment per hour, oldest first, from the firmware's hourly buckets
+  // (ok / warn / err / unknown). Older firmware sends no buckets: then the
+  // bar is estimated from the 24 h uptime percentage as before.
+  function uptimeBar(uptime, state, buckets) {
+    if (state !== "disabled" && Array.isArray(buckets) && buckets.length) {
+      return buckets.map(function (b) {
+        var c = (b === "ok" || b === "warn" || b === "err") ? b : "unknown";
+        return "<span class='" + c + "'></span>";
+      }).join("");
+    }
     var slots = 24;
     var html = "";
     for (var i = 0; i < slots; i++) {
@@ -1604,7 +1613,8 @@
                   : (state === "err" ? 0 : state === "warn" ? 80 : 99);
       var reads   = h.reads_24h   || 0;
       var errors  = h.errors_24h  || 0;
-      // API has no explicit retry counter; surface lifetime error_count instead.
+      // API has no explicit retry counter; surface error_count instead (failed
+      // reads since the last good one; a good read clears it).
       var retries = s.error_count  || 0;
       // avg_latency_us is in microseconds — convert to ms for display.
       var avgLat  = h.avg_latency_us !== undefined
@@ -1625,7 +1635,7 @@
         '<div style="font-size:11px;color:var(--text-3)">' + esc(s.name || s.type || "") + (s.interface ? ' · ' + esc(s.interface) : '') + '</div>' +
         '<div>' +
           '<div class="mono" style="font-size:11px;color:var(--text-3);margin-bottom:4px">24h uptime · ' + uptime.toFixed(1) + '%</div>' +
-          '<div class="health-uptime-bar" aria-label="24-hour uptime">' + uptimeBar(uptime, state) + '</div>' +
+          '<div class="health-uptime-bar" aria-label="24-hour uptime">' + uptimeBar(uptime, state, h.uptime_buckets_24h) + '</div>' +
         '</div>' +
         '<div class="health-stats">' +
           '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.reads")) + '</span><span class="health-stat-v">' + reads.toLocaleString() + '</span></div>' +

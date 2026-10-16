@@ -331,14 +331,15 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                 h.hourLatUs [h.curSlot] += latUs;
                 h.totalLatUs += latUs;
                 h.latSamples++;
-                // Recovered: clear a prior 'overdue' fault so status returns OK.
-                // Also for a sensor whose empty polls are not faults (a remote
-                // node): its only errors are "overdue" ones, and one of those
-                // is all it takes at boot, before a node with a longer
-                // interval has posted once. Kept, it showed ERR on every one
-                // of the node's metrics until the next restart, values
-                // arriving throughout.
-                if (s->isPeriodic() || !s->countEmptyReadAsError()) s->resetErrorCount();
+                // Recovered: a good read clears the fault, so status (ERR) says
+                // whether the sensor works NOW. The history stays in the hourly
+                // buckets (errors_24h, uptime_buckets_24h).
+                //
+                // This used to clear only periodic and remote sensors. For a
+                // wired one a single failed read (the first read after boot,
+                // one I2C hiccup) showed ERR until the next restart, values
+                // arriving every few seconds throughout.
+                s->resetErrorCount();
             } else if (!expectedSleep) {
                 // Rate-limit overdue errors for a periodic sensor to one per
                 // expected data interval, so a dead sensor records ~1 missed
@@ -349,6 +350,21 @@ int SensorManager::tickFiltered(QueueHandle_t queue, uint32_t now, bool blocking
                     h.hourErrors[h.curSlot]++;
                     s->incErrorCount();
                     h.lastErrorMs = ms;
+                    // Say so in /api/log, at most once a minute per sensor
+                    // (a dead continuous sensor fails every poll), with the
+                    // count of failures the silence covered.
+                    h.errsSinceLog++;
+                    if (h.lastErrLogMs == 0 || ms - h.lastErrLogMs >= 60000UL) {
+                        if (s->countEmptyReadAsError())
+                            Log.printf("[SensorManager] '%s' read failed (%u since last line)\n",
+                                       s->getId(), (unsigned)h.errsSinceLog);
+                        else
+                            Log.printf("[SensorManager] '%s' overdue, no data for %lus\n",
+                                       s->getId(),
+                                       (unsigned long)((ms - (_lastReadMs[i] ? _lastReadMs[i] : h.firstSeenMs)) / 1000));
+                        h.lastErrLogMs = ms ? ms : 1;
+                        h.errsSinceLog = 0;
+                    }
                 }
             }
             // expectedSleep: leave every counter untouched (neutral poll).
