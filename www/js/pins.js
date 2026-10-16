@@ -45,7 +45,9 @@
   // ── Loading ───────────────────────────────────────────────────────────────
   var _load = null;
   function getJson(url) {
-    return fetch(url, { credentials: "same-origin" }).then(function (r) {
+    // Through the page's shared request queue when there is one (core.js).
+    var get = window.fetchWithTimeout || fetch;
+    return get(url, { credentials: "same-origin" }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     });

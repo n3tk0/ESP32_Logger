@@ -353,9 +353,10 @@ static void handleApiLatest(AsyncWebServerRequest* req) {
     }
 
     delete[] latest;
-    String out;
-    jsonToString(doc, out);
-    req->send(200, "application/json", out);
+    // Streamed into one buffer of the final size, and 503 when the heap
+    // cannot hold it: a String here, copied again by send(), went out as a
+    // 200 with no body when either allocation failed (JsonResponse.h).
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
