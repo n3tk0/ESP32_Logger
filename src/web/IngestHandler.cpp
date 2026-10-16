@@ -16,6 +16,7 @@
 #include "../nodes/NodeCfgStore.h"   // cfg_rev / cfg / cfg_error, docs/NODE_CONFIG.md §3
 #include "../nodes/NodeFwStore.h"    // fw_md5 / fw_error, docs/NODE_OTA.md §3
 #include "../sensors/RemoteIngest.h"
+#include "../utils/JsonResponse.h"     // beginSizedStream
 
 // A node payload is a handful of small objects. Anything larger is either a
 // misconfigured client or someone probing, and buffering it would be the
@@ -367,8 +368,6 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     nodeCfgIngest(node, body.as<JsonObjectConst>(), extra);
     nodeFwIngest(node, body.as<JsonObjectConst>(), extra);
 
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-    if (!resp) { req->send(500); return; }
     char out[256];
     snprintf(out, sizeof(out),
              "{\"ok\":true,\"accepted\":%d,\"stored\":%d,\"queued\":%d,"
@@ -378,6 +377,19 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
              backpressure ? "true" : "false", noClock ? "true" : "false",
              room < 0 ? 0 : room,
              clockRejected ? "true" : "false");
+    // Sized before it is written (JsonResponse.h: never a growing stream).
+    // Without a block for it the readings are still acknowledged, only
+    // without the config/firmware extras: those ride along next cycle, while
+    // a 503 here would have the node send the stored readings again.
+    size_t len = strlen(out) + 1;
+    for (JsonPairConst kv : cfg.as<JsonObjectConst>())
+        len += strlen(kv.key().c_str()) + 4 + measureJson(kv.value());
+    AsyncResponseStream* resp = beginSizedStream(req, "application/json", len);
+    if (!resp) {
+        strlcat(out, "}", sizeof(out));
+        req->send(200, "application/json", out);
+        return;
+    }
     resp->print(out);
     for (JsonPairConst kv : cfg.as<JsonObjectConst>()) {
         resp->printf(",\"%s\":", kv.key().c_str());

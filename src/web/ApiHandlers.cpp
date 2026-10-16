@@ -8,6 +8,7 @@
 #include <freertos/task.h>
 #include <new>                            // std::nothrow
 #include <atomic>
+#include <memory>                         // std::shared_ptr: /api/data reply state
 #include "../pipeline/DataPipeline.h"
 #include "../pipeline/AggregationEngine.h"
 #include "../sensors/SensorManager.h"
@@ -43,6 +44,7 @@
 #include "RateLimiter.h"               // Pass 7 rate-limit on mutating routes
 #include "RequireAuth.h"               // R5: unified mutating-handler auth preamble
 #include "../utils/JsonResponse.h"     // R9: sendJsonResponse helper
+#include "DataReply.h"                 // /api/data, chunked
 #include "../alerts/AlertEngine.h"    // GET/POST /api/alerts, snooze, toasts
 #include <Wire.h>                     // POST /api/i2c_scan
 #include "../sensors/I2CBus.h"        // bus registry for /api/i2c_scan
@@ -266,31 +268,28 @@ static void handleApiData(AsyncWebServerRequest* req) {
         }
     }
 
-    // --- Build JSON response via AsyncResponseStream (no String realloc) ---
-    AsyncResponseStream* response =
-        req->beginResponseStream("application/json");
-    response->printf("{\"from\":%u,\"to\":%u,\"agg\":\"%s\",\"mode\":\"%s\","
-                     "\"count\":%zu,\"truncated\":%s",
-                     fromTs, toTs, aggParamStr, modeParamStr,
-                     aggCount, truncated ? "true" : "false");
-    if (multiMetricWarning) {
-        response->print(",\"warning\":\"multiple metrics in response; add metric= "
-                        "param for single-series queries\"");
-    }
-    response->print(",\"data\":[");
-
-    for (size_t i = 0; i < aggCount; i++) {
-        char valBuf[16];
-        snprintf(valBuf, sizeof(valBuf), "%.4g", agg[i].value);
-        // Include metric and unit so clients can display axes correctly (#12)
-        response->printf("%s{\"ts\":%u,\"v\":%s,\"metric\":\"%s\",\"unit\":\"%s\"}",
-                         (i > 0 ? "," : ""),
-                         agg[i].timestamp, valBuf,
-                         agg[i].metric, agg[i].unit);
-    }
-    response->print("]}");
-
+    // --- Send the points as a chunked reply ---
+    // A buffered reply held the whole JSON (~70 B a point, 21 KB at
+    // limit=300) in one block until it was sent, and a fragmented C3 heap
+    // often had no such block. Chunked, each piece is written straight into
+    // the TCP send buffer as the window opens; what stays behind is the
+    // points in 12 B each instead of a 72 B SensorReading.
+    DataReply* rep = DataReply::make(agg, aggCount);
     delete[] agg;
+    if (!rep) { sendBusyResponse(req); return; }
+    rep->headLen = (size_t)snprintf(rep->head, sizeof(rep->head),
+                     "{\"from\":%u,\"to\":%u,\"agg\":\"%s\",\"mode\":\"%s\","
+                     "\"count\":%u,\"truncated\":%s%s,\"data\":[",
+                     (unsigned)fromTs, (unsigned)toTs, aggParamStr, modeParamStr,
+                     (unsigned)aggCount, truncated ? "true" : "false",
+                     multiMetricWarning
+                         ? ",\"warning\":\"multiple metrics in response; add metric= "
+                           "param for single-series queries\"" : "");
+    if (rep->headLen >= sizeof(rep->head)) rep->headLen = sizeof(rep->head) - 1;
+    std::shared_ptr<DataReply> st(rep);
+    AsyncWebServerResponse* response = req->beginChunkedResponse("application/json",
+        [st](uint8_t* buf, size_t maxLen, size_t) -> size_t { return st->fill(buf, maxLen); });
+    if (!response) { sendBusyResponse(req); return; }
     req->send(response);
 }
 
@@ -1805,8 +1804,6 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
         return;
     }
 
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-
     // Suggest a sensible filename so curl -OJ / browser save-as gets it
     // right (e.g. "waterlogger-backup-c8df84c4ed68-42.json").
     String fname = "waterlogger-backup-";
@@ -1814,8 +1811,6 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
     fname += "-";
     fname += String((unsigned)bootCount);
     fname += ".json";
-    resp->addHeader("Content-Disposition",
-                    String("attachment; filename=\"") + fname + "\"");
 
     JsonDocument doc;
     doc["version"] = 1;
@@ -1876,9 +1871,8 @@ static void handleApiBackup(AsyncWebServerRequest* req) {
         inhaleJsonFile(doc.as<JsonObject>(), "platform", "/platform_config.json", configFs());
     }
 
-    serializeJson(doc, static_cast<Print&>(*resp));
     xSemaphoreGive(configMutex);
-    req->send(resp);
+    sendJsonResponse(req, doc, 200, fname.c_str());
 }
 
 // ---------------------------------------------------------------------------

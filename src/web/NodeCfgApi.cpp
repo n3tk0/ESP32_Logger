@@ -11,6 +11,7 @@
 #include <new>
 
 #include "IngestHandler.h"                  // INGEST_TOKEN, REMOTE_STATUS_STALE_MS
+#include "../utils/JsonResponse.h"        // sendJsonResponse: sized buffer or 503
 #include "RequireAuth.h"
 #include "WebServer.h"                      // applyNetworkForm()
 #include "../core/Globals.h"                // config, shouldRestart
@@ -42,11 +43,7 @@ void nodesApiBody(AsyncWebServerRequest* req, uint8_t* data, size_t len,
 }
 
 void nodesApiSend(AsyncWebServerRequest* req, int code, const JsonDocument& doc) {
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-    if (!resp) { req->send(500); return; }
-    resp->setCode(code);
-    serializeJson(doc, static_cast<Print&>(*resp));
-    req->send(resp);
+    sendJsonResponse(req, doc, code);
 }
 
 // ============================================================================

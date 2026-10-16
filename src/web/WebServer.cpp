@@ -759,11 +759,8 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     JsonDocument doc;
     settingsToJson(doc.to<JsonObject>(), reveal);
 
-    AsyncResponseStream *resp = r->beginResponseStream("application/json");
     String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
-    resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
-    serializeJson(doc, static_cast<Print&>(*resp));
-    r->send(resp);
+    sendJsonResponse(r, doc, 200, fn.c_str());
 }
 
 static void h_post_save_device(AsyncWebServerRequest* r) {
