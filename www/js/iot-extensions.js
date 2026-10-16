@@ -1562,7 +1562,23 @@
       });
   }
 
-  function uptimeBar(uptime, state) {
+  // One segment per hour, oldest first, from the firmware's hourly buckets
+  // (ok / warn / err / unknown). Older firmware sends no buckets: then the
+  // bar is estimated from the 24 h uptime percentage as before.
+  // Each segment's tooltip names the hour (counted back from now: the
+  // firmware's slots run from its first read, not from the clock) and what
+  // happened in it.
+  var BUCKET_WORD = { ok: "iotExt.hourOk", warn: "iotExt.hourWarn", err: "iotExt.hourErr", unknown: "iotExt.hourUnknown" };
+  function uptimeBar(uptime, state, buckets) {
+    if (state !== "disabled" && Array.isArray(buckets) && buckets.length) {
+      var last = buckets.length - 1;
+      return buckets.map(function (b, i) {
+        var c = (b === "ok" || b === "warn" || b === "err") ? b : "unknown";
+        var ago = last - i;
+        var when = ago === 0 ? ieT("iotExt.hourNow") : ieT("iotExt.hourAgo", { a: ago, b: ago + 1 });
+        return "<span class='" + c + "' title='" + esc(when + " · " + ieT(BUCKET_WORD[c])) + "'></span>";
+      }).join("");
+    }
     var slots = 24;
     var html = "";
     for (var i = 0; i < slots; i++) {
@@ -1602,15 +1618,25 @@
                 : "ok";
       var uptime  = h.uptime_pct_24h  !== undefined ? h.uptime_pct_24h
                   : (state === "err" ? 0 : state === "warn" ? 80 : 99);
+      // The percentage covers only the hours with data: after a restart that
+      // is the last hour or two, so say which period it is.
+      var buckets = Array.isArray(h.uptime_buckets_24h) && h.uptime_buckets_24h.length
+                  ? h.uptime_buckets_24h : null;
+      var known   = buckets ? buckets.filter(function (b) { return b !== "unknown"; }).length : 24;
+      var pct     = uptime.toFixed(1);
+      var uptimeLabel = known === 0 ? ieT("iotExt.uptimeNoData")
+                      : known >= 24 ? ieT("iotExt.uptime24h", { pct: pct })
+                      : ieT("iotExt.uptimeHours", { n: known, pct: pct });
       var reads   = h.reads_24h   || 0;
       var errors  = h.errors_24h  || 0;
-      // API has no explicit retry counter; surface lifetime error_count instead.
+      // API has no explicit retry counter; surface error_count instead (failed
+      // reads since the last good one; a good read clears it).
       var retries = s.error_count  || 0;
       // avg_latency_us is in microseconds — convert to ms for display.
       var avgLat  = h.avg_latency_us !== undefined
                   ? (h.avg_latency_us / 1000).toFixed(2) + " ms" : "—";
       var lastSeen = h.last_read_ms_ago !== undefined
-                  ? Math.round(h.last_read_ms_ago / 1000) + "s ago" : "—";
+                  ? ieT("iotExt.secondsAgo", { n: Math.round(h.last_read_ms_ago / 1000) }) : "—";
 
       if (state === "ok")   upCount++;
       if (state === "warn") { staleCount++; staleNames.push(s.id); }
@@ -1624,13 +1650,14 @@
         '</div>' +
         '<div style="font-size:11px;color:var(--text-3)">' + esc(s.name || s.type || "") + (s.interface ? ' · ' + esc(s.interface) : '') + '</div>' +
         '<div>' +
-          '<div class="mono" style="font-size:11px;color:var(--text-3);margin-bottom:4px">24h uptime · ' + uptime.toFixed(1) + '%</div>' +
-          '<div class="health-uptime-bar" aria-label="24-hour uptime">' + uptimeBar(uptime, state) + '</div>' +
+          '<div class="mono" style="font-size:11px;color:var(--text-3);margin-bottom:4px">' + esc(uptimeLabel) + '</div>' +
+          '<div class="health-uptime-bar" aria-label="' + esc(uptimeLabel) + '">' + uptimeBar(uptime, state, buckets) + '</div>' +
+          (buckets ? '<div class="health-uptime-axis"><span>' + esc(ieT("iotExt.axisStart")) + '</span><span>' + esc(ieT("iotExt.axisNow")) + '</span></div>' : '') +
         '</div>' +
         '<div class="health-stats">' +
           '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.reads")) + '</span><span class="health-stat-v">' + reads.toLocaleString() + '</span></div>' +
-          '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.errors")) + '</span><span class="health-stat-v' + (errors > 10 ? " err" : errors > 0 ? " warn" : "") + '">' + errors + '</span></div>' +
-          '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.retries")) + '</span><span class="health-stat-v' + (retries > 10 ? " warn" : "") + '">' + retries + '</span></div>' +
+          '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.errors")) + '</span><span class="health-stat-v' + (state === "err" && errors > 0 ? " err" : "") + '">' + errors + '</span></div>' +
+          '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.retries")) + '</span><span class="health-stat-v' + (retries > 0 ? " err" : "") + '">' + retries + '</span></div>' +
           '<div class="health-stat"><span class="health-stat-l">' + esc(ieT("iotExt.avgLatency")) + '</span><span class="health-stat-v">' + avgLat + '</span></div>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);font-family:var(--mono)">' +

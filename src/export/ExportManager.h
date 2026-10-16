@@ -100,6 +100,7 @@ private:
     uint32_t     _spoolBackoffMs[MAX_EXPORTERS] = {};
     uint32_t     _spoolDueMs[MAX_EXPORTERS]     = {};
     uint8_t      _spoolReadFails[MAX_EXPORTERS] = {};   // reads in a row that failed
+    uint8_t      _unconfirmedRun[MAX_EXPORTERS] = {};   // live sends in a row with no reply
     uint32_t     _lastSnapFailMs = 0;                // rate-limits that log line
     uint32_t     _lastTableFullMs = 0;
     uint16_t     _tableFullDrops  = 0;
@@ -125,7 +126,7 @@ private:
     SensorReading* _buildSnapshot(int idx, size_t& n);
     void   _parseSensorList(JsonVariantConst v, int list);
 
-    bool _sendWithRetry(IExporter* exp,
+    bool _sendWithRetry(int idx, IExporter* exp,
                         const SensorReading* readings, size_t count);
     void _spoolBatch(IExporter* exp,
                      const SensorReading* readings, size_t count);

@@ -1,4 +1,5 @@
-// Host tests for the 429 back-off (src/export/Throttle.h).
+// Host tests for the 429 back-off and the unanswered-send run
+// (src/export/Throttle.h).
 #include "src/export/Throttle.h"
 #include "check.h"
 
@@ -31,9 +32,26 @@ static void test_parse_retry_after() {
     CHECK_EQ(throttleWaitMs(0, parseRetryAfterS("99999999999999999999")), (uint32_t)3600000);
 }
 
+static void test_unconfirmed_spools_from_third() {
+    uint8_t run = 0;
+    CHECK(!unconfirmedSpools(run));   // 1st: most likely stored, not resent
+    CHECK(!unconfirmedSpools(run));   // 2nd
+    CHECK(unconfirmedSpools(run));    // 3rd: spooled
+    CHECK(unconfirmedSpools(run));    // and every one after it
+    CHECK_EQ(run, (uint8_t)4);
+    run = 0;                          // a reply ends the run
+    CHECK(!unconfirmedSpools(run));
+    // The counter saturates instead of wrapping back below the threshold.
+    run = 254;
+    CHECK(unconfirmedSpools(run));
+    CHECK(unconfirmedSpools(run));
+    CHECK_EQ(run, (uint8_t)255);
+}
+
 int main() {
     RUN(test_backoff_doubles_to_cap);
     RUN(test_retry_after_wins_only_when_longer);
     RUN(test_parse_retry_after);
+    RUN(test_unconfirmed_spools_from_third);
     return SUMMARY();
 }

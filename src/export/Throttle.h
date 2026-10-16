@@ -37,6 +37,19 @@ inline uint32_t throttleWaitMs(uint32_t backoffMs, uint32_t retryAfterS) {
     return ra > backoffMs ? ra : backoffMs;
 }
 
+// A send that got no reply in time (read timeout) has most likely been
+// stored and is not sent again. Only a run of them says the server may not
+// be storing anything: from the third in a row on, the batch goes to the
+// spool after all, so a long hang loses nothing. A reply of any kind ends
+// the run.
+constexpr uint8_t UNCONFIRMED_SPOOL_AFTER = 3;
+
+/// One more send without a reply in a row; true when this one is spooled.
+inline bool unconfirmedSpools(uint8_t& run) {
+    if (run < 255) run++;
+    return run >= UNCONFIRMED_SPOOL_AFTER;
+}
+
 /// Retry-After as seconds: "120" → 120. The HTTP-date form, an empty or
 /// garbled value → 0 (the back-off alone decides).
 inline uint32_t parseRetryAfterS(const char* v) {

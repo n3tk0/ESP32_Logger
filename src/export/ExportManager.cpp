@@ -292,24 +292,25 @@ SensorReading* ExportManager::_buildSnapshot(int idx, size_t& n) {
 }
 
 // ---------------------------------------------------------------------------
-bool ExportManager::_sendWithRetry(IExporter* exp,
-                                    const SensorReading* r, size_t n) {
+bool ExportManager::_sendWithRetry(int idx, IExporter* exp,
+                                   const SensorReading* r, size_t n) {
     // CM-3: maxRetries() is uint8_t — promote it explicitly to int so the
     // loop bound comparison is unambiguously signed/signed.
     const int maxRetries = (int)exp->maxRetries();
     for (int attempt = 0; attempt <= maxRetries; attempt++) {
         // THE HEARTBEAT HAS TO BE FED IN HERE, not only once per exporter in
         // sendAll(). The defaults are maxRetries 3 and retryDelayMs 1000, so
-        // this loop is four send() attempts plus 1+2+4 s of backoff, and none
-        // of the HTTP exporters set a timeout — HTTPClient's own default is
-        // 5 s per attempt, and a TLS handshake to a host that is simply not
-        // answering takes longer than that.
+        // this loop is up to four send() attempts plus 1+2+4 s of backoff,
+        // and each attempt can block for its connect plus its HTTP timeout
+        // (5 s on most exporters, 15 s on openSenseMap; a TLS handshake to a
+        // host that is simply not answering can take longer still).
         //
-        // 4 x 5 s + 7 s of backoff is 27 s against a MAX_SILENCE_MS of 30 s
-        // (TaskManager::checkHealth), for ONE unreachable exporter. So a slow
-        // or blackholed upstream server used to reboot the logger: the
-        // watchdog saw ExportTask silent, set shouldRestart, and the device
-        // restarted mid-export with nothing wrong with it.
+        // Fed only once per exporter, 4 x 5 s + 7 s of backoff was 27 s
+        // against a MAX_SILENCE_MS of 30 s (TaskManager::checkHealth), for
+        // ONE unreachable exporter. So a slow or blackholed upstream server
+        // used to reboot the logger: the watchdog saw ExportTask silent, set
+        // shouldRestart, and the device restarted mid-export with nothing
+        // wrong with it. Fed per attempt, the longest silence is one attempt.
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         if (attempt > 0) {
             uint32_t delayMs = exp->retryDelayMs() * (1 << (attempt - 1));
@@ -318,11 +319,25 @@ bool ExportManager::_sendWithRetry(IExporter* exp,
         }
         HeapActivity ha(HA_EXPORT, exp->getName());
         exp->clearThrottle();
-        if (exp->send(r, n)) return true;
+        if (exp->send(r, n)) { _unconfirmedRun[idx] = 0; return true; }
         // Rate-limited: another attempt is another request against the same
         // limit, and so would the spool be, replayed next time. tick() backs
         // off and keeps these values in the table for the next send.
-        if (exp->throttled()) return false;
+        if (exp->throttled()) { _unconfirmedRun[idx] = 0; return false; }
+        // No answer in time, but the request went out: the server has most
+        // likely stored it (openSenseMap stores, then answers late). Another
+        // attempt would store it a second time, and the next interval sends
+        // newer values anyway. From the third in a row on the server may not
+        // be storing anything, so the batch is spooled (see Throttle.h).
+        if (exp->unconfirmed()) {
+            if (unconfirmedSpools(_unconfirmedRun[idx]) && exp->spoolOnFailure()) {
+                Log.printf("[ExportManager] '%s' %u sends in a row unanswered, spooling\n",
+                              exp->getName(), (unsigned)_unconfirmedRun[idx]);
+                _spoolBatch(exp, r, n);
+            }
+            return false;
+        }
+        _unconfirmedRun[idx] = 0;    // any other failure ends the run
         Log.printf("[ExportManager] '%s' attempt %d/%d failed\n",
                       exp->getName(), attempt + 1, maxRetries + 1);
     }
@@ -509,6 +524,9 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
         HeapActivity ha(HA_EXPORT, exp->getName());
         exp->clearThrottle();
         ok = exp->send(batch, count);          // false on a 429 too
+        // Sent but unanswered: most likely stored, so move past it instead
+        // of sending the same batch again next time (see _sendWithRetry).
+        if (!ok && exp->unconfirmed()) ok = true;
         if (ok) _setSpoolOff(idx, _spoolOff[idx] + count * sizeof(SensorReading));
     }
 
@@ -596,7 +614,7 @@ void ExportManager::tick() {
         // the spooled backlog (#4.7, see _drainSpool). The snapshot is freed
         // before that second request: it is up to a few KB, and the spool
         // batch's body and the socket want the heap too.
-        const bool sent = _sendWithRetry(exp, snap, n);
+        const bool sent = _sendWithRetry(i, exp, snap, n);
         free(snap);
         snap = nullptr;
         if (sent && exp->throttled()) {
