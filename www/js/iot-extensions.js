@@ -450,9 +450,9 @@
     // Subtitle is updated below once getSensors() resolves — /api/status does
     // not include a sensorCount field so we cannot read it here up-front.
 
-    // One more try when the device answers 503 (no heap for the reply while
-    // the page loads) or a body that does not parse: otherwise the Overview
-    // stays empty until the next Refresh.
+    // One more try when the body does not parse (a firmware from before the
+    // 503 cut a reply short instead; fetchWithTimeout already retries a 503):
+    // otherwise the Overview stays empty until the next Refresh.
     function getLatest() {
       return fetchWithTimeout("/api/latest", {}, 15000)
         .then(function (r) { return r.ok ? r.json() : null; })
@@ -1508,9 +1508,8 @@
     // otherwise be treated as the rules doc and the POST below would replace
     // the device's entire rule set with just the new rule.
     (_alertsData ? Promise.resolve(_alertsData)
-                 : fetchWithTimeout("/api/alerts", {}, 15000).then(function (r) {
-                     if (!r.ok) throw new Error("HTTP " + r.status);
-                     return r.json();
+                 : _fetchAlerts().catch(function (st) {
+                     throw (st instanceof Error) ? st : new Error("HTTP " + st);
                    }))
       .then(function (data) {
         _alertsData = data || { rules: [], history: [] };

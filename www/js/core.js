@@ -29,28 +29,61 @@
 // At most FETCH_MAX requests to the device are in flight; the rest wait in
 // order. Every connection costs the device ~9 KB of heap (it closes each one
 // after the reply), and a page load asking five things at once ran a C3 out:
-// /api/latest came back as a 200 with no body. The timeout starts when a
-// request is sent, not while it waits its turn. The slot is freed when the
-// response headers arrive; the small JSON bodies follow at once.
+// /api/latest came back as a 200 with no body.
+// - The timeout runs from the call, queue wait included: while the device is
+//   stalled, polls that expire in the queue drop out instead of piling up
+//   and reaching it as a burst of stale requests when it is back.
+// - A slot is held until the body has arrived, not just the headers (a log
+//   download streams for seconds), read from a clone so the caller's own
+//   reading is untouched. A body that never ends frees it after the timeout.
+// - A GET answered 503 (the device had no heap for the reply) is asked once
+//   more after its Retry-After, so no caller mistakes "busy" for "offline".
 var FETCH_MAX = 3;
 var _fetchActive = 0;
 var _fetchQueue = [];
 function _fetchPump() {
-  while (_fetchActive < FETCH_MAX && _fetchQueue.length) _fetchQueue.shift()();
+  while (_fetchActive < FETCH_MAX && _fetchQueue.length) _fetchQueue.shift().run();
+}
+function _fetchQueued(url, opts, timeoutMs) {
+  var ms = timeoutMs || 15000;
+  return new Promise(function (resolve, reject) {
+    var ctrl = new AbortController();
+    var job = { run: null };
+    var t = setTimeout(function () {
+      var i = _fetchQueue.indexOf(job);
+      if (i >= 0) _fetchQueue.splice(i, 1);    // still waiting: never sent
+      ctrl.abort();
+      if (i >= 0) reject(new DOMException("timed out in queue", "AbortError"));
+    }, ms);
+    job.run = function () {
+      _fetchActive++;
+      var freed = false;
+      function free() {
+        if (freed) return;
+        freed = true; _fetchActive--; _fetchPump();
+      }
+      var o = Object.assign({}, opts, { signal: ctrl.signal });
+      fetch(url, o).then(function (r) {
+        clearTimeout(t);
+        var guard = setTimeout(free, ms);
+        try { r.clone().arrayBuffer().catch(function () {}).then(function () { clearTimeout(guard); free(); }); }
+        catch (e) { clearTimeout(guard); free(); }
+        resolve(r);
+      }, function (e) { clearTimeout(t); free(); reject(e); });
+    };
+    _fetchQueue.push(job);
+    _fetchPump();
+  });
 }
 function fetchWithTimeout(url, opts, timeoutMs) {
   opts = opts || {};
-  return new Promise(function (resolve, reject) {
-    _fetchQueue.push(function () {
-      _fetchActive++;
-      var ctrl = new AbortController();
-      var t = setTimeout(function () { ctrl.abort(); }, timeoutMs || 15000);
-      opts.signal = ctrl.signal;
-      fetch(url, opts)
-        .finally(function () { clearTimeout(t); _fetchActive--; _fetchPump(); })
-        .then(resolve, reject);
-    });
-    _fetchPump();
+  var isGet = !opts.method || String(opts.method).toUpperCase() === "GET";
+  return _fetchQueued(url, opts, timeoutMs).then(function (r) {
+    if (r.status !== 503 || !isGet) return r;
+    var s = parseInt(r.headers.get("Retry-After"), 10);
+    var wait = Math.min(isNaN(s) ? 1 : Math.max(s, 0), 5) * 1000;
+    return new Promise(function (res) { setTimeout(res, wait); })
+      .then(function () { return _fetchQueued(url, opts, timeoutMs); });
   });
 }
 window.fetchWithTimeout = fetchWithTimeout;

@@ -353,20 +353,10 @@ static void handleApiLatest(AsyncWebServerRequest* req) {
     }
 
     delete[] latest;
-    // One allocation of the final size, not a String grown 32 B at a time
-    // (each step a realloc while four other page-load requests hold heap).
-    // A String that could not grow comes back empty: answer 503 so the page
-    // retries, never a 200 with no body — the browser's JSON parse fails on
-    // that and the Overview stays blank.
-    String out;
-    if (!out.reserve(measureJson(doc) + 1) || jsonToString(doc, out) == 0) {
-        AsyncWebServerResponse* res =
-            req->beginResponse(503, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
-        if (res) { res->addHeader("Retry-After", "1"); req->send(res); }
-        else     req->send(503);
-        return;
-    }
-    req->send(200, "application/json", out);
+    // Streamed into one buffer of the final size, and 503 when the heap
+    // cannot hold it: a String here, copied again by send(), went out as a
+    // 200 with no body when either allocation failed (JsonResponse.h).
+    sendJsonResponse(req, doc);
 }
 
 // ---------------------------------------------------------------------------
