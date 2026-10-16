@@ -540,6 +540,7 @@ The **Auth** column in the index uses:
 | GET | `/api/sensors` | read | Registered sensors + status |
 | GET | `/api/sensors/read_now` | read | Force a synchronous read of all sensors |
 | GET | `/api/latest` | read | Latest value per sensor/metric; 503 + `Retry-After: 1` when the reply finds no heap |
+| GET | `/api/sparks` | read | Overview sparklines in one request: `s=<sensor>:<metric>,...` (up to 12), `from`, `to`, `limit` (40); each series as `/api/data?agg=raw&mode=lttb` gives it, values only. 503 + `Retry-After` when the heap budget has no unit |
 | GET | `/api/data` | read | Aggregated time-series (params in §6.3) |
 | GET | `/api/backup` | read | Download a full config/data backup |
 | POST | `/api/ingest` | token | Accept readings pushed by a remote node (`FEATURE_REMOTE_NODES`) |

@@ -672,8 +672,8 @@ static inline void encodeCaps(Transport t, Hw hw, JsonObject out) {
     for (uint8_t b = 0; b < h.boardCount; b++) {
         const BoardInfo& bi = h.boards[b];
         JsonObject o = boards.add<JsonObject>();
-        o["id"]   = bi.id;
-        o["name"] = bi.name;
+        o["id"]   = bi.id;     // not an array (check_json_char_arrays)
+        o["name"] = bi.name;   // a const char*: copied (check_json_char_arrays)
         JsonObject pins = o["pins"].to<JsonObject>();
         for (uint8_t i = 0; i < bi.labelCount; i++) pins[bi.labels[i].label] = bi.labels[i].gpio;
         if (bi.left && bi.left[0])   detail::putPads(o["left"].to<JsonArray>(), bi.left);
@@ -690,7 +690,7 @@ static inline void encodeCaps(Transport t, Hw hw, JsonObject out) {
             char key[4];
             key[0] = '\0';
             strAppendUint(key, sizeof(key), n.gpio);
-            warn[(const char*)key] = n.why;
+            warn[(const char*)key] = n.why;   // a const char* (check_json_char_arrays)
         }
     }
     out["max_gpio"]    = h.maxGpio;

@@ -27,7 +27,12 @@
 #include <esp_arduino_version.h>
 #include <esp_private/panic_internal.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <sdkconfig.h>
+
 #include "LogRing.h"
+#include "PanicCapture.h"
 
 extern "C" {
 
@@ -103,4 +108,67 @@ void IRAM_ATTR __wrap_panic_abort(const char* details) {
     __real_panic_abort(details);
 }
 
+// ── Task watchdog: where the starved task was ──────────────────────────────
+// A TASK_WDT reset came with no cause at all: the watchdog's own message
+// ("did not reset the watchdog in time", the task names) goes out with
+// ESP_EARLY_LOGE, not panic_print_*, and the register dump that follows is
+// the watchdog ISR's own, on the ISR stack. The IDF calls this weak hook from
+// that ISR before it aborts, so it writes two lines first:
+//   [TWDT] run <task> pc .. ra .. bt ..      the task the ISR interrupted
+//   [TWDT] <watched> pc .. ra .. bt ..       the watched task, e.g. async_tcp
+// pc/ra are the task's saved registers, bt the code addresses found on its
+// stack above them (a rough backtrace, newest first). Decode each with
+// addr2line, as above.
+//
+// RISC-V on core 2.x only: the saved frame is found the way the port stores
+// it (rtos_int_enter / a context switch leave the task's RvExcFrame at
+// pxTopOfStack, the TCB's first word: mepc, ra, sp, ...).
+#if ESP_ARDUINO_VERSION_MAJOR < 3 && CONFIG_IDF_TARGET_ARCH_RISCV
+static void* s_watched = nullptr;
+
+static bool isCode(uint32_t a) {
+    return (a >= 0x42000000u && a < 0x42800000u) ||   // flash .text
+           (a >= 0x40380000u && a < 0x403E0000u);     // IRAM
+}
+
+static void putTask(const char* tag, void* task, int maxBt) {
+    if (!task) return;
+    const uint32_t* frame = *(const uint32_t* const*)task;   // pxTopOfStack
+    put("[TWDT] ");
+    put(tag);
+    put(pcTaskGetName((TaskHandle_t)task));
+    // Read from inside the watchdog ISR: a misaligned or out-of-RAM pointer
+    // would fault there, before the panic handler, so check both first.
+    if (!frame || ((uintptr_t)frame & 3) || (uint32_t)(uintptr_t)frame < 0x3FC80000u ||
+        (uint32_t)(uintptr_t)frame >= 0x3FCE0000u) { put("\n"); return; }
+    put(" pc ");  putHex(frame[0]);
+    put(" ra ");  putHex(frame[1]);
+    put(" bt");
+    const uint32_t* sp = (const uint32_t*)(uintptr_t)frame[2];
+    if ((uintptr_t)sp & 3) { put("\n"); return; }
+    int found = 0;
+    for (int i = 0; i < 128 && found < maxBt; i++) {
+        const uint32_t* w = sp + i;
+        if ((uint32_t)(uintptr_t)w < 0x3FC80000u || (uint32_t)(uintptr_t)w >= 0x3FCE0000u) break;
+        if (isCode(*w)) { put(" "); putHex(*w); found++; }
+    }
+    put("\n");
+}
+
+void esp_task_wdt_isr_user_handler(void) {
+    void* cur = xTaskGetCurrentTaskHandle();
+    put("\n");
+    putTask("run ", cur, 6);
+    if (s_watched && s_watched != cur) putTask("", s_watched, 10);
+}
+#endif
+
 } // extern "C"
+
+void panicCaptureWatchTask(void* task) {
+#if ESP_ARDUINO_VERSION_MAJOR < 3 && CONFIG_IDF_TARGET_ARCH_RISCV
+    if (task) s_watched = task;
+#else
+    (void)task;
+#endif
+}

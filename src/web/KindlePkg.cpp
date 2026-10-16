@@ -15,6 +15,7 @@
 #include "../core/SdCompat.h"           // sdFs()
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include "../utils/JsonIO.h"
+#include "../utils/JsonResponse.h"     // sendJsonResponse: sized buffer or 503
 #include "../utils/MutexGuard.h"
 
 // ============================================================================
@@ -210,11 +211,7 @@ bool kindlePkgOffer(AsyncWebServerRequest* req, KindlePkgOffer& out) {
 // ============================================================================
 
 static void sendJson(AsyncWebServerRequest* req, int code, const JsonDocument& doc) {
-    AsyncResponseStream* resp = req->beginResponseStream("application/json");
-    if (!resp) { req->send(500); return; }
-    resp->setCode(code);
-    serializeJson(doc, static_cast<Print&>(*resp));
-    req->send(resp);
+    sendJsonResponse(req, doc, code);
 }
 
 static void sendErr(AsyncWebServerRequest* req, int code, const char* err) {
@@ -477,7 +474,7 @@ void handleKindlePkgUploadDone(AsyncWebServerRequest* req) {
     JsonDocument out;
     if (u->err) {
         out["ok"]    = false;
-        out["error"] = u->err;
+        out["error"] = u->err;   // a const char* (check_json_char_arrays)
         if (u->owner) {                // ours: do not leave half a package behind
             MutexGuard g(fsMutex, pdMS_TO_TICKS(2000));
             if (!fsMutex || g.isLocked()) sdFs()->remove(KINDLEPKG_TMP);

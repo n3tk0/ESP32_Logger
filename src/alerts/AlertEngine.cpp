@@ -19,6 +19,7 @@
 #include "../export/MqttExporter.h"
 #include "../utils/JsonIO.h"
 #include "../core/HeapWatch.h"   // HeapActivity
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 // Forward-declared in Logger.ino (same sketch scope as ApiHandlers.cpp)
 #ifdef EXPORT_MQTT_ENABLED
@@ -332,16 +333,16 @@ void AlertEngine::toJson(JsonDocument& doc) const {
     for (int i = 0; i < _ruleCount; i++) {
         const Rule& rule = _rules[i];
         JsonObject o = rArr.add<JsonObject>();
-        o["id"]          = rule.id;
-        o["name"]        = rule.name;
+        o["id"]          = jsonCopy(rule.id);
+        o["name"]        = jsonCopy(rule.name);
         o["enabled"]     = rule.enabled;
         o["snooze_until"] = rule.snooze_until;
         o["firing"]      = rule.firing;
         o["last_fired"]  = rule.lastFiredTs;
 
         JsonObject expr = o["expr"].to<JsonObject>();
-        expr["sensor"]     = rule.sensor;
-        expr["metric"]     = rule.metric;
+        expr["sensor"]     = jsonCopy(rule.sensor);
+        expr["metric"]     = jsonCopy(rule.metric);
         expr["op"]         = rule.op;
         expr["value"]      = rule.threshold;
         expr["duration_s"] = rule.duration_s;
@@ -361,7 +362,7 @@ void AlertEngine::toJson(JsonDocument& doc) const {
         const HistEntry& e = _history[idx];
         JsonObject ho = hArr.add<JsonObject>();
         ho["ts"]      = e.ts;
-        ho["rule_id"] = e.rule_id;
+        ho["rule_id"] = jsonCopy(e.rule_id);
         ho["value"]   = e.value;
         ho["outcome"] = "fired";
     }
@@ -424,14 +425,14 @@ bool AlertEngine::_save() const {
     for (int i = 0; i < _ruleCount; i++) {
         const Rule& rule = _rules[i];
         JsonObject o = rArr.add<JsonObject>();
-        o["id"]           = rule.id;
-        o["name"]         = rule.name;
+        o["id"]           = jsonCopy(rule.id);
+        o["name"]         = jsonCopy(rule.name);
         o["enabled"]      = rule.enabled;
         o["snooze_until"] = rule.snooze_until;
 
         JsonObject expr = o["expr"].to<JsonObject>();
-        expr["sensor"]     = rule.sensor;
-        expr["metric"]     = rule.metric;
+        expr["sensor"]     = jsonCopy(rule.sensor);
+        expr["metric"]     = jsonCopy(rule.metric);
         expr["op"]         = rule.op;
         expr["value"]      = rule.threshold;
         expr["duration_s"] = rule.duration_s;
@@ -448,7 +449,7 @@ bool AlertEngine::_save() const {
         const HistEntry& e = _history[idx];
         JsonObject ho = hArr.add<JsonObject>();
         ho["ts"]      = e.ts;
-        ho["rule_id"] = e.rule_id;
+        ho["rule_id"] = jsonCopy(e.rule_id);
         ho["value"]   = e.value;
         ho["outcome"] = "fired";
     }

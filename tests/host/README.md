@@ -44,6 +44,10 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_posix_tz.cpp` | `src/utils/PosixTz.h` — the TZ string for each daylight-saving rule, the EU and US change instants as the C library reads them, and `tzOffsetAt()` across day and year boundaries |
 | `test_bme688_mini.cpp` | `src/drivers/BME688_Mini.h` — the BME680/BME688 driver against values from Bosch's BME68x_SensorAPI for the same register image: calibration offsets, the result field, the BME688's gas registers and formula, run_gas and the heater set-point. Uses the `<Wire.h>` shim, a register-file I2C device |
 | `test_settings_json.cpp` | `src/web/SettingsJson.cpp` — the settings file: export → import → export gives the same file, a backup restores every setting it carries (the Kindle language and page shape included) and leaves the WiFi credentials, pins and current log file alone, a key an older file lacks changes nothing, and a file gets the forms' checks. Compiles the four modules it goes through, with shims for `<WiFi.h>`, `<ESPAsyncWebServer.h>` and `<pgmspace.h>` |
+| `test_data_reply.cpp` | `src/web/DataReply.h` — `/api/data` written in pieces gives the old reply byte for byte at every piece size, and more metric/unit pairs than `KINDS` are refused (`kindsOver`) |
+| `test_block_buf.cpp` | `src/web/BlockBuf.h` — the web replies' 512 B blocks: what goes in comes out in order at every read size, `size()` counts it, and blocks come from the installed source (the reply pool) before the heap and go back to it |
+| `test_heap_budget.cpp` | `src/core/HeapBudgetCore.h` — the heap budget: web replies up to the total, a waiting TLS job closes the door to new replies and gets its units once they drain, a forced one runs over the total until all are done |
+| `test_json_copy.cpp` | `src/utils/JsonCopy.h` — ArduinoJson keeps only a pointer to a const char array, and `jsonCopy()` makes the document keep its own copy, so a struct freed or rewritten before serializing does not change the reply |
 
 Fuzz targets (random-input property checks):
 

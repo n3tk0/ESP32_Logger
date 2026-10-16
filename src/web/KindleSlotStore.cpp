@@ -9,6 +9,7 @@
 #include "../pipeline/DataPipeline.h"   // fsMutex
 #include "../utils/MutexGuard.h"
 #include "../utils/JsonIO.h"
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 static KindleZones s_zones;
 
@@ -164,17 +165,17 @@ bool kdSlotsSave(fs::FS& fs, const KindleZones& zones, const char* path) {
     kdZonesClamp(tidy);
 
     JsonDocument doc;
-    if (tidy.groupOut[0]) doc["groups"]["out"] = tidy.groupOut;
-    if (tidy.groupIn[0])  doc["groups"]["in"]  = tidy.groupIn;
+    if (tidy.groupOut[0]) doc["groups"]["out"] = jsonCopy(tidy.groupOut);
+    if (tidy.groupIn[0])  doc["groups"]["in"]  = jsonCopy(tidy.groupIn);
 
     JsonObject zo = doc["zones"].to<JsonObject>();
     for (int i = 0; i < KZ_COUNT; i++) {
         const KindleSlot& s = tidy.z[i];
         if (!s.used()) continue;                  // an empty place writes no key
         JsonObject o = zo[kdZoneKey((uint8_t)i)].to<JsonObject>();
-        o["sensor"] = s.sensorId;
-        o["metric"] = s.metric;
-        if (s.label[0]) o["label"] = s.label;     // omit when it is the default
+        o["sensor"] = jsonCopy(s.sensorId);
+        o["metric"] = jsonCopy(s.metric);
+        if (s.label[0]) o["label"] = jsonCopy(s.label);     // omit when it is the default
         o["flags"] = s.flags;
         if (s.decimals != KSLOT_DECIMALS_AUTO) o["decimals"] = s.decimals;
         if (s.ink != KINK_BLACK) o["ink"] = s.ink;   // omit when it is the default

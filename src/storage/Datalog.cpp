@@ -14,6 +14,7 @@
 #include <time.h>
 #include "../utils/JsonIO.h"
 #include "../utils/Utf8Clip.h"
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 // Every write in this file runs under fsMutex: datalogAppend() and
 // datalogColsSaveIfLearned() under the caller's, datalogColsFromJson()
@@ -123,9 +124,9 @@ void colsJson(JsonObject out) {
     JsonArray a = out["cols"].to<JsonArray>();
     for (uint8_t i = 0; i < s_n; i++) {
         JsonObject o = a.add<JsonObject>();
-        o["s"] = s_cols[i].sensor;
-        o["m"] = s_cols[i].metric;
-        o["l"] = s_cols[i].label;
+        o["s"] = jsonCopy(s_cols[i].sensor);
+        o["m"] = jsonCopy(s_cols[i].metric);
+        o["l"] = jsonCopy(s_cols[i].label);
         if (!s_cols[i].on) o["off"] = true;
         // Only when it is not the average, which a column without it means.
         if (s_cols[i].agg != DL_AGG_AVG) o["a"] = datalogAggName(s_cols[i].agg);
@@ -378,7 +379,7 @@ int datalogHeader(char* buf, size_t cap, uint32_t* rev) {
     uint8_t     aggs[DL_MAX_COLS];
     int n = 0;
     for (uint8_t i = 0; datalogSensorRows() && i < s_n && n < DL_MAX_COLS; i++)
-        if (s_cols[i].on) { aggs[n] = s_cols[i].agg; labels[n++] = s_cols[i].label; }
+        if (s_cols[i].on) { aggs[n] = s_cols[i].agg; labels[n++] = s_cols[i].label; }   // pointers, no JSON (check_json_char_arrays)
     return dlFormatHeader(buf, cap, l, labels, n, aggs);
 }
 

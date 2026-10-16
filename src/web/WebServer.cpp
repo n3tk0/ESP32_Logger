@@ -19,6 +19,7 @@
 
 #include "WebServer.h"
 #include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
+#include "../utils/JsonCopy.h"   // jsonCopy
 #include "../setup.h"                   // WEB_BASIC_AUTH_* macros
 #include "../core/Globals.h"
 #include "../core/SdCompat.h"           // sdFs() — SD.h only when FEATURE_SD_STORAGE
@@ -44,6 +45,9 @@
 #include "../export/ExportManager.h"    // caps.exporters: what this build registered
 #include "../tasks/TaskManager.h"      // applyLoggerConfig after a data log save
 #include "../utils/MutexGuard.h"
+#include "../core/PanicCapture.h"         // TASK_WDT: where async_tcp was
+#include "../core/HeapBudget.h"           // web replies vs TLS jobs
+#include "ReplyPool.h"                   // the reply blocks, set aside at boot
 #include "../utils/Ipv4Parse.h"         // settings form IPs, without sscanf
 #include "../utils/WifiTxPower.h"       // wifiTxPowerValid
 #include "../utils/PosixTz.h"           // dstRuleClamp, tzOffsetAt
@@ -196,6 +200,10 @@ static void buildLiveSnapshot(JsonDocument& doc) {
 // ---------------------------------------------------------------------------
 void publishLiveEvent() {
     if (liveEvents.count() == 0) return;
+    // A second without a unit of the heap budget is skipped: the page keeps
+    // the last snapshot, and the next follows in a second.
+    WebUnit unit;
+    if (!unit.ok()) return;
     JsonDocument doc;
     buildLiveSnapshot(doc);
     String buf;
@@ -758,11 +766,8 @@ static void h_get_export_settings(AsyncWebServerRequest* r) {
     JsonDocument doc;
     settingsToJson(doc.to<JsonObject>(), reveal);
 
-    AsyncResponseStream *resp = r->beginResponseStream("application/json");
     String fn = String(strlen(config.deviceName) ? config.deviceName : "device") + "_settings.json";
-    resp->addHeader("Content-Disposition", "attachment; filename=\"" + fn + "\"");
-    serializeJson(doc, static_cast<Print&>(*resp));
-    r->send(resp);
+    sendJsonResponse(r, doc, 200, fn.c_str());
 }
 
 static void h_post_save_device(AsyncWebServerRequest* r) {
@@ -1669,6 +1674,21 @@ void setupWebServer() {
         heapActivityEnd(HA_WEB);
     });
 
+    // The heap budget's front door (HeapBudget.h): a GET for a dynamic reply
+    // that would get no unit is answered 503 here, before its handler builds
+    // anything. The handlers take the unit themselves; this only saves them
+    // the work. Static files, the SSE channel and POSTs pass: a static file
+    // is not retried by the browser, and a POST is the user's own action.
+    server.addMiddleware([](AsyncWebServerRequest* r, ArMiddlewareNext next) {
+        if (r->method() == HTTP_GET) {
+            const String& u = r->url();
+            const bool dynamic = (u.startsWith("/api/") && u != "/api/events") ||
+                                 u.startsWith("/kindle/data") || u == "/export_settings";
+            if (dynamic && !heapBudgetWebAdmissible()) { sendBusyResponse(r); return; }
+        }
+        next();
+    });
+
     // Defense-in-depth headers applied to every response.
     //
     // WHAT THIS DOES NOT DO, stated plainly because the comment here used to
@@ -1848,7 +1868,7 @@ void setupWebServer() {
     auto fillIdentity = [](JsonObject o) {
         o["device"]         = strlen(config.deviceName) ? config.deviceName : "Water Logger";
         o["deviceName"]     = o["device"];   // alias – sdInit uses both
-        o["deviceId"]       = config.deviceId;
+        o["deviceId"]       = jsonCopy(config.deviceId);
         o["version"]        = getVersionString();
         o["forceWebServer"] = config.forceWebServer;
         o["network"]        = getNetworkDisplay();
@@ -1936,22 +1956,22 @@ void setupWebServer() {
 
     auto fillTheme = [](JsonObject o) {
         o["mode"]              = (int)config.theme.mode;
-        o["primaryColor"]      = config.theme.primaryColor;
-        o["secondaryColor"]    = config.theme.secondaryColor;
-        o["lightBgColor"]      = config.theme.lightBgColor;
-        o["lightTextColor"]    = config.theme.lightTextColor;
-        o["darkBgColor"]       = config.theme.darkBgColor;
-        o["darkTextColor"]     = config.theme.darkTextColor;
-        o["ffColor"]           = config.theme.ffColor;
-        o["pfColor"]           = config.theme.pfColor;
-        o["otherColor"]        = config.theme.otherColor;
-        o["storageBarColor"]   = config.theme.storageBarColor;
-        o["storageBar70Color"] = config.theme.storageBar70Color;
-        o["storageBar90Color"] = config.theme.storageBar90Color;
-        o["storageBarBorder"]  = config.theme.storageBarBorder;
-        o["logoSource"]        = config.theme.logoSource;
-        o["faviconPath"]       = config.theme.faviconPath;
-        o["boardDiagramPath"]  = config.theme.boardDiagramPath;
+        o["primaryColor"]      = jsonCopy(config.theme.primaryColor);
+        o["secondaryColor"]    = jsonCopy(config.theme.secondaryColor);
+        o["lightBgColor"]      = jsonCopy(config.theme.lightBgColor);
+        o["lightTextColor"]    = jsonCopy(config.theme.lightTextColor);
+        o["darkBgColor"]       = jsonCopy(config.theme.darkBgColor);
+        o["darkTextColor"]     = jsonCopy(config.theme.darkTextColor);
+        o["ffColor"]           = jsonCopy(config.theme.ffColor);
+        o["pfColor"]           = jsonCopy(config.theme.pfColor);
+        o["otherColor"]        = jsonCopy(config.theme.otherColor);
+        o["storageBarColor"]   = jsonCopy(config.theme.storageBarColor);
+        o["storageBar70Color"] = jsonCopy(config.theme.storageBar70Color);
+        o["storageBar90Color"] = jsonCopy(config.theme.storageBar90Color);
+        o["storageBarBorder"]  = jsonCopy(config.theme.storageBarBorder);
+        o["logoSource"]        = jsonCopy(config.theme.logoSource);
+        o["faviconPath"]       = jsonCopy(config.theme.faviconPath);
+        o["boardDiagramPath"]  = jsonCopy(config.theme.boardDiagramPath);
         o["chartSource"]       = (int)config.theme.chartSource;
         o["chartLocalPath"]    = strlen(config.theme.chartLocalPath) ? config.theme.chartLocalPath : "/uPlot.iife.min.js";
         o["chartLabelFormat"]  = (int)config.theme.chartLabelFormat;
@@ -2985,6 +3005,14 @@ void startWebServer() {
           .setDefaultFile("index.html")
           .setCacheControl("public, max-age=300, must-revalidate");
 
+    // The heap budget and the reply blocks (HeapBudget.h, ReplyPool.h).
+    // With PSRAM there is heap enough for everything at once: no budget.
+    heapBudgetBegin(!psramFound());
+    replyPoolBegin();
     server.begin();
+    // The AsyncTCP task exists from here on, and the task watchdog watches
+    // it: a request handler that blocks it 5 s resets the device (TASK_WDT).
+    // Name where it was stuck in the RTC log when that happens.
+    panicCaptureWatchTask(xTaskGetHandle("async_tcp"));
     DBGF("Web server started. Free heap: %d\n", ESP.getFreeHeap());
 }

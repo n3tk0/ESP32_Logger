@@ -5,6 +5,7 @@
 #include "../managers/RtcManager.h"   // applyTimeZone
 #include "../utils/PosixTz.h"
 #include <stdlib.h>                  // atoi
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 // ---------------------------------------------------------------------------
 bool TimeModule::load(JsonObjectConst cfg) {
@@ -30,7 +31,7 @@ bool TimeModule::load(JsonObjectConst cfg) {
 // ---------------------------------------------------------------------------
 bool TimeModule::save(JsonObject cfg) const {
     const NetworkConfig& n = config.network;
-    cfg["ntpServer"]      = n.ntpServer;
+    cfg["ntpServer"]      = jsonCopy(n.ntpServer);
     cfg["timezone"]       = (int)n.timezone;
     cfg["dstOffsetHours"] = (int)n.dstOffsetHours;
     cfg["dstRule"]        = (int)n.dstRule;

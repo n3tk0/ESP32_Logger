@@ -13,6 +13,7 @@
 #include "../utils/CpuFreq.h"            // cpuMhzValid, CPU_MAX_MHZ
 
 #include <string.h>
+#include "../utils/JsonCopy.h"   // jsonCopy
 
 namespace {
 
@@ -64,7 +65,7 @@ void datalogFromJson(JsonObjectConst dl) {
 void settingsToJson(JsonObject doc, bool revealSecrets) {
     // ── Identity ──────────────────────────────────────────────────────────
     doc["deviceName"]     = strlen(config.deviceName) ? config.deviceName : "Water Logger";
-    doc["deviceId"]       = config.deviceId;
+    doc["deviceId"]       = jsonCopy(config.deviceId);
     doc["forceWebServer"] = config.forceWebServer;
 
     // ── Theme ─────────────────────────────────────────────────────────────
@@ -72,14 +73,14 @@ void settingsToJson(JsonObject doc, bool revealSecrets) {
     // not carry.
     JsonObject th = doc["theme"].to<JsonObject>();
     ThemeModule::instance().save(th);
-    th["ffColor"]           = config.theme.ffColor;
-    th["pfColor"]           = config.theme.pfColor;
-    th["otherColor"]        = config.theme.otherColor;
-    th["storageBarColor"]   = config.theme.storageBarColor;
-    th["storageBar70Color"] = config.theme.storageBar70Color;
-    th["storageBar90Color"] = config.theme.storageBar90Color;
-    th["storageBarBorder"]  = config.theme.storageBarBorder;
-    th["boardDiagramPath"]  = config.theme.boardDiagramPath;
+    th["ffColor"]           = jsonCopy(config.theme.ffColor);
+    th["pfColor"]           = jsonCopy(config.theme.pfColor);
+    th["otherColor"]        = jsonCopy(config.theme.otherColor);
+    th["storageBarColor"]   = jsonCopy(config.theme.storageBarColor);
+    th["storageBar70Color"] = jsonCopy(config.theme.storageBar70Color);
+    th["storageBar90Color"] = jsonCopy(config.theme.storageBar90Color);
+    th["storageBarBorder"]  = jsonCopy(config.theme.storageBarBorder);
+    th["boardDiagramPath"]  = jsonCopy(config.theme.boardDiagramPath);
 
     // ── Flow Meter ────────────────────────────────────────────────────────
     JsonObject fm = doc["flowMeter"].to<JsonObject>();
