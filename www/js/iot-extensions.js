@@ -2042,6 +2042,15 @@
     });
     wiz.querySelector("#wizNext").addEventListener("click", function () {
       if (_wizStep < 4) {
+        // The pin check is wired on the first open, once the board context
+        // arrives: leaving step 3 before that waits for it, so a pin the
+        // board cannot use is not saved unchecked.
+        if (_wizStep === 3 && !_wizPins && _wizPinsReady) {
+          var btn = this;
+          btn.disabled = true;
+          _wizPinsReady.then(function () { btn.disabled = false; btn.click(); });
+          return;
+        }
         if (_wizStep === 3 && _wizPins && !_wizPins()) {
           showToast(ieT("pins.fixPins"), "", "err");
           return;
@@ -2091,7 +2100,7 @@
   }
 
   // ── Pins (www/js/pins.js, context shared with sensors.js) ─────────────────
-  var _wizPins = null, _wizSensors = null;
+  var _wizPins = null, _wizSensors = null, _wizPinsReady = null;
   function wizPinField(id, label, value, ifaces) {
     var ctx = (typeof CL_PINS !== "undefined" && CL_PINS.ctx) || null;
     return Pins.field(id, label, value, ctx, { target: id, cls: "wiz-if", attrs: ' data-if="' + ifaces + '"' });
@@ -2112,7 +2121,9 @@
       .then(function (r) { return r.ok ? r.json() : {}; })
       .then(function (c) { _wizSensors = (c && c.sensors) || []; })
       .catch(function () { _wizSensors = []; });
-    Promise.all([clPinsReady(), sensorsReady]).then(function () {
+    var ready = _wizPinsReady = Promise.all([clPinsReady(), sensorsReady]);
+    ready.then(function () { if (_wizPinsReady === ready) _wizPinsReady = null; });
+    ready.then(function () {
       if (!wiz.isConnected) return;
       var ctx = CL_PINS.ctx || { profile: null, board: null };
       wiz.querySelectorAll("input[data-pin]").forEach(function (inp) {
