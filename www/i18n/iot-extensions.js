@@ -56,7 +56,8 @@ I18n.register("iotExt", {
     // Sensor diagnostics grid
     reads: "Reads",
     errors: "Errors (24 h)",
-    retries: "Failures in a row",
+    retries: "In a row",
+    retriesHint: "Failed reads since the last good one",
     avgLatency: "Avg latency",
     uptime24h: "24 h uptime · {pct}%",
     uptimeHours: "Uptime, last {n} h · {pct}%",
@@ -283,10 +284,11 @@ I18n.register("iotExt", {
     // Sensor diagnostics grid
     reads: "Отчитания",
     errors: "Грешки (24 ч)",
-    retries: "Поредни грешки",
+    retries: "Поредни",
+    retriesHint: "Неуспешни четения след последното успешно",
     avgLatency: "Ср. латентност",
     uptime24h: "Uptime за 24 ч · {pct}%",
-    uptimeHours: "Uptime за последните {n} ч · {pct}%",
+    uptimeHours: "Uptime за {n} ч · {pct}%",
     uptimeNoData: "Uptime · още няма данни",
     axisStart: "−24 ч",
     axisNow: "сега",

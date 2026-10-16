@@ -1340,9 +1340,12 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .health-tile.err  { border-color:rgba(220,38,38,.4); }
 .health-tile-head { display:flex; align-items:center; justify-content:space-between; }
 .health-name { font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px; }
-.health-stats { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:11px; }
-.health-stat { display:flex; flex-direction:column; gap:2px; }
-.health-stat-l { color:var(--text-3); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+.health-stats { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px 12px; font-size:11px; }
+.health-stat { display:flex; flex-direction:column; gap:2px; min-width:0; }
+/* One line each: a narrow tile (span 4 holds two of them side by side)
+   cuts a long label with an ellipsis instead of wrapping it. */
+.health-stat-l { color:var(--text-3); font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .health-stat-v { font-family:var(--mono); font-weight:600; color:var(--text-2); }
 .health-stat-v.warn { color:var(--warn); }
 .health-stat-v.err  { color:var(--err); }
