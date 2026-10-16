@@ -1657,7 +1657,7 @@
         '<div class="health-stats">' +
           '<div class="health-stat"><span class="health-stat-l" title="' + esc(ieT("iotExt.reads")) + '">' + esc(ieT("iotExt.reads")) + '</span><span class="health-stat-v">' + reads.toLocaleString() + '</span></div>' +
           '<div class="health-stat"><span class="health-stat-l" title="' + esc(ieT("iotExt.errors")) + '">' + esc(ieT("iotExt.errors")) + '</span><span class="health-stat-v' + (state === "err" && errors > 0 ? " err" : "") + '">' + errors + '</span></div>' +
-          '<div class="health-stat"><span class="health-stat-l" title="' + esc(ieT("iotExt.retries")) + '">' + esc(ieT("iotExt.retries")) + '</span><span class="health-stat-v' + (retries > 0 ? " err" : "") + '">' + retries + '</span></div>' +
+          '<div class="health-stat"><span class="health-stat-l" title="' + esc(ieT("iotExt.retriesHint")) + '">' + esc(ieT("iotExt.retries")) + '</span><span class="health-stat-v' + (retries > 0 ? " err" : "") + '">' + retries + '</span></div>' +
           '<div class="health-stat"><span class="health-stat-l" title="' + esc(ieT("iotExt.avgLatency")) + '">' + esc(ieT("iotExt.avgLatency")) + '</span><span class="health-stat-v">' + avgLat + '</span></div>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);font-family:var(--mono)">' +
