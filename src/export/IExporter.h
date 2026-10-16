@@ -65,7 +65,8 @@ public:
     // The request went out but no answer came back in time (HTTP read
     // timeout). The server most likely stored it and was only slow to say
     // so: sending it again, or spooling it, puts the same values in twice.
-    // ExportManager then neither retries nor spools, and counts it as sent.
+    // ExportManager then doesn't retry it and counts it as sent; only from
+    // the third such send in a row does it spool the batch (Throttle.h).
     bool                unconfirmed() const { return _unconfirmed; }
 
     // Clears both flags above; ExportManager calls it before each send().

@@ -167,7 +167,8 @@ bool OpenSenseMapExporter::send(const SensorReading* readings, size_t count) {
                        (unsigned long)_retryAfterS);
         } else if (code == HTTPC_ERROR_READ_TIMEOUT) {
             // Sent, no answer: most likely stored (duplicates on the box
-            // showed it). Not resent and not spooled.
+            // showed it). Not resent; spooled only from the third in a row
+            // (see UNCONFIRMED_SPOOL_AFTER in Throttle.h).
             _unconfirmed = true;
             Log.println("[OSM] POST sent, no reply in 15 s — not resent");
         } else if (!ok && code >= 400 && code < 500 && code != 408) {
