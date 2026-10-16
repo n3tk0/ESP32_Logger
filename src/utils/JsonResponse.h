@@ -37,6 +37,7 @@
 #include "../web/StringResponse.h"
 #include "../core/HeapBudget.h"   // WebUnit: one of the replies in flight
 #include "../core/LogRing.h"      // Log
+#include "JsonIO.h"               // jsonToString
 
 // Replies up to this size go out as one String (StringResponse.h): written
 // straight from the String, with none of the 2872 B send buffer a block
@@ -119,7 +120,7 @@ inline void sendJsonResponse(AsyncWebServerRequest* r, const JsonDocument& doc,
     // in flight is under JSON_SMALL_REPLY bytes, sent straight from it.
     if (n <= JSON_SMALL_REPLY) {
         String out;
-        if (out.reserve(n) && serializeJson(doc, out) == n) {
+        if (out.reserve(n) && jsonToString(doc, out) == n) {
             StringResponse* res = new (std::nothrow) StringResponse(code, "application/json", std::move(out));
             if (res) {
                 if (attachment)
