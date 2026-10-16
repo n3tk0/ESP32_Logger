@@ -55,6 +55,8 @@ static void test_too_many_metrics_is_refused() {
     SensorReading* a = readings(n);
     for (size_t i = 0; i < n; i++) snprintf(a[i].metric, sizeof(a[i].metric), "m%u", (unsigned)i);
     CHECK(DataReply::make(a, n) == nullptr);
+    CHECK(DataReply::kindsOver(a, n));
+    CHECK(!DataReply::kindsOver(a, n - 1));
     DataReply* r = DataReply::make(a, n - 1);
     CHECK(r != nullptr);
     delete r;

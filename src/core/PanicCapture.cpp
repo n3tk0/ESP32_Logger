@@ -137,12 +137,15 @@ static void putTask(const char* tag, void* task, int maxBt) {
     put("[TWDT] ");
     put(tag);
     put(pcTaskGetName((TaskHandle_t)task));
-    if (!frame || (uint32_t)(uintptr_t)frame < 0x3FC80000u ||
+    // Read from inside the watchdog ISR: a misaligned or out-of-RAM pointer
+    // would fault there, before the panic handler, so check both first.
+    if (!frame || ((uintptr_t)frame & 3) || (uint32_t)(uintptr_t)frame < 0x3FC80000u ||
         (uint32_t)(uintptr_t)frame >= 0x3FCE0000u) { put("\n"); return; }
     put(" pc ");  putHex(frame[0]);
     put(" ra ");  putHex(frame[1]);
     put(" bt");
     const uint32_t* sp = (const uint32_t*)(uintptr_t)frame[2];
+    if ((uintptr_t)sp & 3) { put("\n"); return; }
     int found = 0;
     for (int i = 0; i < 128 && found < maxBt; i++) {
         const uint32_t* w = sp + i;

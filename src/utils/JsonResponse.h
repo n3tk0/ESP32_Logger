@@ -28,9 +28,12 @@
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
 
-// Bytes the largest free block must hold beyond the reply buffer itself.
+// Bytes the largest free block must hold beyond the reply buffer itself:
+// the library's send buffer (2 x TCP MSS, 2872 B), allocated in one piece
+// once the headers are out, plus a little. Without it the reply waits on
+// the poll timer, its buffer still held, until some other reply frees one.
 #ifndef JSON_RESPONSE_HEADROOM
-#define JSON_RESPONSE_HEADROOM 1024
+#define JSON_RESPONSE_HEADROOM 3072
 #endif
 
 // A stream whose buffer holds n bytes without growing, or nullptr when the

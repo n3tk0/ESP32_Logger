@@ -381,10 +381,13 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
     // Without a block for it the readings are still acknowledged, only
     // without the config/firmware extras: those ride along next cycle, while
     // a 503 here would have the node send the stored readings again.
+    // An extra cut short by the heap (overflowed) goes the same way: half a
+    // config is worse than none, and the whole of it comes next cycle.
     size_t replyLen = strlen(out) + 1;
     for (JsonPairConst kv : cfg.as<JsonObjectConst>())
         replyLen += strlen(kv.key().c_str()) + 4 + measureJson(kv.value());
-    AsyncResponseStream* resp = beginSizedStream(req, "application/json", replyLen);
+    AsyncResponseStream* resp = cfg.overflowed() ? nullptr
+                              : beginSizedStream(req, "application/json", replyLen);
     if (!resp) {
         strlcat(out, "}", sizeof(out));
         req->send(200, "application/json", out);

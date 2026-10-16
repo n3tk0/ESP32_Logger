@@ -32,6 +32,23 @@ struct DataReply {
 
     ~DataReply() { delete[] pts; }
 
+    // More than KINDS metric/unit pairs in agg[0..n): a reply make() refuses.
+    static bool kindsOver(const SensorReading* agg, size_t n) {
+        const SensorReading* seen[KINDS];
+        size_t kinds = 0;
+        for (size_t i = 0; i < n; i++) {
+            size_t k = 0;
+            while (k < kinds && (strcmp(seen[k]->metric, agg[i].metric) ||
+                                 strcmp(seen[k]->unit, agg[i].unit))) k++;
+            if (k == kinds) {
+                if (k == KINDS) return true;
+                seen[kinds++] = &agg[i];
+            }
+        }
+        return false;
+    }
+
+    // nullptr when the heap has no room for it, or over KINDS (kindsOver()).
     static DataReply* make(const SensorReading* agg, size_t n) {
         DataReply* r = new (std::nothrow) DataReply();
         if (!r) return nullptr;

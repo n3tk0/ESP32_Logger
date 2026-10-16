@@ -167,10 +167,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
     }
     if (want > 0) {
         raw = new (std::nothrow) SensorReading[want];
-        if (!raw) {
-            req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
-            return;
-        }
+        if (!raw) { sendBusyResponse(req); return; }   // the page asks once more
         if (xSemaphoreTake(webDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
             ringCount = webRingBuf.copyMatching(raw, want, RING_SHARE, fromTs, toTs,
                                                 sensorFilter, metricFilter);
@@ -214,7 +211,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
         agg = new(std::nothrow) SensorReading[outCap + 1];
         if (!agg) {
             delete[] raw;
-            req->send(500, "application/json", "{\"ok\":false,\"error\":\"out of memory\"}");
+            sendBusyResponse(req);
             return;
         }
 
@@ -274,8 +271,16 @@ static void handleApiData(AsyncWebServerRequest* req) {
     // often had no such block. Chunked, each piece is written straight into
     // the TCP send buffer as the window opens; what stays behind is the
     // points in 12 B each instead of a 72 B SensorReading.
-    DataReply* rep = DataReply::make(agg, aggCount);
+    // More metric/unit pairs than KINDS is the question, not the heap: a 400,
+    // since a 503 would be asked again and again.
+    const bool tooManyKinds = DataReply::kindsOver(agg, aggCount);
+    DataReply* rep = tooManyKinds ? nullptr : DataReply::make(agg, aggCount);
     delete[] agg;
+    if (tooManyKinds) {
+        req->send(400, "application/json",
+                  "{\"ok\":false,\"error\":\"too many metrics; add metric= or sensor=\"}");
+        return;
+    }
     if (!rep) { sendBusyResponse(req); return; }
     rep->headLen = (size_t)snprintf(rep->head, sizeof(rep->head),
                      "{\"from\":%u,\"to\":%u,\"agg\":\"%s\",\"mode\":\"%s\","
