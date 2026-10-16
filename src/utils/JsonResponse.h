@@ -1,9 +1,9 @@
 // ============================================================================
 // src/utils/JsonResponse.h
 //
-// sendJsonResponse — serialize a JsonDocument to an ESPAsyncWebServer
-// streaming response and send it, with Content-Type: application/json;
-// 503 + Retry-After: 1 when the heap cannot hold the whole reply.
+// sendJsonResponse — serialize a JsonDocument and send it, with
+// Content-Type: application/json; 503 + Retry-After: 1 when the heap cannot
+// hold the whole reply.
 //
 // Usage:
 //   static void handleApiFoo(AsyncWebServerRequest* req) {
@@ -12,41 +12,45 @@
 //       sendJsonResponse(req, doc);
 //   }
 //
-// Replies built with print/printf (/api/data, /api/ingest) measure their
-// length first and ask beginSizedStream() for the buffer, sending
-// sendBusyResponse() when it says no.
+// Replies built with print/printf (/api/ingest) measure their length first,
+// write into a BlockPrint of that length and send it with sendBlockPrint().
 //
-// NEVER call beginResponseStream() without a size here. That buffer grows by
-// one realloc per write; when a growth fails the library logs "Failed to
-// allocate" for every following write, and ArduinoJson writes one byte at a
-// time: a 2 KB reply became 2000 lines on the UART, the AsyncTCP task stalled
-// past the 5 s task watchdog, and the Overview reset the C3 (2026-10-16).
+// NEVER an AsyncResponseStream. Its buffer is one block that grows by a
+// realloc per write; when a growth fails, every later byte tries the
+// allocation again and logs "Failed to allocate". ArduinoJson writes one byte
+// at a time, and a reply that could not grow kept the AsyncTCP task in malloc
+// past the 5 s task watchdog: the Overview and the Sensors page reset the C3
+// (2026-10-16). A BlockPrint takes 512 B blocks, which a fragmented heap
+// still has, stops at the first one it cannot get, and never takes more than
+// the length it was given.
 // ============================================================================
 #pragma once
 
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
-#include <esp_heap_caps.h>
+#include <memory>
+#include <new>
 
-// Bytes the largest free block must hold beyond the reply buffer itself:
-// the library's send buffer (2 x TCP MSS, 2872 B), allocated in one piece
-// once the headers are out, plus a little. Without it the reply waits on
-// the poll timer, its buffer still held, until some other reply frees one.
-#ifndef JSON_RESPONSE_HEADROOM
-#define JSON_RESPONSE_HEADROOM 3072
-#endif
+#include "../web/BlockBuf.h"
+#include "../core/LogRing.h"   // Log
 
-// A stream whose buffer holds n bytes without growing, or nullptr when the
-// heap has no block for it. The buffer is one block of n + 2 bytes (cbuf adds
-// one), so ask for it only when the largest free block holds it with room to
-// spare for the other requests in flight: a page-load burst can leave the
-// heap with 20 KB free but no 7 KB piece. Checked first because cbuf's
-// constructor does not test its own allocation.
-inline AsyncResponseStream* beginSizedStream(AsyncWebServerRequest* r, const char* type, size_t n) {
-    if (!n || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < n + 2 + JSON_RESPONSE_HEADROOM)
-        return nullptr;
-    return r->beginResponseStream(type, n + 1);
-}
+// A reply of exactly `limit` bytes, assembled in blocks. Bytes past the limit
+// are counted, not kept: over() says the length worked out beforehand was
+// wrong, and the reply must not go out under it.
+struct BlockPrint : public Print {
+    BlockBuf buf;
+    size_t   limit;
+    size_t   extra = 0;
+    explicit BlockPrint(size_t n) : limit(n) {}
+    size_t write(uint8_t c) override { return write(&c, 1); }
+    size_t write(const uint8_t* p, size_t n) override {
+        const size_t left = limit - buf.size();
+        if (n > left) { extra += n - left; n = left; }
+        return n ? buf.write(p, n) : 0;
+    }
+    bool over()     const { return extra != 0; }
+    bool complete() const { return !buf.failed() && !extra && buf.size() == limit; }
+};
 
 // 503 + Retry-After: 1 — the page asks a GET once more after it.
 inline void sendBusyResponse(AsyncWebServerRequest* r) {
@@ -57,26 +61,45 @@ inline void sendBusyResponse(AsyncWebServerRequest* r) {
     r->send(busy);
 }
 
+// A BlockPrint that is complete(), sent with its length; false (nothing sent)
+// when it is not, or the response itself cannot be had. A length that came
+// out wrong is logged with the request's path: that is a bug, not the heap.
+inline bool sendBlockPrint(AsyncWebServerRequest* r, std::shared_ptr<BlockPrint> pay,
+                           const char* type, int code = 200,
+                           const char* attachment = nullptr) {
+    if (!pay) return false;
+    if (pay->over() || (!pay->buf.failed() && pay->buf.size() != pay->limit)) {
+        Log.printf("[web] %s: reply measured %u B, wrote %u B\n", r->url().c_str(),
+                   (unsigned)pay->limit, (unsigned)(pay->buf.size() + pay->extra));
+        return false;
+    }
+    if (!pay->complete()) return false;
+    AsyncWebServerResponse* res = r->beginResponse(type, pay->limit,
+        [pay](uint8_t* out, size_t maxLen, size_t) -> size_t { return pay->buf.read(out, maxLen); });
+    if (!res) return false;
+    res->setCode(code);
+    if (attachment)
+        res->addHeader("Content-Disposition",
+                       String("attachment; filename=\"") + attachment + "\"");
+    r->send(res);
+    return true;
+}
+
 // `attachment`, when given, is the file name for a Content-Disposition
 // header (settings and backup downloads).
 inline void sendJsonResponse(AsyncWebServerRequest* r, const JsonDocument& doc,
                              int code = 200, const char* attachment = nullptr) {
-    // The reply is buffered whole before it goes out, so size the buffer
-    // once from measureJson() rather than letting it grow — and check that
-    // all of it fit. A document that ran out of heap while being built
-    // (overflowed) or a buffer that could not take every byte would go out
-    // as a 200 with a cut-short or empty body, which the page cannot parse
-    // and does not retry: answer 503 + Retry-After instead, which it does.
+    // A document that ran out of heap while being built (overflowed), or a
+    // reply that could not be had whole, would go out as a 200 with a
+    // cut-short body, which the page cannot parse and does not retry: answer
+    // 503 + Retry-After instead, which it does.
     const size_t n = doc.overflowed() ? 0 : measureJson(doc);
-    AsyncResponseStream* resp = beginSizedStream(r, "application/json", n);
-    if (resp && serializeJson(doc, static_cast<Print&>(*resp)) == n) {
-        resp->setCode(code);
-        if (attachment)
-            resp->addHeader("Content-Disposition",
-                            String("attachment; filename=\"") + attachment + "\"");
-        r->send(resp);
-        return;
+    std::shared_ptr<BlockPrint> pay;
+    if (n) {
+        BlockPrint* p = new (std::nothrow) BlockPrint(n);
+        if (p) pay.reset(p);
     }
-    delete resp;   // never sent: still ours
-    sendBusyResponse(r);
+    if (pay) serializeJson(doc, static_cast<Print&>(*pay));
+    if (!sendBlockPrint(r, pay, "application/json", code, attachment))
+        sendBusyResponse(r);
 }

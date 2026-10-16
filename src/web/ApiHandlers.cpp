@@ -1579,8 +1579,8 @@ static void handleApiModuleRestart(AsyncWebServerRequest* req, const String& id)
 //   • scan: WiFi.scanNetworks(async=true) → GET polls via WiFi.scanComplete()
 //   • test: a short-lived FreeRTOS task runs the connect-and-wait loop;
 //           handlers only touch a file-static state machine (g_wtState).
-// Both responses stream via AsyncResponseStream to avoid building a big
-// contiguous String on the heap.
+// Both responses go through sendJsonResponse (JsonResponse.h): measured,
+// then written in 512 B blocks, never one big contiguous buffer.
 // ---------------------------------------------------------------------------
 
 // ── WiFi test state machine ─────────────────────────────────────────────────
