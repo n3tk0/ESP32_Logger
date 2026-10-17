@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <MD5Builder.h>
+#include <memory>
 #include <new>
 #include <time.h>
 
@@ -323,17 +324,21 @@ static int readChunk(uint32_t serial, uint32_t off, uint8_t* buf, size_t len) {
 
 void handleKindlePkgTar(AsyncWebServerRequest* req) {
     if (!s_pkg.have) { req->send(404); return; }
-    if (Reader* r = readerFind(remoteIp(req))) {
-        if (r->st == RS_PENDING) r->st = RS_SENDING;
-    }
+    // A unit of the heap budget for as long as the package streams, taken
+    // before the reader is marked as being sent one: busy, and it asks again.
+    std::shared_ptr<WebUnit> unit(new (std::nothrow) WebUnit());
+    if (!unit || !unit->ok()) { sendBusyResponse(req); return; }
     const uint32_t serial = s_pkg.serial;
     AsyncWebServerResponse* res = req->beginResponse(
         "application/x-tar", s_pkg.size,
-        [serial](uint8_t* buf, size_t maxLen, size_t index) -> size_t {
+        [serial, unit](uint8_t* buf, size_t maxLen, size_t index) -> size_t {
             const int n = readChunk(serial, (uint32_t)index, buf, maxLen);
             return n < 0 ? RESPONSE_TRY_AGAIN : (size_t)n;
         });
-    if (!res) { req->send(500); return; }
+    if (!res) { sendBusyResponse(req); return; }
+    if (Reader* r = readerFind(remoteIp(req))) {
+        if (r->st == RS_PENDING) r->st = RS_SENDING;
+    }
     res->addHeader("x-MD5", s_pkg.md5);
     res->addHeader("Cache-Control", "no-store");
     req->send(res);

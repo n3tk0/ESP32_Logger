@@ -376,8 +376,13 @@ load_kv() {
             '"'*'"' )
                 val=${val#\"}
                 val=${val%\"}
-                # Undo the collector's backslash escaping, literally.
-                val=$(printf '%s' "$val" | sed 's/\\\(["\\$`]\)/\1/g')
+                # Undo the collector's backslash escaping, literally. Only
+                # where there is one: a sed per value is ~80 processes a load
+                # on the reader's slow ARM, for values that almost never hold
+                # a backslash.
+                case "$val" in
+                    *\\*) val=$(printf '%s' "$val" | sed 's/\\\(["\\$`]\)/\1/g') ;;
+                esac
                 ;;
         esac
         eval "$key=\$val"                         # value expanded, never parsed
@@ -2898,7 +2903,7 @@ fetch_line() {
     local q="line=1&$2w=$3&h=$4"
     case "$LINE_F" in *_1.bmp) q="$q&inv=1" ;; esac
     if wget -q -T 15 -O "$TMP/line.new" "$(host_url)/kindle/graph.bmp?$q" \
-         2>/dev/null && [ -s "$TMP/line.new" ]; then
+         2>/dev/null && graph_ok "$TMP/line.new"; then
         rm -f "$TMP/line_$1_"*.bmp
         mv "$TMP/line.new" "$LINE_F"
     else

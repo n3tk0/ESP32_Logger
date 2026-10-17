@@ -25,6 +25,7 @@
 #include "KindlePkg.h"                  // PKG_* — the reader's own update
 #include "BlockBuf.h"                   // the payload, in small blocks
 #include "../utils/JsonResponse.h"      // sendBusyResponse
+#include "StringResponse.h"              // the pages, sent without a second copy
 #ifdef FEATURE_ESPNOW_INGEST
 #  include "../espnow/EspNowIngest.h"   // espnowAnyBatteryWarn()
 #endif
@@ -52,6 +53,44 @@ struct KdPayload : public Print {
     size_t write(uint8_t c) override { return buf.write(&c, 1); }
     size_t write(const uint8_t* p, size_t n) override { return buf.write(p, n); }
 };
+
+// The browser pages. A page is built in one String and handed over by move
+// (StringResponse.h): beginResponse(code, type, String) copied it, which put
+// the dashboard's 7 KB in the heap twice. A response that cannot be had is a
+// bare 503, never a dereferenced null.
+static void kdSendHtml(AsyncWebServerRequest* req, String&& p) {
+    StringResponse* res = new (std::nothrow) StringResponse(200, "text/html", std::move(p));
+    if (!res) { req->send(503); return; }
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+}
+
+static void kdSendText(AsyncWebServerRequest* req, const char* line) {
+    AsyncWebServerResponse* res = req->beginResponse(200, "text/plain", line);
+    if (!res) { req->send(503); return; }
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+}
+
+// The dashboard holds a unit of the heap budget until its last byte is out.
+struct KdPageResponse : public StringResponse {
+    WebUnit unit;
+    KdPageResponse(String&& body, WebUnit&& u)
+        : StringResponse(200, "text/html", std::move(body)), unit(std::move(u)) {}
+};
+
+// No unit, or no heap for the page: a page that asks again in a few seconds.
+// A browser shows a bare 503 as an error and stays on it; the e-ink page has
+// nobody standing by to press reload.
+static void kdSendBusyPage(AsyncWebServerRequest* req) {
+    AsyncWebServerResponse* res = req->beginResponse(503, "text/html",
+        "<!DOCTYPE html><html><head><meta http-equiv=\"refresh\" content=\"5\">"
+        "</head><body></body></html>");
+    if (!res) { req->send(503); return; }
+    res->addHeader("Retry-After", String(heapBudgetRetryAfter()));
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+}
 
 static void kdForecastKeysEmpty(Print* s) {
     s->print("FC_SUMMARY=\"\"\nFC_CODE=-1\nFC_ICON=-1\nFC_HIGH=\nFC_LOW=\n"
@@ -183,6 +222,13 @@ static KdPage kdPageFor(AsyncWebServerRequest* req, const KindleConfig& skin) {
     pg.w = pw;
     pg.screenW = w;
     return pg;
+}
+
+// The width the dashboard declared for this reader, for the pages between two
+// of its loads (clear, forecast): a different one leaves the browser zoomed.
+static int kdPageViewW(AsyncWebServerRequest* req) {
+    const KdPage pg = kdPageFor(req, config.kindle);
+    return pg.screenW ? pg.screenW : pg.w;
 }
 
 // The ?rot=, ?scr= and ?bar= this request came with, to carry on: every link
@@ -1029,6 +1075,13 @@ static void appendWeekStrip(String& out, const KindleConfig& skin, uint32_t now,
 // The chart itself lives in KindleChartBmp.h — Arduino-free, so the host
 // tests can render it and check the bytes. Only the serving is below.
 
+// The image's renderer and the unit it streams under, released together.
+struct KdBmp {
+    ChartBmpReader rd;
+    WebUnit        unit;
+    explicit KdBmp(WebUnit&& u) : unit(std::move(u)) {}
+};
+
 void handleKindleGraph(AsyncWebServerRequest* req) {
     const KindleConfig skin = config.kindle;
     // As wide as the reader's layout left the chart, when it says: the
@@ -1068,8 +1121,14 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     // ~3 KB a go against this device's free heap is not many aborted requests
     // before it stops serving anything at all. The response object owns the
     // std::function; destroying it — on completion OR on abort — releases this.
-    auto st = std::shared_ptr<ChartBmpReader>(new(std::nothrow) ChartBmpReader);
-    if (!st) { req->send(503, "text/plain", "out of memory"); return; }
+    //
+    // And a unit of the heap budget for as long as the image streams: the wall
+    // page asks for a line per place, all at once, ~4.5 KB each in flight.
+    WebUnit unit;
+    if (!unit.ok()) { sendBusyResponse(req); return; }
+    auto own = std::shared_ptr<KdBmp>(new(std::nothrow) KdBmp(std::move(unit)));
+    if (!own) { sendBusyResponse(req); return; }
+    ChartBmpReader* st = &own->rd;
 
     const uint32_t now = (uint32_t)time(nullptr);
     // The desk chart's two lines, as /kindle/data labels them; a line alone
@@ -1104,13 +1163,13 @@ void handleKindleGraph(AsyncWebServerRequest* req) {
     // skips the per-chunk framing on a slow link.
     AsyncWebServerResponse* resp = req->beginResponse(
         "image/bmp", st->total,
-        [st](uint8_t* buffer, size_t maxLen, size_t /*index*/) -> size_t {
-            return st->read(buffer, maxLen);
+        [own](uint8_t* buffer, size_t maxLen, size_t /*index*/) -> size_t {
+            return own->rd.read(buffer, maxLen);
         });
 
     // beginResponse allocates, and this device runs close enough to its heap
     // limit that "it returned null" is a real branch rather than a formality.
-    if (!resp) { req->send(503, "text/plain", "out of memory"); return; }
+    if (!resp) { sendBusyResponse(req); return; }
     resp->addHeader("Cache-Control", "no-cache");
     req->send(resp);
 }
@@ -1735,7 +1794,7 @@ static void appendValue(String& p, const KdResolved& r, const KindleSlot& sl,
 static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
                        const char* valueClass, bool caption = true,
                        const char* capUnit = "", bool wall = false,
-                       const char* lineZone = nullptr) {
+                       const char* lineZone = nullptr, int lineW = 0, int lineH = 0) {
     const bool capArrow = wall && r.arrow && *r.arrow;
     const bool inv = sl.flags & KSLOTF_INV;
     if (inv) p += F("<div class=\"inv\">");
@@ -1753,10 +1812,16 @@ static void appendCell(String& p, const KdResolved& r, const KindleSlot& sl,
     p += F("<div class=\"cv\">");
     // The place's own 24 h line behind its value (KSLOTF_LINE, wall grid).
     if (lineZone && (sl.flags & KSLOTF_LINE)) {
-        p += F("<img class=\"cl\" src=\"/kindle/graph.bmp?line=1&amp;w=200&amp;h=64&amp;z=");
+        // At the cell's own shape, as the panel asks for it (update_dash.sh
+        // draw_line): an image of another shape is stretched into the cell.
+        p += F("<img class=\"cl\" src=\"/kindle/graph.bmp?line=1&amp;w=");
+        p += lineW > 0 ? lineW : 200;
+        p += F("&amp;h=");
+        p += lineH > 0 ? lineH : 64;
+        p += F("&amp;z=");
         p += lineZone;
         if (inv) p += F("&amp;inv=1");
-        p += F("\" alt=\"\">");
+        p += F("\" alt=\"\" onerror=\"kdImgRetry(this)\">");
     }
     appendValue(p, r, sl, valueClass, !capArrow);
     p += F("</div>");
@@ -1777,7 +1842,8 @@ static int appendGridRow(String& p, const KdRender& rd, const uint8_t* used, int
         p += F("%\">");
         appendCell(p, rd.res[used[at]], zones.z[used[at]], "gv", true,
                    rd.capUnit[used[at] - KZ_G1], rd.flow.wall,
-                   rd.flow.wall ? kdZoneKey(used[at]) : nullptr);
+                   rd.flow.wall ? kdZoneKey(used[at]) : nullptr,
+                   rd.flow.colLW / cols - 14, rd.flow.gridValSz);
         p += F("</td>");
     }
     p += F("</tr></table>");
@@ -2375,20 +2441,21 @@ static void handleKindleData(AsyncWebServerRequest* req) {
     // from the GRID_ROWS, PAGE_MODE and CH_* keys above and below, which keep
     // their old meaning for it.
     {
-        // STATIC, not on the stack: the landscape page's keys took the table
-        // to ninety entries, 720 bytes, in a handler that already holds three
-        // 24-hour trend series there. The async server runs one handler at a
-        // time on its own task, so one table is all that is ever in use.
-        static KdFlowKV kv[KDF_PANEL_KEYS];
-        const int nkv = kdFlowPanelKeys(rd.flow, resW, kv);
-        for (int i = 0; i < nkv; i++) {
-            int v = kv[i].value;
-            // The width /kindle/graph.bmp?w= will actually serve, which the
-            // panel then requires the image to be — clampW's, not the flow's.
-            if (!strcmp(kv[i].key, "GR_W"))
-                v = ChartBmp::clampW((uint16_t)v, skin.fbinkResW);
-            s->printf("LY_%s=%d\n", kv[i].key, v);
-        }
+        // PRINTED AS THEY ARE WORKED OUT, with no table of them: the table
+        // was 784 bytes of RAM held for good, for one loop over it.
+        struct Out { Print* s; uint16_t resW; };
+        Out o = {s, skin.fbinkResW};
+        kdFlowPanelKeys(rd.flow, resW, [](void* c, const char* key, int v) {
+            const Out& o = *(const Out*)c;
+            // The size /kindle/graph.bmp?w=&h= will actually serve, which the
+            // panel then requires the image to be: clampW's and clampH's, not
+            // the flow's. A height of 0 is "no chart", and stays 0.
+            if (!strcmp(key, "GR_W"))
+                v = ChartBmp::clampW((uint16_t)v, o.resW);
+            else if (!strcmp(key, "GR_H") && v > 0)
+                v = ChartBmp::clampH((uint16_t)v, o.resW);
+            o.s->printf("LY_%s=%d\n", key, v);
+        }, &o);
         char rows[16];
         kdFlowRowsText(rd.flow, rows, sizeof(rows));
         kdShellVar(s, "LY_GRID_ROWS", rows);
@@ -2733,7 +2800,7 @@ static void appendHeroLine(String& p, const KdFlow& f, bool inv) {
     p += F("&amp;h=");
     p += H;
     if (inv) p += F("&amp;inv=1");
-    p += F("\" width=\"100%\" height=\"100%\" alt=\"\"></div>");
+    p += F("\" width=\"100%\" height=\"100%\" alt=\"\" onerror=\"kdImgRetry(this)\"></div>");
 }
 
 /// White on black (KSLOTF_INV): the black plate, and a box the blocks drawn
@@ -2960,6 +3027,12 @@ static void kdRotCss(String& p, uint8_t rot) {
 }
 
 static void handleKindle(AsyncWebServerRequest* req) {
+    // A unit of the heap budget first, before anything is built, held until
+    // the page's last byte is out (KdPageResponse). No unit: a page that asks
+    // again, and the reader keeps what it shows meanwhile.
+    WebUnit unit;
+    if (!unit.ok()) { kdSendBusyPage(req); return; }
+
     // THE LANGUAGE, FIRST, BEFORE ANYTHING IS WORDED. kdT() and the weekday and
     // month tables read one ambient value rather than taking a parameter each —
     // see DashboardStrings.h for why — and this is where it is set. Every page
@@ -2974,11 +3047,9 @@ static void handleKindle(AsyncWebServerRequest* req) {
     // The pressure series cost more: a full twenty-four-hour walk of the trend
     // ring, computed and then dropped.
     //
-    // The two temperatures stay because the refresh cadence below is derived
-    // from whichever of them is newer, and the two temperature series stay
-    // because the chart draws them.
-    const Latest outT = latestOf(outdoorSensorId(), "temperature");
-    const Latest inT  = latestOf(indoorSensorId(),  "temperature");
+    // The two temperature series stay because the chart draws them. The
+    // refresh cadence follows the newest of the places themselves (below),
+    // whatever sensors they were given.
 
     const uint32_t now = (uint32_t)time(nullptr);
 
@@ -3017,7 +3088,7 @@ static void handleKindle(AsyncWebServerRequest* req) {
     rd.chart = pick;
 
     String p;
-    p.reserve(7000);
+    if (!p.reserve(7000)) { kdSendBusyPage(req); return; }
     char buf[16];
 
     p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
@@ -3039,12 +3110,22 @@ static void handleKindle(AsyncWebServerRequest* req) {
     if (skin.clockPinRefresh != 0xFF) cad.clockPinRefresh = (skin.clockPinRefresh != 0);
     cad.clamp();
 
-    p += kdRefreshDelaySec(outT.ts > inT.ts ? outT.ts : inT.ts, now,
+    uint32_t newest = 0;
+    for (int i = 0; i < KZ_COUNT; i++)
+        if (rd.res[i].ok && rd.res[i].ts > newest) newest = rd.res[i].ts;
+    p += kdRefreshDelaySec(newest, now,
                            now > KINDLE_MIN_REAL_TS, cad);
     p += F("\"><title>");
     p += kdT("Weather", "Времето");
     p += F("</title>");
     kdAutoScript(p, req, skin);
+    // A line image the collector answered busy (503, the heap budget) is asked
+    // for again a few seconds later, three times, and then left out: a broken
+    // image icon on the page is worse than a value without its line.
+    p += F("<script>function kdImgRetry(i){var n=+(i.getAttribute('data-r')||0);"
+           "if(n>2){i.style.visibility='hidden';return}i.setAttribute('data-r',n+1);"
+           "setTimeout(function(){i.src=i.src.replace(/&r=\\d+$/,'')+'&r='+(n+1)},"
+           "2000+n*1500)}</script>");
     p += F("<style>");
 
     // The stylesheet: every number in it is a 600-px-layout figure passed
@@ -3524,7 +3605,11 @@ static void handleKindle(AsyncWebServerRequest* req) {
     if (rot != KROT_0) p += F("</div>");
     p += F("</body></html>");
 
-    AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
+    // A String that ran out of heap stops growing and says nothing: a page
+    // without its end is a page cut short, and a busy page is better.
+    if (!p.endsWith("</html>")) { kdSendBusyPage(req); return; }
+    KdPageResponse* res = new (std::nothrow) KdPageResponse(std::move(p), std::move(unit));
+    if (!res) { kdSendBusyPage(req); return; }
     // The meta tag drives the refresh, so nothing may be served from cache: an
     // e-ink browser holding a stale page is indistinguishable from a dead
     // sensor, and there is no spinner to give the game away.
@@ -3653,9 +3738,7 @@ static void handleKindleProbe(AsyncWebServerRequest* req) {
 
     p += F("<p><a href=\"/kindle\">Dashboard</a></p></body></html>");
 
-    AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
-    res->addHeader("Cache-Control", "no-store");
-    req->send(res);
+    kdSendHtml(req, std::move(p));
 }
 
 // ---------------------------------------------------------------------------
@@ -3691,7 +3774,7 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
     p.reserve(500);
     p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
            "<meta name=\"viewport\" content=\"width=");
-    p += PAGE_W;
+    p += kdPageViewW(req);
     p += F("\"><meta http-equiv=\"refresh\" content=\"1;url=/kindle");
     if (step < FRAMES) { p += F("/clear?s="); p += (step + 1); p += kdRotArg(req, '&'); }
     else p += kdRotArg(req, '?');
@@ -3700,9 +3783,7 @@ static void handleKindleClear(AsyncWebServerRequest* req) {
     p += black ? F("#000") : F("#fff");
     p += F("}</style></head><body></body></html>");
 
-    AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
-    res->addHeader("Cache-Control", "no-store");
-    req->send(res);
+    kdSendHtml(req, std::move(p));
 }
 
 #ifdef MODULE_FORECAST_ENABLED
@@ -3739,17 +3820,14 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
         if (step > POLL_MAX) step = POLL_MAX;
         const bool busy = forecastModule.refreshPending();
         if (text) {
-            AsyncWebServerResponse* res = req->beginResponse(
-                200, "text/plain", busy ? "pending" : "done");
-            res->addHeader("Cache-Control", "no-store");
-            req->send(res);
+            kdSendText(req, busy ? "pending" : "done");
             return;
         }
         String p;
         p.reserve(420);
         p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
                "<meta name=\"viewport\" content=\"width=");
-        p += PAGE_W;
+        p += kdPageViewW(req);
         p += F("\"><meta http-equiv=\"refresh\" content=\"");
         if (busy && step < POLL_MAX) {
             p += POLL_S;
@@ -3764,9 +3842,7 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
                "font:24px sans-serif;text-align:center}</style></head><body><p>");
         p += kdT("Updating the forecast&hellip;", "Обновявам прогнозата&hellip;");
         p += F("</p></body></html>");
-        AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
-        res->addHeader("Cache-Control", "no-store");
-        req->send(res);
+        kdSendHtml(req, std::move(p));
         return;
     }
 
@@ -3779,9 +3855,7 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
         else if (r == ForecastModule::REFRESH_WAIT)    snprintf(line, sizeof(line), "wait %lu", (unsigned long)waitS);
         else if (r == ForecastModule::REFRESH_OFFLINE) strcpy(line, "offline");
         else                                           strcpy(line, "off");
-        AsyncWebServerResponse* res = req->beginResponse(200, "text/plain", line);
-        res->addHeader("Cache-Control", "no-store");
-        req->send(res);
+        kdSendText(req, line);
         return;
     }
 
@@ -3789,7 +3863,7 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
     p.reserve(560);
     p += F("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
            "<meta name=\"viewport\" content=\"width=");
-    p += PAGE_W;
+    p += kdPageViewW(req);
     p += F("\"><meta http-equiv=\"refresh\" content=\"");
     if (r == ForecastModule::REFRESH_QUEUED) {
         p += POLL_S;
@@ -3817,9 +3891,7 @@ static void handleKindleForecast(AsyncWebServerRequest* req) {
     }
     p += F("</p></body></html>");
 
-    AsyncWebServerResponse* res = req->beginResponse(200, "text/html", p);
-    res->addHeader("Cache-Control", "no-store");
-    req->send(res);
+    kdSendHtml(req, std::move(p));
 }
 #endif
 

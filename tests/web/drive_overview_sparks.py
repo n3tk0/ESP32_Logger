@@ -89,6 +89,8 @@ with sync_playwright() as p:
         });
         return out;
     }""")
+    swept = pg.evaluate("""() => document.querySelectorAll(
+        'svg[data-drawn-for] clipPath rect').length""")
     print("  sparks requests:", sparks)
     print("  drawn:", drawn)
 
@@ -104,6 +106,7 @@ with sync_playwright() as p:
           "every series the device answered is drawn")
     check(drawn.get("livingroom::pressure") is True,
           "a series left out of the answer is drawn from /api/data")
+    check(swept >= 1, "a sparkline drawn for the first time sweeps in (%d)" % swept)
     errs = [(k, t) for k, t in console if k in ("error", "pageerror")]
     check(not errs, "no page errors (%s)" % errs[:3])
     b.close()

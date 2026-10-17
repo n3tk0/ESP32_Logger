@@ -572,6 +572,27 @@
   var _ovSparkCache = {};
   var OV_SPARK_REUSE_MS = 60000;
 
+  // The series already drawn in on this page, and a name for each clip.
+  var _ovSparkShown = {}, _ovSparkClipN = 0;
+  var OV_SPARK_SWEEP_MS = 700;
+  function _ovSweep(rect) {
+    if (!rect) return;
+    var raf = window.requestAnimationFrame;
+    if (!raf) { rect.setAttribute("width", "100"); return; }
+    var t0 = null;
+    raf(function step(t) {
+      if (t0 === null) t0 = t;
+      var k = Math.max(0, Math.min(1, (t - t0) / OV_SPARK_SWEEP_MS));
+      k = 1 - Math.pow(1 - k, 3);                      // ease out
+      rect.setAttribute("width", (100 * k).toFixed(2));
+      if (k < 1) raf(step);
+    });
+  }
+  function _ovReducedMotion() {
+    try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+    catch (e) { return false; }
+  }
+
   function _ovFetchSpark(svg, sensorId, metric) {
     var key = sensorId + "::" + metric;
     var hit = _ovSparkCache[key];
@@ -608,9 +629,21 @@
           area += " L " + x + "," + y;
         }
         area += " L 100,36 Z";
+        // DRAWN IN, oldest to newest, the first time a series is shown on
+        // this page: the cards' answers come in at their own pace, and a line
+        // that sweeps in reads as the page drawing it, not as a page that
+        // stalls. A deck drawn again (the sensor list arriving) shows it
+        // whole, and so does a browser asked for less motion.
+        var sweep = !_ovSparkShown[key] && !_ovReducedMotion();
+        _ovSparkShown[key] = true;
+        var clip = sweep ? "ovsc" + (++_ovSparkClipN) : "";
         svg.innerHTML =
+          (sweep ? '<defs><clipPath id="' + clip + '"><rect x="0" y="0" width="0" height="36"></rect>' +
+                   '</clipPath></defs><g clip-path="url(#' + clip + ')">' : "") +
           '<path d="' + area + '" fill="currentColor" opacity="0.13"></path>' +
-          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>';
+          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>' +
+          (sweep ? "</g>" : "");
+        if (sweep) _ovSweep(svg.querySelector("clipPath rect"));
         var card = svg.closest ? svg.closest(".ov-metric-card") : null;
         var scale = card && card.querySelector(".ov-spark-scale");
         if (scale) {

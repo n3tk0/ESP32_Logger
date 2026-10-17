@@ -1153,8 +1153,12 @@ static const int KDF_PANEL_KEYS = KDF_PANEL_BASE + 48;
 /// One key into kdFlowPanelKeys()'s list. Out of line on purpose: the list
 /// is over a hundred keys, and the bounds check and the scaling written out at
 /// each of them cost the all-features C3 build kilobytes it does not have.
-struct KdfPut { KdFlowKV* out; int n; unsigned resW; };
+/// With `sink` set, each key goes straight to it instead of into `out`: the
+/// collector prints them as they come, with no table of them held anywhere.
+typedef void (*KdfSink)(void* ctx, const char* key, int value);
+struct KdfPut { KdFlowKV* out; int n; unsigned resW; KdfSink sink; void* ctx; };
 static inline __attribute__((noinline)) void kdfPut(KdfPut& w, const char* k, int v) {
+    if (w.sink) { w.sink(w.ctx, k, v); w.n++; return; }
     // Bounded: a key added below without KDF_PANEL_KEYS growing with it is
     // dropped (and fails test_panel_keys) rather than written past `out`.
     if (w.n < KDF_PANEL_KEYS) { w.out[w.n].key = k; w.out[w.n].value = v; }
@@ -1187,8 +1191,8 @@ static inline __attribute__((noinline)) void kdfPutTable(KdfPut& w, const KdFlow
     }
 }
 
-static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out) {
-    KdfPut w = {out, 0, resW};
+static inline int kdFlowPanelKeysW(const KdFlow& f, KdfPut& w) {
+    const unsigned resW = w.resW;
     #define KDF_K(k, v)  kdfPutK(w, (k), (v))
     #define KDF_R(k, v)  kdfPut(w, (k), (v))
     static const KdfKey kBase[] = {
@@ -1335,6 +1339,17 @@ static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out)
     #undef KDF_R
     #undef KDF_T
     return w.n > KDF_PANEL_KEYS ? -1 : w.n;  // -1: the table outgrew its count
+}
+
+static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdFlowKV* out) {
+    KdfPut w = {out, 0, resW, nullptr, nullptr};
+    return kdFlowPanelKeysW(f, w);
+}
+
+/// The same keys, in the same order, each handed to `sink` as it is worked out.
+static inline int kdFlowPanelKeys(const KdFlow& f, unsigned resW, KdfSink sink, void* ctx) {
+    KdfPut w = {nullptr, 0, resW, sink, ctx};
+    return kdFlowPanelKeysW(f, w);
 }
 
 /// The grid's rows, as the panel reads them: "2", "1 1", "3 2".
