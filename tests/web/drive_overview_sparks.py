@@ -52,8 +52,17 @@ with sync_playwright() as p:
     exe = os.environ.get("CHROMIUM_PATH")
     b = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
     pg = b.new_page(viewport={"width": 1400, "height": 1000})
+    pg.emulate_media(reduced_motion="no-preference")   # the sweep is skipped otherwise
     pg.on("console", lambda m: console.append((m.type, m.text)))
     pg.on("pageerror", lambda e: console.append(("pageerror", str(e))))
+    # Every sweep clip the page ever inserts, counted as it goes in: the deck
+    # can be drawn again after the sweep, and then shows the line whole.
+    pg.add_init_script("""window.__sweeps = 0;
+        new MutationObserver(function (ms) { ms.forEach(function (m) {
+            m.addedNodes.forEach(function (n) {
+                if (n.querySelectorAll) window.__sweeps += n.querySelectorAll('clipPath').length +
+                    (n.nodeName === 'clipPath' ? 1 : 0);
+            }); }); }).observe(document, { childList: true, subtree: true });""")
 
     pg.route("**/api/latest*", lambda r: r.fulfill(
         status=200, content_type="application/json", body=json.dumps(LATEST)))
@@ -89,8 +98,7 @@ with sync_playwright() as p:
         });
         return out;
     }""")
-    swept = pg.evaluate("""() => document.querySelectorAll(
-        'svg[data-drawn-for] clipPath rect').length""")
+    swept = pg.evaluate("() => window.__sweeps")
     print("  sparks requests:", sparks)
     print("  drawn:", drawn)
 
