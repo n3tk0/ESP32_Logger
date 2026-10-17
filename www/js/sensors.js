@@ -60,10 +60,30 @@ var sensorChart = null;
 // A value's height in the 0..36 spark: the line keeps to the upper 22 units, so
 // the bottom of the filled area stays clear for the age chip laid over it. A
 // flat hour is a line across the middle, not one along the bottom.
+// min/range are sparkRange()'s span (core.js): a reading past it sits at the edge.
 function _sSparkY(v, min, range) {
   if (!(range > 1e-9)) return "12.5";
-  return (22 - ((v - min) / range) * 19).toFixed(1);
+  return (22 - sparkK(v, min, range) * 19).toFixed(1);
 }
+
+// Each group's cards in even rows (3+3, not 4+2) once they need more than one;
+// a group that fits on one row keeps the page's column width.
+var SENSORS_CARD_MIN_W = 220;
+function _sensorsBalance() {
+  [].forEach.call(document.querySelectorAll("#sensors-grid .s-group-cards"), function (g) {
+    var n = [].filter.call(g.children, function (c) { return c.style.display !== "none"; }).length;
+    var gap = parseFloat(getComputedStyle(g).columnGap) || 0;
+    var fit = Math.max(1, Math.floor((g.clientWidth + gap) / (SENSORS_CARD_MIN_W + gap)));
+    if (n <= fit) { g.style.gridTemplateColumns = ""; return; }
+    var per = Math.ceil(n / Math.ceil(n / fit));
+    g.style.gridTemplateColumns = "repeat(" + per + ",minmax(0,1fr))";
+  });
+}
+var _sBalanceT = null;
+window.addEventListener("resize", function () {
+  clearTimeout(_sBalanceT);
+  _sBalanceT = setTimeout(_sensorsBalance, 100);
+});
 
 // The other metrics' sparks, by "sensor::metric": an hour wide, so an
 // auto-refresh round draws them from here and asks again once a minute at most.
@@ -152,6 +172,7 @@ function sensorsLoad(opts) {
             var sparkSvg = "";
             var spark = (mIdx === 0) ? (s.spark || []) : [];
             
+            var scaleText = "";
             if (spark.length >= 2) {
               var min = Infinity, max = -Infinity;
               for (var i = 0; i < spark.length; i++) {
@@ -159,7 +180,10 @@ function sensorsLoad(opts) {
                 if (n < min) min = n;
                 if (n > max) max = n;
               }
-              var range = max - min;
+              scaleText = _sScaleText(m, min, max);
+              var span = sparkRange(spark.map(Number));
+              min = span.lo;
+              var range = span.hi - span.lo;
               var stepX = 100 / (spark.length - 1);
               var pts = "";
               for (var j = 0; j < spark.length; j++) {
@@ -233,6 +257,8 @@ function sensorsLoad(opts) {
                 '<div class="s-val">' +
                   '<span class="n">' + (val ? esc(val) : "—") + '</span>' +
                   (unit ? '<span class="u">' + esc(unit) + '</span>' : '') +
+                  '<span class="s-scale" title="' + esc(spT("scaleHint", "Lowest and highest reading in the graph")) + '">' +
+                    esc(scaleText) + '</span>' +
                 '</div>' +
                 sparkSvg +
                 '<div class="s-foot">' +
@@ -252,14 +278,17 @@ function sensorsLoad(opts) {
           var rawTransport = s.transport || "";
           var transport = (rawTransport && rawTransport !== s.id && rawTransport !== s.type)
                           ? rawTransport : "";
-          var sub = [s.name && s.name !== s.id ? s.id : "", s.type && s.type !== s.id ? s.type : "", transport]
+          // The same heading as the Overview's groups: the id, then what it is
+          // ("outside · Remote node"); the type repeats the name, so it is left out.
+          var gName = s.id || s.name;
+          var sub = [s.name && String(s.name).toLowerCase() !== String(gName).toLowerCase() ? s.name : "", transport]
                     .filter(function (x) { return x; }).join(" · ");
           var detail = (s.status === "err" || s.status === "error") && s.status_detail
                        ? '<span class="badge err s-group-detail">' + esc(s.status_detail) + '</span>' : "";
           html.push(
             '<section class="s-group" data-sid="' + esc(s.id || '') + '">' +
               '<div class="s-group-head">' +
-                '<span class="s-group-name">' + esc(s.name || s.id) + '</span>' +
+                '<span class="s-group-name">' + esc(gName) + '</span>' +
                 (sub ? '<span class="s-group-id">' + esc(sub) + '</span>' : '') +
                 detail +
                 '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
@@ -269,6 +298,7 @@ function sensorsLoad(opts) {
           );
         });
         grid.innerHTML = html.join("");
+        _sensorsBalance();
         [].forEach.call(grid.querySelectorAll("svg.s-spark[data-pts]"), function (svg) {
           _sSparkDraw(svg, svg.getAttribute("data-pts"));
         });
@@ -280,8 +310,15 @@ function sensorsLoad(opts) {
           var hit = _sLazyPts[svg.getAttribute("data-sensor") + "::" + svg.getAttribute("data-metric")];
           if (!hit || Date.now() - hit.at >= SENSORS_LAZY_MAX_AGE_MS) return true;
           if (hit.pts) _sSparkDraw(svg, hit.pts);
+          var scaleEl = svg.parentNode && svg.parentNode.querySelector(".s-scale");
+          if (scaleEl && hit.scale) scaleEl.textContent = hit.scale;
           return false;
         });
+        // "↓low ↑high" beside a card's value, in the metric's own decimals.
+        function _sScaleText(m, lo, hi) {
+          var a = mFmt(m, lo), b = mFmt(m, hi);
+          return a === b ? "" : "↓" + a + "  ↑" + b;   // a flat hour has no range to give
+        }
         // The line with the faint filled area under it, as on the Overview.
         function _sSparkDraw(svg, pts) {
           var area = "M 0,36 L " + pts.split(" ").join(" L ") + " L 100,36 Z";
@@ -312,7 +349,12 @@ function sensorsLoad(opts) {
                 if (!isNaN(val)) { if (val < min) min = val; if (val > max) max = val; ys.push(val); }
               });
               if (ys.length < 2) return;
-              var range = max - min;
+              var scaleEl = svg.parentNode && svg.parentNode.querySelector(".s-scale");
+              if (scaleEl) scaleEl.textContent = _sScaleText(mId, min, max);
+              _sLazyPts[cacheKey].scale = _sScaleText(mId, min, max);
+              var span = sparkRange(ys);
+              min = span.lo;
+              var range = span.hi - span.lo;
               var stepX = 100 / (ys.length - 1), pts = "";
               for (var j = 0; j < ys.length; j++) {
                 var x = (j * stepX).toFixed(1);
@@ -380,6 +422,7 @@ function sensorsFilter() {
   document.querySelectorAll("#sensors-grid .s-group").forEach(function (g) {
     g.style.display = g.querySelector('.sensor:not([style*="none"])') ? "" : "none";
   });
+  _sensorsBalance();
 }
 
 // ── Sensor chart history from the data log ───────────────────────────────

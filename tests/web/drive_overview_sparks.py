@@ -104,6 +104,11 @@ with sync_playwright() as p:
 
     check(len(sparks) >= 1, "the sparklines were asked for with /api/sparks")
     check(len(sparks) == 1, "in one request (%d made)" % len(sparks))
+    ragged = pg.evaluate("""() => { const by = {};
+        [...document.querySelectorAll('#overview-deck > .deck-slot:not([hidden])')].forEach(s => {
+            (by[s.style.top] = by[s.style.top] || []).push(s.offsetHeight); });
+        return Object.values(by).filter(h => Math.max(...h) - Math.min(...h) > 1); }""")
+    check(not ragged, "Overview cards in a row are one height (%s)" % ragged[:2])
     asked_data = sorted(parse_qs(urlparse(u).query).get("metric", [""])[0] for u in datas)
     check(asked_data == ["pressure"] * sum(1 for k in drawn if k.endswith("::pressure")),
           "/api/data only for the series left out (%s)" % asked_data)
@@ -158,7 +163,10 @@ with sync_playwright() as p:
         # The mock's sensors with an hour's spark on each: one moving, one flat.
         d = route.fetch().json()
         for i, sn in enumerate(d.get("sensors") or []):
-            sn["spark"] = [20 + (k % 7) * 0.4 for k in range(24)] if i == 0 else [1012] * 24
+            # The first: a moving hour with one reading far below the rest.
+            sn["spark"] = [5 if k == 12 else 20 + (k % 7) * 0.4 for k in range(24)] if i == 0 else [1012] * 24
+            if sn.get("id") == "livingroom":   # six cards: two even rows, not 4+2
+                sn["metrics"] = list(sn.get("metrics") or []) + ["gas_resistance", "tvoc"]
         route.fulfill(status=200, content_type="application/json", body=json.dumps(d))
 
     def s_series(route):
@@ -180,6 +188,21 @@ with sync_playwright() as p:
     check(geo and all(g["dl"] <= 1.5 and g["dr"] <= 1.5 and g["db"] <= 1.5 for g in geo),
           "Sensors sparks run edge to edge and down to the card's bottom (%s)" % geo[:2])
     check(geo and all(g["footIn"] for g in geo), "the age sits inside the graph's area")
+    first = pg3.evaluate("""() => { const p = document.querySelector('#sensors-grid svg.s-spark polyline');
+        const ys = p.getAttribute('points').split(' ').map(q => +q.split(',')[1]);
+        const card = p.closest('.sensor');
+        return { ys: ys, scale: card.querySelector('.s-scale').textContent }; }""")
+    body = sorted(first["ys"])[1:]          # all but the far reading
+    check(max(body) - min(body) >= 10,
+          "one far reading does not press the rest flat (%.1f of 19)" % (max(body) - min(body)))
+    check(first["scale"].startswith("\u2193") and "\u2191" in first["scale"] and "5" in first["scale"],
+          "the card gives the graph's true low and high (%r)" % first["scale"])
+    rows = pg3.evaluate("""() => { const g = document.querySelector('#sensors-grid .s-group[data-sid="livingroom"] .s-group-cards');
+        const by = {}; [...g.children].forEach(c => { by[c.offsetTop] = (by[c.offsetTop] || 0) + 1; });
+        return Object.values(by); }""")
+    check(len(rows) >= 2 and max(rows) - min(rows) <= 1, "six cards sit in even rows (%s)" % rows)
+    head = pg3.evaluate("""() => document.querySelector('#sensors-grid .s-group[data-sid="livingroom"] .s-group-head').innerText""")
+    check(head.startswith("livingroom") and "bme688" not in head, "the heading is the id, then what it is (%r)" % head)
     data_first = len(s_data)
     pg3.wait_for_timeout(11500)
     rounds = [t for t in s_seen]

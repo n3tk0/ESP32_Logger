@@ -549,6 +549,8 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .sensor .s-val { display:flex; align-items:baseline; gap:5px; font-family:var(--mono); }
 .sensor .s-val .n { font-size:24px; font-weight:600; letter-spacing:-.02em; }
 .sensor .s-val .u { color:var(--text-3); font-size:12px; font-family:var(--sans); }
+/* The graph's low / high, beside the value as on the Overview. */
+.sensor .s-val .s-scale { margin-left:auto; font-size:11px; color:var(--text-3); white-space:pre; }
 /* The graph runs from edge to edge and down to the card's bottom, as on the
    Overview; the reading's age sits inside its filled area on a chip of the
    card's own colour, so it reads over the line and the fill alike. */
@@ -1204,7 +1206,9 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
   border-bottom:1px solid var(--border);
 }
 .s-group-name { font-weight:600; font-size:14px; }
-.s-group-id { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.s-group-id { font-size:12px; color:var(--text-3); }
+/* One heading on both pages: "outside · Remote node". */
+.s-group-id::before, .deck-group-sub::before { content:"· "; }
 .s-group-head > .badge:last-child { margin-left:auto; }
 .s-group-detail { font-size:10px; }
 

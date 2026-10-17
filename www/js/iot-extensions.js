@@ -404,7 +404,10 @@
       // "Group by sensor": one heading per sensor over its metric cards.
       groupBy:   function (cardId) {
         var src = _ovCardSensor[cardId];
-        return src ? { key: src.id, label: src.id, sub: src.name, icon: "cpu" } : null;
+        // "outside · Remote node", as the Sensors page heads its groups.
+        if (!src) return null;
+        var same = String(src.name || "").toLowerCase() === String(src.id).toLowerCase();
+        return { key: src.id, label: src.id, sub: same ? "" : src.name, icon: "cpu" };
       },
       groupLabel: "iotExt.groupBySensor",
       toolbarExtra: _ovAutoRefreshControl,
@@ -663,6 +666,8 @@
         if (ys.length < 2) return;
         var meta = ovMetricMeta(metric);
         var lo = min, hi = max;
+        var span = sparkRange(ys);
+        min = span.lo; max = span.hi;
         // Counts and concentrations start at zero, so a small wobble is not
         // drawn as a cliff (PM2.5 1.5 -> 1.2 filled the whole card).
         if (meta.z && min > 0) min = 0;
@@ -670,7 +675,7 @@
         var stepX = 100 / (ys.length - 1), line = "", area = "M 0,36";
         for (var j = 0; j < ys.length; j++) {
           var x = (j * stepX).toFixed(1);
-          var y = (34 - ((ys[j] - min) / range) * 30).toFixed(1);
+          var y = (34 - sparkK(ys[j], min, range) * 30).toFixed(1);
           line += (j ? " " : "") + x + "," + y;
           area += " L " + x + "," + y;
         }

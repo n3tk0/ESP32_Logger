@@ -143,7 +143,9 @@
       rows.push(currentRow);
     }
 
-    // Third pass: position cards with equalized row heights
+    // Third pass: position cards with equalized row heights. Every card in a
+    // row takes the tallest one's height, a fixed-height card too (its chip
+    // sets the least it gets), so a row never ends in a ragged edge.
     var cumTop = 0;
     rows.forEach(function (row) {
       var maxH = 0;
@@ -151,7 +153,7 @@
       row.forEach(function (p) {
         p.slot.style.left   = (p.col * (colW + GAP)) + "px";
         p.slot.style.top    = cumTop + "px";
-        p.slot.style.height = (p.fixed ? p.height : maxH) + "px";
+        p.slot.style.height = maxH + "px";
       });
       cumTop += maxH + GAP;
     });

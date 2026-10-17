@@ -127,6 +127,20 @@ function autoRefreshSeconds() {
   return v > 0 ? Math.max(AUTO_REFRESH_MIN_S, v) : 0;
 }
 
+// The span a sparkline is drawn over: the 5th to the 95th percentile of its
+// values, so one reading far from the rest (a dip while IAQ calibrates after
+// a restart) does not press the whole hour flat against the top. Points past
+// it are drawn at the edge. The ↓/↑ labels still give the true low and high.
+function sparkRange(ys) {
+  var s = ys.slice().sort(function (a, b) { return a - b; }), n = s.length;
+  if (n < 10) return { lo: s[0], hi: s[n - 1] };
+  return { lo: s[Math.floor(0.05 * (n - 1))], hi: s[Math.ceil(0.95 * (n - 1))] };
+}
+// v's place in [lo, lo + range] as 0..1, held to the ends.
+function sparkK(v, lo, range) {
+  return range > 1e-9 ? Math.max(0, Math.min(1, (v - lo) / range)) : 0.5;
+}
+
 function sparkDraw(svg, key, inner) {
   if (!svg) return;
   if (!_sparkBegun[key]) _sparkBegun[key] = Date.now();
