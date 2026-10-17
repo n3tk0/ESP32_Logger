@@ -57,11 +57,44 @@ function pcfgSave(obj, cb) {
 // ============================================================================
 var sensorChart = null;
 
-function sensorsLoad() {
+// A value's height in the 0..36 spark: the line keeps to the upper 22 units, so
+// the bottom of the filled area stays clear for the age chip laid over it. A
+// flat hour is a line across the middle, not one along the bottom.
+function _sSparkY(v, min, range) {
+  if (!(range > 1e-9)) return "12.5";
+  return (22 - ((v - min) / range) * 19).toFixed(1);
+}
+
+// The other metrics' sparks, by "sensor::metric": an hour wide, so an
+// auto-refresh round draws them from here and asks again once a minute at most.
+var _sLazyPts = {};
+var SENSORS_LAZY_MAX_AGE_MS = 60000;
+
+// Auto-refresh, on the Overview's setting (autoRefreshSeconds in core.js): a
+// round starts once the last one is in, only while this page is shown and the
+// tab is visible, and redraws in place without the loading state.
+var _sAutoTimer = null;
+function _sensorsAutoArm() {
+  if (_sAutoTimer) { clearTimeout(_sAutoTimer); _sAutoTimer = null; }
+  var sec = autoRefreshSeconds();
+  if (!sec) return;
+  _sAutoTimer = setTimeout(function () {
+    _sAutoTimer = null;
+    if (typeof currentPage !== "undefined" && currentPage !== "sensors") return;
+    if (document.visibilityState === "hidden") { _sensorsAutoArm(); return; }
+    sensorsLoad({ quiet: true });
+  }, sec * 1000);
+}
+
+function sensorsLoad(opts) {
+  var quiet = !!(opts && opts.quiet);
   var grid = document.getElementById("sensors-grid");
   var msg = document.getElementById("sensors-msg");
-  if (msg) msg.textContent = window.I18n ? I18n.t("common.loading") : "Loading…";
-  if (grid) grid.innerHTML = "";
+  if (_sAutoTimer) { clearTimeout(_sAutoTimer); _sAutoTimer = null; }
+  if (!quiet) {
+    if (msg) msg.textContent = window.I18n ? I18n.t("common.loading") : "Loading…";
+    if (grid) grid.innerHTML = "";
+  }
 
   // Phase 5c-4 — short relative-time formatter for sensor freshness pills.
   // Falls through "5s" → "3m" → "2h" → "1d" so the staleness signal stays
@@ -72,9 +105,10 @@ function sensorsLoad() {
 
   // Force a fresh fetch here — this is the Sensors page main load, the
   // operator is explicitly looking at this data and expects it current.
-  getSensors({ maxAgeMs: 0 })
+  return getSensors({ maxAgeMs: 0 })
     .catch(function () { return null; })
     .then(function (d) {
+      if (quiet && !d) return;   // a missed round keeps what is shown
       if (!d || !d.sensors || d.sensors.length === 0) {
         if (msg)
           msg.textContent = spT(
@@ -126,12 +160,11 @@ function sensorsLoad() {
                 if (n > max) max = n;
               }
               var range = max - min;
-              if (range < 1e-9) range = 1;
               var stepX = 100 / (spark.length - 1);
               var pts = "";
               for (var j = 0; j < spark.length; j++) {
                 var x = (j * stepX).toFixed(1);
-                var y = (32 - ((+spark[j] - min) / range) * 28).toFixed(1);
+                var y = _sSparkY(+spark[j], min, range);
                 pts += (j ? " " : "") + x + "," + y;
               }
               // Drawn once the grid is in (sparkDraw below), to sweep in.
@@ -243,18 +276,24 @@ function sensorsLoad() {
         // Fetch missing sparklines for secondary metrics. Throttle to a small
         // concurrency — ESPAsyncWebServer has a tiny connection pool, so firing
         // one /api/data request per metric at once causes timeouts/contention.
-        var lazySparks = [].slice.call(grid.querySelectorAll(".s-spark-lazy"));
+        var lazySparks = [].slice.call(grid.querySelectorAll(".s-spark-lazy")).filter(function (svg) {
+          var hit = _sLazyPts[svg.getAttribute("data-sensor") + "::" + svg.getAttribute("data-metric")];
+          if (!hit || Date.now() - hit.at >= SENSORS_LAZY_MAX_AGE_MS) return true;
+          if (hit.pts) _sSparkDraw(svg, hit.pts);
+          return false;
+        });
         // The line with the faint filled area under it, as on the Overview.
         function _sSparkDraw(svg, pts) {
           var area = "M 0,36 L " + pts.split(" ").join(" L ") + " L 100,36 Z";
           sparkDraw(svg, "s:" + svg.getAttribute("data-sensor") + "::" + svg.getAttribute("data-metric"),
                     '<path d="' + area + '" fill="currentColor" opacity="0.13"></path>' +
-                    '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>');
+                    '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.75" vector-effect="non-scaling-stroke"></polyline>');
         }
         function _drawLazySpark(svg) {
           var sId = svg.getAttribute("data-sensor");
           var mId = svg.getAttribute("data-metric");
           if (!sId || !mId) return Promise.resolve();
+          var cacheKey = sId + "::" + mId;
           var now  = Math.floor(Date.now() / 1000);
           var from = now - 3600; // last 1 hour
           var url = "/api/data?sensor=" + encodeURIComponent(sId)
@@ -264,6 +303,7 @@ function sensorsLoad() {
           return fetchWithTimeout(url, {}, 5000)
             .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
             .then(function (res) {
+              _sLazyPts[cacheKey] = { at: Date.now(), pts: "" };
               if (!res || !res.data || res.data.length < 2) return;
               var min = Infinity, max = -Infinity, ys = [];
               res.data.forEach(function (pt) {
@@ -273,13 +313,13 @@ function sensorsLoad() {
               });
               if (ys.length < 2) return;
               var range = max - min;
-              if (range < 1e-9) range = 1;
               var stepX = 100 / (ys.length - 1), pts = "";
               for (var j = 0; j < ys.length; j++) {
                 var x = (j * stepX).toFixed(1);
-                var y = (32 - ((ys[j] - min) / range) * 28).toFixed(1);
+                var y = _sSparkY(ys[j], min, range);
                 pts += (j ? " " : "") + x + "," + y;
               }
+              _sLazyPts[cacheKey].pts = pts;
               _sSparkDraw(svg, pts);
             })
             .catch(function (err) { console.error("Failed to fetch sparkline data:", err); });
@@ -292,6 +332,8 @@ function sensorsLoad() {
           _drawLazySpark(lazySparks[qi++]).then(_nextSpark);
         }
         for (var w = 0; w < Math.min(MAX_PARALLEL, lazySparks.length); w++) _nextSpark();
+        // A redraw keeps the filter that was typed.
+        if ((document.getElementById("sensors-filter") || {}).value) sensorsFilter();
       }
 
       // Populate chart sensor selectors (primary + overlay)
@@ -301,18 +343,29 @@ function sensorsLoad() {
             return '<option value="' + esc(s.id) + '">' + esc(s.name) + "</option>";
           })
           .join("");
+      // Rebuilt only when the list changed (an open list stays open); the
+      // chart's choice stays.
       var sel = document.getElementById("sc-sensor");
-      if (sel) {
+      if (sel && sel.dataset.opts !== sensorOpts) {
+        var was = sel.value;
+        sel.dataset.opts = sensorOpts;
         sel.innerHTML = '<option value="">' + esc(spT("optSensor", "— select sensor —")) + '</option>' + sensorOpts;
+        sel.value = was;
+        if (sel.value !== was) sel.value = "";
       }
       var sel2 = document.getElementById("sc-sensor2");
-      if (sel2) {
+      if (sel2 && sel2.dataset.opts !== sensorOpts) {
+        var was2 = sel2.value;
+        sel2.dataset.opts = sensorOpts;
         sel2.innerHTML = '<option value="">' + esc(spT("optNone", "— none —")) + '</option>' + sensorOpts;
+        sel2.value = was2;
+        if (sel2.value !== was2) sel2.value = "";
       }
     })
     .catch(function (e) {
-      if (msg) msg.textContent = spT("failedLoadSensors", "Failed to load sensors: {e}", { e: e });
-    });
+      if (msg && !quiet) msg.textContent = spT("failedLoadSensors", "Failed to load sensors: {e}", { e: e });
+    })
+    .then(_sensorsAutoArm);
 }
 
 function sensorsFilter() {

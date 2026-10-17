@@ -427,15 +427,12 @@
   // heap. Off by default, as the page has always been. A round starts only
   // once the last one is in, and only while the Overview is the page shown
   // and the tab is visible.
-  var OV_AUTO_KEY = "esp32logger.overview.autoRefresh";
-  var OV_AUTO_MIN_S = 5;
+  // The same setting drives the Sensors page (sensors.js).
+  var OV_AUTO_KEY = AUTO_REFRESH_KEY;
+  var OV_AUTO_MIN_S = AUTO_REFRESH_MIN_S;
   var OV_AUTO_CHOICES = [0, 5, 10, 30, 60, 300];
   var _ovAutoTimer = null, _ovAutoBusy = false, _ovAutoSparkAt = 0;
-  function _ovAutoSeconds() {
-    var v = 0;
-    try { v = parseInt(localStorage.getItem(OV_AUTO_KEY), 10) || 0; } catch (e) {}
-    return v > 0 ? Math.max(OV_AUTO_MIN_S, v) : 0;
-  }
+  var _ovAutoSeconds = autoRefreshSeconds;
   function _ovAutoRefreshArm() {
     if (_ovAutoTimer) { clearTimeout(_ovAutoTimer); _ovAutoTimer = null; }
     var sec = _ovAutoSeconds();

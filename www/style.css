@@ -549,8 +549,20 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 .sensor .s-val { display:flex; align-items:baseline; gap:5px; font-family:var(--mono); }
 .sensor .s-val .n { font-size:24px; font-weight:600; letter-spacing:-.02em; }
 .sensor .s-val .u { color:var(--text-3); font-size:12px; font-family:var(--sans); }
-.sensor .s-spark { width:100%; height:36px; color:var(--accent); margin:0 -4px; opacity:.7; }
-.sensor .s-foot { display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-3); font-family:var(--mono); }
+/* The graph runs from edge to edge and down to the card's bottom, as on the
+   Overview; the reading's age sits inside its filled area on a chip of the
+   card's own colour, so it reads over the line and the fill alike. */
+.sensor { overflow:hidden; padding-bottom:0; }
+.sensor .s-spark { display:block; width:calc(100% + 28px); height:58px; color:var(--accent); margin:auto -14px 0; }
+.sensor .s-foot {
+  position:absolute; left:10px; bottom:7px; z-index:1;
+  display:flex; justify-content:space-between; align-items:center;
+  font-size:10.5px; color:var(--text-2); font-family:var(--mono);
+}
+.sensor .s-foot > span {
+  padding:1px 6px; border-radius:999px; line-height:1.5;
+  background:color-mix(in srgb, var(--panel) 82%, transparent);
+}
 
 /* FILE TABLE */
 .ftable { width:100%; border-collapse:collapse; font-size:12.5px; }
@@ -1080,6 +1092,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
   .badge { border:1px solid #ccc; padding:1pt 4pt; font-size:7pt; }
   .sensor { border:1px solid #ccc; padding:6pt; break-inside:avoid; }
   .s-spark { display:none; }
+  .sensor .s-foot { position:static; }
 
   @page { margin:15mm; }
   h1, h2 { page-break-after:avoid; }

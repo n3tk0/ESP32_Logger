@@ -142,6 +142,64 @@ with sync_playwright() as p:
     gaps = [round(b_ - a_, 1) for a_, b_ in zip(seen, seen[1:])]
     check(len(seen) >= 2, "the readings are read again on their own (%d)" % len(seen))
     check(all(g >= 4.8 for g in gaps), "never sooner than 5 s apart (%s)" % gaps)
+
+    # The Sensors page: the same setting, and its sparks across the card.
+    pg3 = b.new_page(viewport={"width": 1400, "height": 1000})
+    pg3.on("pageerror", lambda e: console.append(("pageerror", str(e))))
+    pg3.add_init_script("try{localStorage.setItem('esp32logger.overview.autoRefresh','5')}catch(e){}")
+    pg3.add_init_script("""window.__emptied = 0;
+        document.addEventListener('DOMContentLoaded', function () {
+            var g = document.getElementById('sensors-grid'); if (!g) return;
+            new MutationObserver(function () { if (!g.children.length) window.__emptied++; })
+                .observe(g, { childList: true }); });""")
+    s_seen, s_data = [], []
+
+    def s_sensors(route):
+        # The mock's sensors with an hour's spark on each: one moving, one flat.
+        d = route.fetch().json()
+        for i, sn in enumerate(d.get("sensors") or []):
+            sn["spark"] = [20 + (k % 7) * 0.4 for k in range(24)] if i == 0 else [1012] * 24
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(d))
+
+    def s_series(route):
+        s_data.append(time.time())
+        pts = [{"t": NOW - 3600 + k * 120, "v": 40 + (k % 5)} for k in range(30)]
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"ok": True, "data": pts}))
+    pg3.route("**/api/sensors*", s_sensors)
+    pg3.route("**/api/data*", s_series)
+    pg3.on("request", lambda r: s_seen.append(time.time()) if "/api/sensors" in r.url else None)
+    pg3.goto(BASE + "/#sensors", wait_until="networkidle")
+    pg3.wait_for_selector("#sensors-grid .sensor svg.s-spark polyline", timeout=15000)
+    geo = pg3.evaluate("""() => [...document.querySelectorAll('#sensors-grid .sensor')]
+        .filter(c => c.querySelector('svg.s-spark polyline')).map(c => {
+            const r = c.getBoundingClientRect(), sv = c.querySelector('svg.s-spark').getBoundingClientRect(),
+                  f = c.querySelector('.s-foot > span').getBoundingClientRect();
+            return { dl: sv.left - r.left, dr: r.right - sv.right, db: r.bottom - sv.bottom,
+                     footIn: f.top >= sv.top && f.bottom <= sv.bottom && f.left >= sv.left }; })""")
+    check(geo and all(g["dl"] <= 1.5 and g["dr"] <= 1.5 and g["db"] <= 1.5 for g in geo),
+          "Sensors sparks run edge to edge and down to the card's bottom (%s)" % geo[:2])
+    check(geo and all(g["footIn"] for g in geo), "the age sits inside the graph's area")
+    data_first = len(s_data)
+    pg3.wait_for_timeout(11500)
+    rounds = [t for t in s_seen]
+    s_gaps = [round(b_ - a_, 1) for a_, b_ in zip(rounds, rounds[1:])]
+    check(len(rounds) >= 3, "Sensors reads again on the Overview's setting (%d)" % len(rounds))
+    check(all(g >= 4.8 for g in s_gaps), "Sensors rounds are 5 s apart or more (%s)" % s_gaps)
+    check(len(s_data) == data_first,
+          "the other metrics' sparks are not asked for again within a minute (%d -> %d)" % (data_first, len(s_data)))
+    check(pg3.evaluate("window.__emptied") <= 1, "a round redraws in place, the grid is never emptied")
+    check(pg3.locator("#sensors-grid svg.s-spark polyline").count() >= 1, "the sparks are still drawn")
+    flat = pg3.evaluate("""() => { const s = [...document.querySelectorAll('#sensors-grid svg.s-spark polyline')]
+        .map(p => p.getAttribute('points')).find(t => new Set(t.split(' ').map(q => q.split(',')[1])).size === 1);
+        return s ? +s.split(' ')[0].split(',')[1] : null; }""")
+    check(flat is not None and 8 <= flat <= 18, "a flat hour is a line across the middle (y=%s)" % flat)
+    # Off the page, its cards are left as they are (a round would replace them).
+    pg3.evaluate("document.querySelector('#sensors-grid .sensor').dataset.mark = '1'")
+    pg3.evaluate("location.hash = '#overview'")
+    pg3.wait_for_timeout(11000)
+    check(pg3.evaluate("!!document.querySelector('#sensors-grid .sensor[data-mark]')"),
+          "and stops once another page is shown")
     b.close()
 
 print("FAIL" if fails else "PASS", "(%d failed)" % len(fails))

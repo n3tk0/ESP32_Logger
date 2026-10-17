@@ -116,6 +116,17 @@ function _sparkReducedMotion() {
   catch (e) { return false; }
 }
 // `inner` is the svg's markup (viewBox 0 0 100 36); `key` names the series.
+// How often the Overview and Sensors pages read again, in seconds (0 = off).
+// Chosen in the Overview's Customize bar, per browser; never under 5 s, as
+// every round is a request the device answers from a small heap.
+var AUTO_REFRESH_KEY = "esp32logger.overview.autoRefresh";
+var AUTO_REFRESH_MIN_S = 5;
+function autoRefreshSeconds() {
+  var v = 0;
+  try { v = parseInt(localStorage.getItem(AUTO_REFRESH_KEY), 10) || 0; } catch (e) {}
+  return v > 0 ? Math.max(AUTO_REFRESH_MIN_S, v) : 0;
+}
+
 function sparkDraw(svg, key, inner) {
   if (!svg) return;
   if (!_sparkBegun[key]) _sparkBegun[key] = Date.now();
