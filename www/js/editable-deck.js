@@ -281,6 +281,9 @@
     // When on, live mode gathers each group's cards behind one heading row,
     // groups in the order their first card has; the saved order is untouched.
     var groupBy = typeof opts.groupBy === "function" ? opts.groupBy : null;
+    // toolbarExtra() -> an element shown in the toolbar while customising
+    // (the Overview's auto-refresh), or null.
+    var toolbarExtra = typeof opts.toolbarExtra === "function" ? opts.toolbarExtra : null;
 
     var cards = loadCards(pageId, defaults, registry);
     var grouped = groupBy ? loadFlag(pageId, "group") : false;
@@ -392,6 +395,8 @@
           editing = false; renderToolbar(); render(); editingHooks(false);
         });
         toolbarSlot.appendChild(badge);
+        var extra = toolbarExtra ? toolbarExtra() : null;
+        if (extra) toolbarSlot.appendChild(extra);
         if (grp) toolbarSlot.appendChild(grp);
         toolbarSlot.appendChild(reset);
         toolbarSlot.appendChild(done);

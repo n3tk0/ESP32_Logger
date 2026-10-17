@@ -407,6 +407,7 @@
         return src ? { key: src.id, label: src.id, sub: src.name, icon: "cpu" } : null;
       },
       groupLabel: "iotExt.groupBySensor",
+      toolbarExtra: _ovAutoRefreshControl,
       onEdit:    function () { /* re-apply cached data after render */
         if (_overviewLastData)   _applyOverviewData(_overviewLastData);
         if (_overviewStatusData) ovFillWaterCached(_overviewStatusData);
@@ -417,6 +418,75 @@
     });
 
     populateOverview();
+    _ovAutoRefreshArm();
+  }
+
+  // ── Auto-refresh ───────────────────────────────────────────────────────────
+  // The readings again every so often, chosen while customising, per browser.
+  // Never under 5 s: every round is a request the device answers from a small
+  // heap. Off by default, as the page has always been. A round starts only
+  // once the last one is in, and only while the Overview is the page shown
+  // and the tab is visible.
+  var OV_AUTO_KEY = "esp32logger.overview.autoRefresh";
+  var OV_AUTO_MIN_S = 5;
+  var OV_AUTO_CHOICES = [0, 5, 10, 30, 60, 300];
+  var _ovAutoTimer = null, _ovAutoBusy = false, _ovAutoSparkAt = 0;
+  function _ovAutoSeconds() {
+    var v = 0;
+    try { v = parseInt(localStorage.getItem(OV_AUTO_KEY), 10) || 0; } catch (e) {}
+    return v > 0 ? Math.max(OV_AUTO_MIN_S, v) : 0;
+  }
+  function _ovAutoRefreshArm() {
+    if (_ovAutoTimer) { clearTimeout(_ovAutoTimer); _ovAutoTimer = null; }
+    var sec = _ovAutoSeconds();
+    if (!sec) return;
+    _ovAutoTimer = setTimeout(_ovAutoTick, sec * 1000);
+  }
+  function _ovAutoTick() {
+    _ovAutoTimer = null;
+    var shown = (typeof currentPage === "undefined" || currentPage === "overview") &&
+                document.visibilityState !== "hidden";
+    if (!shown || _ovAutoBusy) { _ovAutoRefreshArm(); return; }
+    _ovAutoBusy = true;
+    // The sparklines are an hour wide: asked for again once a minute at most,
+    // and drawn whole (they have already swept in).
+    if (Date.now() - _ovAutoSparkAt >= 60000) {
+      _ovAutoSparkAt = Date.now();
+      [].forEach.call(document.querySelectorAll("#page-overview svg.metric-spark-bg"),
+                      function (svg) { svg.dataset.drawnFor = ""; });
+    }
+    populateOverview(false).then(function () {
+      _ovAutoBusy = false;
+      _ovAutoRefreshArm();
+    }, function () { _ovAutoBusy = false; _ovAutoRefreshArm(); });
+  }
+  function _ovAutoRefreshControl() {
+    var wrap = document.createElement("label");
+    wrap.className = "deck-autorefresh";
+    wrap.title = ieT("iotExt.autoRefreshHint");
+    var sel = document.createElement("select");
+    sel.className = "input";
+    sel.id = "ovAutoRefresh";
+    var cur = _ovAutoSeconds();
+    OV_AUTO_CHOICES.forEach(function (sec) {
+      var o = document.createElement("option");
+      o.value = String(sec);
+      o.textContent = sec === 0 ? ieT("iotExt.autoRefreshOff")
+                    : sec < 60 ? sec + " s" : (sec / 60) + " min";
+      if (sec === cur) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", function () {
+      var v = parseInt(sel.value, 10) || 0;
+      if (v && v < OV_AUTO_MIN_S) v = OV_AUTO_MIN_S;
+      try { localStorage.setItem(OV_AUTO_KEY, String(v)); } catch (e) {}
+      _ovAutoRefreshArm();
+    });
+    var span = document.createElement("span");
+    span.innerHTML = '<span data-icon="refresh-cw"></span> ' + esc(ieT("iotExt.autoRefresh"));
+    wrap.appendChild(span);
+    wrap.appendChild(sel);
+    return wrap;
   }
 
   function _normalizeLatest(data) {
@@ -572,29 +642,6 @@
   var _ovSparkCache = {};
   var OV_SPARK_REUSE_MS = 60000;
 
-  // When each series began sweeping in on this page, and a name for each clip.
-  var _ovSparkShown = {}, _ovSparkClipN = 0;
-  var OV_SPARK_SWEEP_MS = 700;
-  // From `begun` (Date.now() when the series first swept in): a deck drawn
-  // again mid-sweep carries on from where the line had got to.
-  function _ovSweep(rect, begun) {
-    if (!rect) return;
-    var raf = window.requestAnimationFrame;
-    if (!raf) { rect.setAttribute("width", "100"); return; }
-    var t0 = null, ahead = Math.max(0, Date.now() - begun);
-    raf(function step(t) {
-      if (t0 === null) t0 = t - ahead;
-      var k = Math.max(0, Math.min(1, (t - t0) / OV_SPARK_SWEEP_MS));
-      k = 1 - Math.pow(1 - k, 3);                      // ease out
-      rect.setAttribute("width", (100 * k).toFixed(2));
-      if (k < 1) raf(step);
-    });
-  }
-  function _ovReducedMotion() {
-    try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
-    catch (e) { return false; }
-  }
-
   function _ovFetchSpark(svg, sensorId, metric) {
     var key = sensorId + "::" + metric;
     var hit = _ovSparkCache[key];
@@ -631,23 +678,10 @@
           area += " L " + x + "," + y;
         }
         area += " L 100,36 Z";
-        // DRAWN IN, oldest to newest, the first time a series is shown on
-        // this page: the cards' answers come in at their own pace, and a line
-        // that sweeps in reads as the page drawing it, not as a page that
-        // stalls. A deck drawn again (the sensor list arriving) carries the
-        // sweep on, or shows the line whole once it is done; a browser asked
-        // for less motion shows it whole.
-        if (!_ovSparkShown[key]) _ovSparkShown[key] = Date.now();
-        var begun = _ovSparkShown[key];
-        var sweep = Date.now() - begun < OV_SPARK_SWEEP_MS && !_ovReducedMotion();
-        var clip = sweep ? "ovsc" + (++_ovSparkClipN) : "";
-        svg.innerHTML =
-          (sweep ? '<defs><clipPath id="' + clip + '"><rect x="0" y="0" width="0" height="36"></rect>' +
-                   '</clipPath></defs><g clip-path="url(#' + clip + ')">' : "") +
+        // Swept in, oldest to newest, the first time it is shown (sparkDraw, core.js).
+        sparkDraw(svg, "ov:" + key,
           '<path d="' + area + '" fill="currentColor" opacity="0.13"></path>' +
-          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>' +
-          (sweep ? "</g>" : "");
-        if (sweep) _ovSweep(svg.querySelector("clipPath rect"), begun);
+          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>');
         var card = svg.closest ? svg.closest(".ov-metric-card") : null;
         var scale = card && card.querySelector(".ov-spark-scale");
         if (scale) {

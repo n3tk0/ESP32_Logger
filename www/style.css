@@ -1857,6 +1857,9 @@ body.deck-dragging,
 body.deck-dragging * { cursor: grabbing !important; }
 
 .deck-editing-badge { height: 28px; display: inline-flex; align-items: center; padding: 0 10px; }
+/* Overview auto-refresh, shown in the toolbar while customising. */
+.deck-autorefresh { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2, inherit); }
+.deck-autorefresh .input { width:auto; height:32px; padding-top:0; padding-bottom:0; }
 /* page-actions-deck: display:contents lets deck buttons sit alongside other
    page-actions children without an extra flex box breaking wrap behavior. */
 .page-actions-deck { display: contents; }

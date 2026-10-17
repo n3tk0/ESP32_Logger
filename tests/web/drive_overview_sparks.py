@@ -117,6 +117,31 @@ with sync_playwright() as p:
     check(swept >= 1, "a sparkline drawn for the first time sweeps in (%d)" % swept)
     errs = [(k, t) for k, t in console if k in ("error", "pageerror")]
     check(not errs, "no page errors (%s)" % errs[:3])
+
+    # Auto-refresh, chosen while customising: never under 5 s, off by default.
+    latest_off = []
+    pg.unroute("**/api/latest*")
+    pg.route("**/api/latest*", lambda r: (latest_off.append(time.time()), r.fulfill(
+        status=200, content_type="application/json", body=json.dumps(LATEST)))[1])
+    pg.wait_for_timeout(6500)
+    check(len(latest_off) == 0, "off by default: no rounds on its own (%d)" % len(latest_off))
+    pg.click(".deck-customise-btn")
+    opts = pg.evaluate("""() => [...document.querySelectorAll('#ovAutoRefresh option')].map(o => +o.value)""")
+    check(opts and min(o for o in opts if o) >= 5, "offered in Customise, none under 5 s (%s)" % opts)
+
+    pg2 = b.new_page(viewport={"width": 1400, "height": 1000})
+    # A stored 2 s (set by hand) is held to 5 s.
+    pg2.add_init_script("try{localStorage.setItem('esp32logger.overview.autoRefresh','2')}catch(e){}")
+    seen = []
+    pg2.route("**/api/latest*", lambda r: (seen.append(time.time()), r.fulfill(
+        status=200, content_type="application/json", body=json.dumps(LATEST)))[1])
+    pg2.route("**/api/sparks*", api_sparks)
+    pg2.route("**/api/data*", api_data)
+    pg2.goto(URL, wait_until="networkidle")
+    pg2.wait_for_timeout(11500)
+    gaps = [round(b_ - a_, 1) for a_, b_ in zip(seen, seen[1:])]
+    check(len(seen) >= 2, "the readings are read again on their own (%d)" % len(seen))
+    check(all(g >= 4.8 for g in gaps), "never sooner than 5 s apart (%s)" % gaps)
     b.close()
 
 print("FAIL" if fails else "PASS", "(%d failed)" % len(fails))

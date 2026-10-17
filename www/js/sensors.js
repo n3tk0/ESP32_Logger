@@ -134,10 +134,10 @@ function sensorsLoad() {
                 var y = (32 - ((+spark[j] - min) / range) * 28).toFixed(1);
                 pts += (j ? " " : "") + x + "," + y;
               }
+              // Drawn once the grid is in (sparkDraw below), to sweep in.
               sparkSvg =
-                '<svg class="s-spark" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">' +
-                '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>' +
-                "</svg>";
+                '<svg class="s-spark" data-sensor="' + esc(s.id) + '" data-metric="' + esc(m) +
+                '" data-pts="' + pts + '" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg>';
             } else if (mIdx > 0 && m) {
               sparkSvg = '<svg class="s-spark s-spark-lazy" data-sensor="' + esc(s.id) + '" data-metric="' + esc(m) + '" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"></svg>';
             } else {
@@ -236,11 +236,21 @@ function sensorsLoad() {
           );
         });
         grid.innerHTML = html.join("");
+        [].forEach.call(grid.querySelectorAll("svg.s-spark[data-pts]"), function (svg) {
+          _sSparkDraw(svg, svg.getAttribute("data-pts"));
+        });
 
         // Fetch missing sparklines for secondary metrics. Throttle to a small
         // concurrency — ESPAsyncWebServer has a tiny connection pool, so firing
         // one /api/data request per metric at once causes timeouts/contention.
         var lazySparks = [].slice.call(grid.querySelectorAll(".s-spark-lazy"));
+        // The line with the faint filled area under it, as on the Overview.
+        function _sSparkDraw(svg, pts) {
+          var area = "M 0,36 L " + pts.split(" ").join(" L ") + " L 100,36 Z";
+          sparkDraw(svg, "s:" + svg.getAttribute("data-sensor") + "::" + svg.getAttribute("data-metric"),
+                    '<path d="' + area + '" fill="currentColor" opacity="0.13"></path>' +
+                    '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>');
+        }
         function _drawLazySpark(svg) {
           var sId = svg.getAttribute("data-sensor");
           var mId = svg.getAttribute("data-metric");
@@ -270,7 +280,7 @@ function sensorsLoad() {
                 var y = (32 - ((ys[j] - min) / range) * 28).toFixed(1);
                 pts += (j ? " " : "") + x + "," + y;
               }
-              svg.innerHTML = '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.4"></polyline>';
+              _sSparkDraw(svg, pts);
             })
             .catch(function (err) { console.error("Failed to fetch sparkline data:", err); });
         }

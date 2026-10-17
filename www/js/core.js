@@ -102,6 +102,43 @@ var _ramText = "";
 // Compact "used/total UNIT" for the half-width sidebar chips: one decimal
 // only below 10, no space before the unit ("1.2/120MB", "184/250KB"), so
 // both chips of a row keep their half of the sidebar.
+// ── Sparklines that sweep in ────────────────────────────────────────────────
+// A sparkline is drawn in from oldest to newest the first time a series is
+// shown on a page: the answers come in at their own pace, and a line that
+// sweeps in reads as the page drawing it, not as a page that stalls. A page
+// drawn again mid-sweep (a refresh, the sensor list arriving) carries the
+// sweep on from where it had got to; after that, and for a browser asked for
+// less motion, the line is drawn whole. Overview and Sensors share it.
+var SPARK_SWEEP_MS = 700;
+var _sparkBegun = {}, _sparkClipN = 0;
+function _sparkReducedMotion() {
+  try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+  catch (e) { return false; }
+}
+// `inner` is the svg's markup (viewBox 0 0 100 36); `key` names the series.
+function sparkDraw(svg, key, inner) {
+  if (!svg) return;
+  if (!_sparkBegun[key]) _sparkBegun[key] = Date.now();
+  var begun = _sparkBegun[key];
+  var raf = window.requestAnimationFrame;
+  if (!raf || Date.now() - begun >= SPARK_SWEEP_MS || _sparkReducedMotion()) {
+    svg.innerHTML = inner;
+    return;
+  }
+  var id = "spc" + (++_sparkClipN);
+  svg.innerHTML = '<defs><clipPath id="' + id + '"><rect x="0" y="0" width="0" height="36"></rect>' +
+                  '</clipPath></defs><g clip-path="url(#' + id + ')">' + inner + "</g>";
+  var rect = svg.querySelector("clipPath rect");
+  var t0 = null, ahead = Math.max(0, Date.now() - begun);
+  raf(function step(t) {
+    if (t0 === null) t0 = t - ahead;
+    var k = Math.max(0, Math.min(1, (t - t0) / SPARK_SWEEP_MS));
+    k = 1 - Math.pow(1 - k, 3);                      // ease out
+    rect.setAttribute("width", (100 * k).toFixed(2));
+    if (k < 1) raf(step);
+  });
+}
+
 function _fmtNum(v) { return v < 10 ? v.toFixed(1) : String(Math.round(v)); }
 function _fmtPair(a, total) {
   if (total < 1048576) {
