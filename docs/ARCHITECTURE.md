@@ -753,7 +753,10 @@ them apart.
 backfill, and they are two numbers rather than one because they ask for
 opposite fixes: a backlog queue that keeps overflowing wants a bigger queue,
 while a burst that arrives with no clock on either side wants NTP or an RTC,
-and no amount of queue will help it.
+and no amount of queue will help it. `history_refused` counts backfill the
+mailbox could not take at all: a queued reading names its (node, metric) by
+the pair's slot in the latest-value table, and a pair with no slot found the
+table full of other metrics.
 
 `skew_s` is how far a node's clock is from the collector's, in seconds,
 positive when the node is behind. It is measured rather than reported: every

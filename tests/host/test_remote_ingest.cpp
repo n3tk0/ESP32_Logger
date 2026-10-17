@@ -17,6 +17,7 @@
 // dashboard blank for minutes while a backlog cleared.
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 // The implementation is guarded by this, and the CI harness compiles every
 // host test with the same bare command line — no -D flags. Defined here so the
@@ -352,6 +353,64 @@ static void test_a_shed_is_not_a_refusal() {
     CHECK_EQ(ri.historyPending(), 0);
 }
 
+// ---------------------------------------------------------------------------
+// A queued reading names its (node, metric) by the pair's slot. A slot that
+// only history has claimed holds no latest value: it is not drained, peeked
+// or counted as a node until the node's next put().
+// ---------------------------------------------------------------------------
+static void test_history_only_pair_is_not_a_latest_value() {
+    RemoteIngest& ri = fresh();
+    CHECK(ri.putHistorical("late", "humidity", 55.0f, "%", T0));
+    CHECK_EQ(ri.nodeCount(), 0);
+    CHECK_EQ(ri.ageMsForNode("late"), UINT32_MAX);
+    SensorReading out[8];
+    CHECK_EQ(ri.peekLatest("late", out, 8), 0);
+    CHECK_EQ(ri.drainLatest("late", out, 8, 0), 0);
+    CHECK_EQ(ri.drainHistory("late", out, 8), 1);
+    CHECK(strcmp(out[0].metric, "humidity") == 0);
+    CHECK(strcmp(out[0].unit, "%") == 0);
+    CHECK_EQ(out[0].timestamp, T0);
+
+    CHECK(ri.put("late", "humidity", 56.0f, "%", 0));
+    CHECK_EQ(ri.nodeCount(), 1);
+    CHECK_EQ(ri.drainLatest("late", out, 8, 0), 1);
+}
+
+static void test_history_with_no_free_slot_is_refused() {
+    RemoteIngest& ri = fresh();
+    char metric[8];
+    for (int i = 0; i < RemoteIngest::MAX_ENTRIES; i++) {
+        snprintf(metric, sizeof(metric), "m%d", i);
+        CHECK(ri.put("full", metric, 1.0f, "", 0));
+    }
+    CHECK(!ri.putHistorical("other", "temperature", 1.0f, "C", T0));
+    CHECK_EQ(ri.historyPending(), 0);
+    CHECK(ri.putHistorical("full", "m3", 2.0f, "", T0));   // a pair it has
+    SensorReading out[4];
+    CHECK_EQ(ri.drainHistory("full", out, 4), 1);
+    CHECK(strcmp(out[0].metric, "m3") == 0);
+}
+
+static void test_long_names_keep_one_slot() {
+    RemoteIngest& ri = fresh();
+    // Longer than the fields: stored cut short, and found again as stored.
+    const char* node   = "a_node_name_longer_than_sixteen";
+    const char* metric = "pm2_5_atmospheric_x";
+    for (int i = 0; i < 60; i++)
+        CHECK(ri.putHistoricalEx(node, metric, (float)i, "ug", T0 + i) != RemoteIngest::HistPut::Refused);
+    CHECK(ri.put("other", "temp", 1.0f, "C", 0));       // the table is not full
+    for (int i = 0; i < 5; i++) CHECK(ri.put(node, metric, (float)i, "ug", 0));
+    CHECK_EQ(ri.nodeCount(), 2);
+}
+
+static void test_put_historical_ex_says_what_happened() {
+    RemoteIngest& ri = fresh();
+    CHECK(ri.putHistoricalEx("out", "t", 1.0f, "C", 0) == RemoteIngest::HistPut::Refused);   // no clock
+    CHECK(ri.putHistoricalEx("out", "t", 1.0f, "C", T0) == RemoteIngest::HistPut::Queued);
+    for (int i = 1; i < 64; i++) ri.putHistorical("out", "t", (float)i, "C", T0 + i);
+    CHECK(ri.putHistoricalEx("out", "t", 99.0f, "C", T0 + 99) == RemoteIngest::HistPut::Shed);
+}
+
 int main() {
     RUN(test_put_overwrites);
     RUN(test_history_keeps_every_reading);
@@ -368,5 +427,9 @@ int main() {
     RUN(test_touch_moves_last_seen_not_the_values);
     RUN(test_history_room_counts_down_to_zero_and_stops);
     RUN(test_a_shed_is_not_a_refusal);
+    RUN(test_history_only_pair_is_not_a_latest_value);
+    RUN(test_history_with_no_free_slot_is_refused);
+    RUN(test_long_names_keep_one_slot);
+    RUN(test_put_historical_ex_says_what_happened);
     return SUMMARY();
 }

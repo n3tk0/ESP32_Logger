@@ -48,6 +48,7 @@ concurrency regressions in milliseconds, leaving end-to-end / chaos testing
 | `test_block_buf.cpp` | `src/web/BlockBuf.h` — the web replies' 512 B blocks: what goes in comes out in order at every read size, `size()` counts it, and blocks come from the installed source (the reply pool) before the heap and go back to it |
 | `test_heap_budget.cpp` | `src/core/HeapBudgetCore.h` — the heap budget: web replies up to the total, a waiting TLS job closes the door to new replies and gets its units once they drain, a forced one runs over the total until all are done |
 | `test_json_copy.cpp` | `src/utils/JsonCopy.h` — ArduinoJson keeps only a pointer to a const char array, and `jsonCopy()` makes the document keep its own copy, so a struct freed or rewritten before serializing does not change the reply |
+| `test_lazy_slots.cpp` | `src/core/LazySlots.h` — records made on first claim and kept: nothing allocated until one is claimed, a record out of use is handed out again before a new one is made, and the table stops at N |
 
 Fuzz targets (random-input property checks):
 

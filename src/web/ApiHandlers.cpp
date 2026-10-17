@@ -320,7 +320,7 @@ static void handleApiData(AsyncWebServerRequest* req) {
 //                               "v":[21.4,21.5,...]}, ...]}
 // Series are read one at a time, so the heap holds one series' readings at
 // once. A name with anything but letters, digits, '_', '-' or '.' is left
-// out rather than echoed.
+// out rather than echoed; the page asks /api/data for that one on its own.
 static bool sparkName(const char* p, size_t n) {
     if (!n) return false;
     for (size_t i = 0; i < n; i++) {
@@ -581,6 +581,7 @@ static void handleEspnowStatus(AsyncWebServerRequest* req) {
     st["ring_full"]         = s.ringFull;
     st["history_collapsed"] = s.historyCollapsed;
     st["history_no_clock"]  = s.historyNoClock;
+    st["history_refused"]   = s.historyRefused;
     st["acks"]              = s.acksSent;
     st["discover_seen"]     = s.discoverSeen;
     st["discover_bad_sig"]  = s.discoverBadSig;
@@ -2089,7 +2090,8 @@ static void handleApiAlertsToasts(AsyncWebServerRequest* req) {
         o["value"]   = toast.value;
         o["ts"]      = toast.ts;
     }
-    sendJsonResponse(req, doc);
+    // The toasts are taken off the queue: a busy answer would lose them.
+    sendJsonAnswer(req, doc);
 }
 
 // ---------------------------------------------------------------------------

@@ -160,7 +160,17 @@ void ExportManager::_parseSensorList(JsonVariantConst v, int list) {
         const char* id = e.as<const char*>();
         if (!id || !*id) continue;
         if (n >= EXPORT_MAX_SENSOR_FILTER) break;
-        strlcpy(_sensors[list][n++], id, sizeof(_sensors[0][0]));
+        if (!_sensors[list]) {
+            _sensors[list] = static_cast<SensorIdList*>(calloc(1, sizeof(SensorIdList)));
+            if (!_sensors[list]) {
+                // Not "every sensor", which is what an empty list means: an
+                // exporter chosen for one sensor must not send them all.
+                Log.println("[ExportManager] no heap for a sensor list - that exporter sends nothing");
+                _sensorCount[list] = SEL_NONE;
+                return;
+            }
+        }
+        strlcpy((*_sensors[list])[n++], id, sizeof((*_sensors[list])[0]));
     }
     _sensorCount[list] = n;
 }
@@ -170,8 +180,9 @@ bool ExportManager::_accepts(int idx, const char* sensorId) const {
     const int     list = _selOf[idx];
     const uint8_t n    = _sensorCount[list];
     if (n == 0) return true;                     // empty selection = all
+    if (n == SEL_NONE || !_sensors[list]) return false;
     for (uint8_t k = 0; k < n && k < EXPORT_MAX_SENSOR_FILTER; k++) {
-        if (strcmp(_sensors[list][k], sensorId) == 0) return true;
+        if (strcmp((*_sensors[list])[k], sensorId) == 0) return true;
     }
     return false;
 }

@@ -23,6 +23,27 @@ static inline void copyClamped(char* dst, size_t dstLen, const char* src) {
     dst[dstLen - 1] = '\0';
 }
 
+int RemoteIngest::_slot(const char* nodeId, const char* metric) {
+    int free = -1;
+    for (int i = 0; i < MAX_ENTRIES; i++) {
+        if (!_e[i].used) {
+            if (free < 0) free = i;      // remember the first hole, keep scanning
+            continue;
+        }
+        // As stored: clamped. A name longer than its field compared in full
+        // never matched its own slot and claimed a new one on every call.
+        if (strncmp(_e[i].nodeId, nodeId, MAX_NODE_ID - 1) == 0 &&
+            strncmp(_e[i].metric, metric, MAX_METRIC - 1) == 0) return i;
+    }
+    if (free >= 0) {
+        _e[free] = Entry();
+        copyClamped(_e[free].nodeId, MAX_NODE_ID, nodeId);
+        copyClamped(_e[free].metric, MAX_METRIC,  metric);
+        _e[free].used = true;
+    }
+    return free;
+}
+
 bool RemoteIngest::put(const char* nodeId, const char* metric, float value,
                        const char* unit, uint32_t ts) {
     if (nodeId == nullptr || *nodeId == '\0') return false;
@@ -30,58 +51,45 @@ bool RemoteIngest::put(const char* nodeId, const char* metric, float value,
     if (!isfinite(value))                     return false;
 
     const uint32_t now = millis();
-    bool stored = false;
 
     taskENTER_CRITICAL(&_mux);
-    int free = -1;
-    for (int i = 0; i < MAX_ENTRIES; i++) {
-        if (!_e[i].used) {
-            if (free < 0) free = i;      // remember the first hole, keep scanning
-            continue;
+    const int i = _slot(nodeId, metric);
+    if (i >= 0) {
+        Entry& e = _e[i];
+        if (e.live) {
+            e.gapMs[1] = e.gapMs[0];
+            e.gapMs[0] = now - e.rxMillis;
         }
-        if (eq(_e[i].nodeId, nodeId) && eq(_e[i].metric, metric)) {
-            _e[i].gapMs[1] = _e[i].gapMs[0];
-            _e[i].gapMs[0] = now - _e[i].rxMillis;
-            _e[i].value    = value;
-            _e[i].ts       = ts;
-            _e[i].rxMillis = now;
-            _e[i].seenMs   = now;
-            copyClamped(_e[i].unit, MAX_UNIT, unit);
-            stored = true;
-            break;
-        }
-    }
-    if (!stored && free >= 0) {
-        copyClamped(_e[free].nodeId, MAX_NODE_ID, nodeId);
-        copyClamped(_e[free].metric, MAX_METRIC,  metric);
-        copyClamped(_e[free].unit,   MAX_UNIT,    unit);
-        _e[free].value    = value;
-        _e[free].ts       = ts;
-        _e[free].rxMillis = now;
-        _e[free].seenMs   = now;
-        _e[free].gapMs[0] = 0;
-        _e[free].gapMs[1] = 0;
-        _e[free].used     = true;
-        stored = true;
+        e.value    = value;
+        e.ts       = ts;
+        e.rxMillis = now;
+        e.seenMs   = now;
+        e.live     = true;
+        copyClamped(e.unit, MAX_UNIT, unit);
     }
     taskEXIT_CRITICAL(&_mux);
 
-    return stored;
+    return i >= 0;
 }
 
-bool RemoteIngest::putHistorical(const char* nodeId, const char* metric,
-                                 float value, const char* unit, uint32_t ts) {
-    if (nodeId == nullptr || *nodeId == '\0') return false;
-    if (metric == nullptr || *metric == '\0') return false;
-    if (!isfinite(value))                     return false;
+RemoteIngest::HistPut RemoteIngest::putHistoricalEx(const char* nodeId, const char* metric,
+                                                  float value, const char* unit, uint32_t ts) {
+    if (nodeId == nullptr || *nodeId == '\0') return HistPut::Refused;
+    if (metric == nullptr || *metric == '\0') return HistPut::Refused;
+    if (!isfinite(value))                     return HistPut::Refused;
     // A backdated reading whose date is wrong is worse than a gap: it would be
     // filed under an hour it did not happen in and quietly corrupt the record
     // it was meant to complete.
-    if (ts < 1000000000u)                     return false;
+    if (ts < 1000000000u)                     return HistPut::Refused;
 
     bool dropped = false;
 
     taskENTER_CRITICAL(&_mux);
+    // The pair's slot names the reading. One claimed here holds no latest
+    // value (live stays false) until the node's next put().
+    const int e = _slot(nodeId, metric);
+    if (e < 0) { taskEXIT_CRITICAL(&_mux); return HistPut::Refused; }
+    if (!_e[e].live) copyClamped(_e[e].unit, MAX_UNIT, unit);
     if (_hCount >= MAX_HISTORY) {
         // Full. Drop the OLDEST — losing the start of an outage beats losing
         // the end of it, which is the same rule the node applies to its own
@@ -92,15 +100,13 @@ bool RemoteIngest::putHistorical(const char* nodeId, const char* metric,
         dropped = true;
     }
     Hist& h = _h[(_hHead + _hCount) % MAX_HISTORY];
-    copyClamped(h.nodeId, MAX_NODE_ID, nodeId);
-    copyClamped(h.metric, MAX_METRIC,  metric);
-    copyClamped(h.unit,   MAX_UNIT,    unit);
     h.value = value;
     h.ts    = ts;
+    h.entry = (uint8_t)e;
     _hCount++;
     taskEXIT_CRITICAL(&_mux);
 
-    return !dropped;
+    return dropped ? HistPut::Shed : HistPut::Queued;
 }
 
 int RemoteIngest::historyPending() const {
@@ -145,7 +151,7 @@ int RemoteIngest::drainLatest(const char* nodeId, SensorReading* out, int maxOut
 
     taskENTER_CRITICAL(&_mux);
     for (int i = 0; i < MAX_ENTRIES && n < maxOut; i++) {
-        if (!_e[i].used || !eq(_e[i].nodeId, nodeId)) continue;
+        if (!_e[i].live || !eq(_e[i].nodeId, nodeId)) continue;
 
         // millis() wraps every ~49 days; unsigned subtraction is correct
         // across the wrap, which is why age is computed rather than compared.
@@ -195,12 +201,13 @@ int RemoteIngest::drainHistory(const char* nodeId, SensorReading* out, int maxOu
     int scanned = 0;
     while (n < maxOut && scanned < _hCount) {
         const int idx = (_hHead + scanned) % MAX_HISTORY;
-        if (!eq(_h[idx].nodeId, nodeId)) { scanned++; continue; }
+        const Entry& e = _e[_h[idx].entry];
+        if (!eq(e.nodeId, nodeId)) { scanned++; continue; }
 
         SensorReading& r = out[n];
         r = SensorReading();
-        copyClamped(r.metric, sizeof(r.metric), _h[idx].metric);
-        copyClamped(r.unit,   sizeof(r.unit),   _h[idx].unit);
+        copyClamped(r.metric, sizeof(r.metric), e.metric);
+        copyClamped(r.unit,   sizeof(r.unit),   e.unit);
         r.value     = _h[idx].value;
         r.timestamp = _h[idx].ts;      // authoritative; not stamped over
         r.quality   = QUALITY_GOOD;
@@ -230,7 +237,7 @@ uint32_t RemoteIngest::ageMsForNode(const char* nodeId) const {
 
     taskENTER_CRITICAL(&_mux);
     for (int i = 0; i < MAX_ENTRIES; i++) {
-        if (!_e[i].used || !eq(_e[i].nodeId, nodeId)) continue;
+        if (!_e[i].live || !eq(_e[i].nodeId, nodeId)) continue;
         const uint32_t age = now - _e[i].seenMs;
         if (age < best) best = age;
     }
@@ -244,7 +251,7 @@ void RemoteIngest::touch(const char* nodeId) {
     const uint32_t now = millis();
     taskENTER_CRITICAL(&_mux);
     for (int i = 0; i < MAX_ENTRIES; i++)
-        if (_e[i].used && eq(_e[i].nodeId, nodeId)) _e[i].seenMs = now;
+        if (_e[i].live && eq(_e[i].nodeId, nodeId)) _e[i].seenMs = now;
     taskEXIT_CRITICAL(&_mux);
 }
 
@@ -256,7 +263,7 @@ int RemoteIngest::_snapshotNodes(char (&out)[MAX_ENTRIES][MAX_NODE_ID]) const {
     int raw = 0;
     taskENTER_CRITICAL(&_mux);
     for (int i = 0; i < MAX_ENTRIES; i++) {
-        if (!_e[i].used) continue;
+        if (!_e[i].live) continue;
         memcpy(out[raw++], _e[i].nodeId, MAX_NODE_ID);
     }
     taskEXIT_CRITICAL(&_mux);
@@ -299,7 +306,7 @@ int RemoteIngest::peekLatest(const char* nodeId, SensorReading* out, int maxOut,
     int n = 0;
     taskENTER_CRITICAL(&_mux);
     for (int i = 0; i < MAX_ENTRIES && n < maxOut; i++) {
-        if (!_e[i].used || !eq(_e[i].nodeId, nodeId)) continue;
+        if (!_e[i].live || !eq(_e[i].nodeId, nodeId)) continue;
 
         // One entry per (node, metric) is the mailbox's own invariant, so this
         // cannot normally fire — it is here because put() clamps long metric

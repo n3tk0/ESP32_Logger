@@ -99,9 +99,24 @@ public:
     ///
     /// Returns false when the queue is full, in which case the OLDEST entry is
     /// dropped to make room — losing the start of an outage beats losing the
-    /// end of it, the same rule the node applies to its own buffer.
+    /// end of it, the same rule the node applies to its own buffer. Also false
+    /// when the reading is refused (see putHistoricalEx()).
     bool putHistorical(const char* nodeId, const char* metric, float value,
-                       const char* unit, uint32_t ts);
+                       const char* unit, uint32_t ts) {
+        return putHistoricalEx(nodeId, metric, value, unit, ts) == HistPut::Queued;
+    }
+
+    /// What putHistorical() did with a reading. A queued reading names its
+    /// (node, metric) by the pair's slot in the latest-value table, so a pair
+    /// that has none and finds the table full is REFUSED, not queued: the
+    /// caller must count it as lost, not as taken.
+    enum class HistPut : uint8_t {
+        Queued,    ///< taken
+        Shed,      ///< taken; the oldest queued reading was dropped for it
+        Refused,   ///< not taken: invalid, no clock, or no slot for its pair
+    };
+    HistPut putHistoricalEx(const char* nodeId, const char* metric, float value,
+                            const char* unit, uint32_t ts);
 
     /// How many queued historical readings are still waiting to be drained.
     int historyPending() const;
@@ -109,7 +124,8 @@ public:
     /// How many more the queue can take before it starts shedding.
     ///
     /// EXISTS SO A SENDER CAN BE TOLD TO WAIT. putHistorical() never refuses
-    /// for want of room — it drops the oldest and takes the new one, which is
+    /// for want of queue room — it drops the oldest and takes the new one
+    /// (it can refuse a pair with no slot in the table; HistPut::Refused), which is
     /// the only thing it can do for ESP-NOW, where the frame has already been
     /// received and the node is asleep by the time it is parsed.
     ///
@@ -205,20 +221,22 @@ private:
     /// Queued historical readings, across all nodes.
     ///
     /// Sized for one node emptying a full buffer: fourteen samples of four
-    /// metrics is fifty-six, and 64 × 40 bytes is 2.5 KB of static RAM on a
-    /// part with 320 KB. Two nodes recovering at the same moment will drop the
-    /// oldest of the two backlogs, which is the right thing to lose.
+    /// metrics is fifty-six. Two nodes recovering at the same moment will drop
+    /// the oldest of the two backlogs, which is the right thing to lose.
 #ifndef REMOTE_HISTORY_SLOTS
 #  define REMOTE_HISTORY_SLOTS 64
 #endif
     static constexpr int MAX_HISTORY = REMOTE_HISTORY_SLOTS;
+    static_assert(MAX_ENTRIES <= 255, "Hist::entry is a uint8_t");
 
+    /// The node, metric and unit are the entry's (`_e[entry]`): a queued
+    /// reading names its pair by index, as the compact ring does. With the
+    /// three strings in every slot the queue was 64 × 56 B = 3.5 KB of RAM
+    /// that held the same few names over and over; now 64 × 12 B.
     struct Hist {
-        char     nodeId[MAX_NODE_ID];
-        char     metric[MAX_METRIC];
-        char     unit[MAX_UNIT];
         float    value;
         uint32_t ts;
+        uint8_t  entry;
     };
 
     struct Entry {
@@ -230,8 +248,13 @@ private:
         uint32_t rxMillis;   // local millis() at receipt
         uint32_t seenMs;     // local millis() the node last posted at all
         uint32_t gapMs[2];   // the last two intervals between put()s, newest first
-        bool     used;
+        bool     used;       // the pair holds this slot (a latest value, queued history, or both)
+        bool     live;       // value/ts/rxMillis hold a latest value from put()
     };
+
+    /// The slot for (nodeId, metric), claiming a free one when there is none.
+    /// -1 when the table is full. Under _mux.
+    int _slot(const char* nodeId, const char* metric);
 
     /// Copies the distinct node ids into `out` and returns how many. The
     /// spinlock covers only the linear copy; the O(n²) dedup runs after it

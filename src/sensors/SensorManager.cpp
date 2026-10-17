@@ -38,20 +38,27 @@ void _releaseSerial1(ISensor* who) {
 // Scoped PER BUS: an address only collides with another device on the same
 // wire. This is what lets VEML6075 and VEML7700 — both hard-wired to 0x10 with
 // no address-select pin — run at the same time, one on each controller.
-static ISensor* _i2cOwners[I2CBus::MAX_BUSES][128] = {};
+// One row per claim, not one per possible address: a bus × 128 table of
+// pointers was 1 KB of RAM for the handful of addresses a device uses. Every
+// plugin claims one address, so twice the sensor limit is room to spare.
+struct I2cClaim { ISensor* who; uint8_t bus; uint8_t addr; };
+static I2cClaim _i2cOwners[SensorManager::MAX_SENSORS * 2] = {};
 
 bool _claimI2cAddress(uint8_t bus, uint8_t addr, ISensor* who) {
-    if (bus >= I2CBus::MAX_BUSES || addr >= 128) return false;
-    if (_i2cOwners[bus][addr] == nullptr) { _i2cOwners[bus][addr] = who; return true; }
-    return (_i2cOwners[bus][addr] == who);
+    if (bus >= I2CBus::MAX_BUSES || addr >= 128 || !who) return false;
+    I2cClaim* free = nullptr;
+    for (I2cClaim& c : _i2cOwners) {
+        if (!c.who) { if (!free) free = &c; continue; }
+        if (c.bus == bus && c.addr == addr) return c.who == who;
+    }
+    if (!free) return false;      // more claims than sensors: refused like a taken address
+    *free = { who, bus, addr };
+    return true;
 }
 void _releaseI2cClaims(ISensor* who) {
     if (!who) return;
-    for (int b = 0; b < I2CBus::MAX_BUSES; b++) {
-        for (int i = 0; i < 128; i++) {
-            if (_i2cOwners[b][i] == who) _i2cOwners[b][i] = nullptr;
-        }
-    }
+    for (I2cClaim& c : _i2cOwners)
+        if (c.who == who) c = {};
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@
 #include "../espnow/EspNowIngest.h"     // the table label follows the config
 #endif
 #include "../utils/JsonIO.h"
+#include "../core/LazySlots.h"
 
 using namespace nodecfg;
 
@@ -39,7 +40,11 @@ struct Entry {
     ncr::ProbeMap  probes;
 };
 
-static Entry             s_e[NODECFG_MAX_NODES];
+// One ~240 B record per node the collector has heard of, made on its first
+// contact (a POST, an ESP-NOW frame, or its file at boot) and kept: a table of
+// NODECFG_MAX_NODES held from boot was 3.8 KB of a C3's heap for a house with
+// one node.
+static LazySlots<Entry, NODECFG_MAX_NODES> s_e;
 static SemaphoreHandle_t s_mx  = nullptr;
 static volatile uint32_t s_gen = 1;
 
@@ -80,17 +85,17 @@ static Entry* find(bool espnow, const char* name, uint8_t id) {
 }
 
 static Entry* alloc(bool espnow, const char* name, uint8_t id) {
-    for (Entry& e : s_e) {
-        if (e.used) continue;
-        memset(&e, 0, sizeof(e));
-        e.used   = true;
-        e.espnow = espnow;
-        e.id     = id;
-        copyStr(e.name, sizeof(e.name), espnow ? "" : name);
-        return &e;
+    Entry* e = s_e.claim([](const Entry& x) { return !x.used; });
+    if (!e) {
+        Log.println("[nodecfg] index full (or no heap) — config not kept");
+        return nullptr;
     }
-    Log.println("[nodecfg] index full — config not kept");
-    return nullptr;
+    memset(e, 0, sizeof(*e));
+    e->used   = true;
+    e->espnow = espnow;
+    e->id     = id;
+    copyStr(e->name, sizeof(e->name), espnow ? "" : name);
+    return e;
 }
 
 // ============================================================================

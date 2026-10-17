@@ -28,18 +28,20 @@ struct Batch {
     fs::FS*  fs      = nullptr;
     fs::FS*  mirror  = nullptr;
     char*    buf     = nullptr;      // PEND_BYTES, CRLF-terminated rows
-    char*    hdr     = nullptr;      // HDR_BYTES
-    char*    tmpHdr  = nullptr;      // HDR_BYTES
-    char*    row     = nullptr;      // ROW_BYTES
+    char*    hdr     = nullptr;      // HDR_BYTES: the pending rows' header
+    // HDR_BYTES, two uses one after the other in add(): the current header,
+    // compared with hdr and copied into it, then the row being formatted.
+    char*    scratch = nullptr;
     size_t   len     = 0;
     int      rows    = 0;
     uint32_t epoch   = 0;            // newest row
     uint32_t first   = 0;            // oldest row: the batch's period
 
     bool alloc() {
-        char* m = (char*)malloc(PEND_BYTES + 2 * HDR_BYTES + ROW_BYTES);
+        static_assert(ROW_BYTES <= HDR_BYTES, "a row is formatted in the header scratch");
+        char* m = (char*)malloc(PEND_BYTES + 2 * HDR_BYTES);
         if (!m) return false;
-        buf = m; hdr = m + PEND_BYTES; tmpHdr = hdr + HDR_BYTES; row = tmpHdr + HDR_BYTES;
+        buf = m; hdr = m + PEND_BYTES; scratch = hdr + HDR_BYTES;
         buf[0] = hdr[0] = '\0';
         return true;
     }
@@ -83,6 +85,7 @@ struct Batch {
     void add(const DatalogRow& r, const float* vals, int nVals, uint32_t wantRev = 0) {
         if (!buf) return;
         uint32_t rev = 0;
+        char* const tmpHdr = scratch;
         if (datalogHeader(tmpHdr, HDR_BYTES, &rev) < 0) {
             Log.println("[StorageTask] row dropped - header did not fit");
             dataLost("datalog header too long");
@@ -93,6 +96,10 @@ struct Batch {
         // A batch goes to one file: a new header or a new rotation period
         // writes what is pending first.
         if (rows && (strcmp(tmpHdr, hdr) != 0 || !datalogSamePeriod(first, t))) flush();
+        // Taken now, while the scratch still holds it: the row goes there
+        // next. With rows pending they are the same header already.
+        if (!rows) strlcpy(hdr, tmpHdr, HDR_BYTES);
+        char* const row = scratch;
         const int n = dlFormatRow(row, ROW_BYTES, datalogLayout(), r, vals, nVals);
         if (n < 0) {
             Log.println("[StorageTask] row dropped - did not fit");
@@ -100,7 +107,7 @@ struct Batch {
             return;
         }
         if (len + n + 3 > PEND_BYTES) flush();
-        if (!rows) { strlcpy(hdr, tmpHdr, HDR_BYTES); first = t; }
+        if (!rows) first = t;
         memcpy(buf + len, row, n);
         len += n;
         buf[len++] = '\r'; buf[len++] = '\n'; buf[len] = '\0';

@@ -932,9 +932,10 @@ function ndRenderDiag() {
     ["frames", "diagAccepted"], ["unknown_node", "diagUnknown"], ["malformed", "diagMalformed"],
     ["discover_bad_sig", "diagBadSig"], ["replayed", "diagReplayed"], ["ring_full", "diagRingFull"],
     ["history_collapsed", "diagHistCollapsed"], ["history_no_clock", "diagHistNoClock"],
+    ["history_refused", "diagHistRefused"],
     ["acks", "diagAcks"], ["discover_seen", "diagDiscoverSeen"], ["paired", "diagPaired"],
   ];
-  var badKeys = { unknown_node: 1, malformed: 1, discover_bad_sig: 1, ring_full: 1, history_collapsed: 1, history_no_clock: 1 };
+  var badKeys = { unknown_node: 1, malformed: 1, discover_bad_sig: 1, ring_full: 1, history_collapsed: 1, history_no_clock: 1, history_refused: 1 };
   var problems = 0;
   var html = rows.map(function (row) {
     var k = row[0], v = s[k] == null ? 0 : s[k];
