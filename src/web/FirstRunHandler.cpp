@@ -64,7 +64,7 @@ void handleGetBoardProfiles(AsyncWebServerRequest* req) {
     for (uint8_t i = 0; i < n; i++) {
         const BoardProfile* p = list[i];
         JsonObject o    = arr.add<JsonObject>();
-        o["id"]         = p->shortId;
+        o["id"]         = p->shortId;   // a const char* (check_json_char_arrays)
         o["name"]       = p->name;   // a const char*: copied (check_json_char_arrays)
         o["maxGpio"]    = p->maxGpio;
 
@@ -95,7 +95,7 @@ void handleGetBoardProfiles(AsyncWebServerRequest* req) {
     // The profile this image was built for, offered preselected by the
     // wizard. Absent when the build names none (chaos env, custom builds).
     const BoardProfile* sug = suggestedProfile();
-    if (sug) doc["suggested"] = sug->shortId;
+    if (sug) doc["suggested"] = sug->shortId;   // a const char* (check_json_char_arrays)
 
     sendJsonResponse(req, doc);
 }

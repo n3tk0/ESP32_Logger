@@ -105,16 +105,34 @@ inline bool sendBlockPrint(AsyncWebServerRequest* r, std::shared_ptr<BlockPrint>
 
 // `attachment`, when given, is the file name for a Content-Disposition
 // header (settings and backup downloads).
+//
+// `always`: the request has already changed state, so the reply goes out
+// without a unit when the budget has none (WebUnit::orBypass()). A POST, PUT
+// or DELETE always does; a GET that consumes something says so with
+// sendJsonAnswer().
+inline void sendJsonResponseImpl(AsyncWebServerRequest* r, const JsonDocument& doc,
+                                 int code, const char* attachment, bool always);
+
 inline void sendJsonResponse(AsyncWebServerRequest* r, const JsonDocument& doc,
                              int code = 200, const char* attachment = nullptr) {
+    sendJsonResponseImpl(r, doc, code, attachment, r->method() != HTTP_GET);
+}
+
+inline void sendJsonAnswer(AsyncWebServerRequest* r, const JsonDocument& doc, int code = 200) {
+    sendJsonResponseImpl(r, doc, code, nullptr, true);
+}
+
+inline void sendJsonResponseImpl(AsyncWebServerRequest* r, const JsonDocument& doc,
+                                 int code, const char* attachment, bool always) {
     // A document that ran out of heap while being built (overflowed), or a
     // reply that could not be had whole, would go out as a 200 with a
     // cut-short body, which the page cannot parse and does not retry: answer
     // 503 + Retry-After instead, which it does. So does a reply the budget
     // has no unit for (HeapBudget.h).
     const size_t n = doc.overflowed() ? 0 : measureJson(doc);
-    WebUnit unit;
-    if (!n || !unit.ok()) { sendBusyResponse(r); return; }
+    if (!n) { sendBusyResponse(r); return; }
+    WebUnit unit = always ? WebUnit::orBypass() : WebUnit();
+    if (!unit.ok()) { sendBusyResponse(r); return; }
 
     // A small reply gives its unit back once it is handed over: what stays
     // in flight is under JSON_SMALL_REPLY bytes, sent straight from it.

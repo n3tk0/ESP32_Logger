@@ -53,6 +53,17 @@ WebUnit::WebUnit() {
     portEXIT_CRITICAL(&s_mux);
 }
 
+WebUnit WebUnit::orBypass() {
+    WebUnit u;
+    if (!u._ok) {
+        u._ok = true;           // uncounted: nothing to give back
+        portENTER_CRITICAL(&s_mux);
+        if (s_webRefused) s_webRefused--;   // not a refusal after all
+        portEXIT_CRITICAL(&s_mux);
+    }
+    return u;
+}
+
 void WebUnit::release() {
     if (!_counted) return;
     portENTER_CRITICAL(&s_mux);

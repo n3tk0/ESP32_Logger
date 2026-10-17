@@ -547,8 +547,19 @@
         });
         items.forEach(function (it) {
           var v = by[it.sensor + "::" + it.metric];
+          // A series left out of the answer is one whose name the device
+          // will not echo (a space, a letter outside ASCII): that one asks
+          // /api/data on its own, as every card did before.
+          if (!Array.isArray(v)) {
+            fetchWithTimeout("/api/data?sensor=" + encodeURIComponent(it.sensor) +
+                "&metric=" + encodeURIComponent(it.metric) + "&from=" + from + "&to=" + to +
+                "&agg=raw&mode=lttb&limit=40", {}, 8000)
+              .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+              .then(it.resolve, it.reject);
+            return;
+          }
           // The shape the drawing below reads, as /api/data gives it.
-          it.resolve({ data: (Array.isArray(v) ? v : []).map(function (x) { return { v: x }; }) });
+          it.resolve({ data: v.map(function (x) { return { v: x }; }) });
         });
       })
       .catch(function (e) { items.forEach(function (it) { it.reject(e); }); });

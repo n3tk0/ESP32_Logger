@@ -6,9 +6,9 @@ what an Overview load asked a C3 for, each with its own connection and reply
 (design/c3-heap-design-1016.md). They now share one /api/sparks request.
 
 This loads the Overview against the mock and checks that the sparklines are
-drawn, from one /api/sparks request and no /api/data request, and that a
-series the device leaves out is drawn as nothing rather than breaking the
-others.
+drawn, from one /api/sparks request, and that a series the device leaves out
+(a name it will not echo) is asked for with /api/data on its own and drawn
+too, without breaking the others.
 
     python3 tests/web/mock_device.py 8765 &
     python3 tests/web/drive_overview_sparks.py
@@ -65,7 +65,7 @@ with sync_playwright() as p:
         for item in q.get("s", [""])[0].split(","):
             sensor, _, metric = item.rpartition(":")
             if metric == "pressure":
-                continue                      # left out: drawn as nothing
+                continue                      # left out: asked for on its own
             series.append({"sensor": sensor, "metric": metric,
                            "v": [20 + (i % 5) * 0.5 for i in range(40)]})
         route.fulfill(status=200, content_type="application/json",
@@ -75,7 +75,8 @@ with sync_playwright() as p:
     def api_data(route):
         datas.append(route.request.url)
         route.fulfill(status=200, content_type="application/json",
-                      body=json.dumps({"count": 0, "data": []}))
+                      body=json.dumps({"count": 40, "data": [
+                          {"ts": NOW - 3600 + i * 90, "v": 1010 + (i % 4)} for i in range(40)]}))
     pg.route("**/api/data*", api_data)
 
     pg.goto(URL, wait_until="networkidle")
@@ -93,14 +94,16 @@ with sync_playwright() as p:
 
     check(len(sparks) >= 1, "the sparklines were asked for with /api/sparks")
     check(len(sparks) == 1, "in one request (%d made)" % len(sparks))
-    check(not datas, "and no /api/data request (%d made)" % len(datas))
+    asked_data = sorted(parse_qs(urlparse(u).query).get("metric", [""])[0] for u in datas)
+    check(asked_data == ["pressure"] * sum(1 for k in drawn if k.endswith("::pressure")),
+          "/api/data only for the series left out (%s)" % asked_data)
     asked = sparks[0].split(",") if sparks else []
     check(len(asked) == len(set(asked)), "each series is asked for once")
     check(any(v for v in drawn.values()), "the sparklines are drawn")
     check(all(v for k, v in drawn.items() if not k.endswith("::pressure")),
           "every series the device answered is drawn")
-    check("livingroom::pressure" in drawn and not drawn["livingroom::pressure"],
-          "a series left out of the answer is drawn as nothing")
+    check(drawn.get("livingroom::pressure") is True,
+          "a series left out of the answer is drawn from /api/data")
     errs = [(k, t) for k, t in console if k in ("error", "pageerror")]
     check(not errs, "no page errors (%s)" % errs[:3])
     b.close()
