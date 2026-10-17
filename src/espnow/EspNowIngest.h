@@ -161,6 +161,9 @@ struct EspNowIngestStats {
     /// of queue will help it. One number covering both is the kind of
     /// diagnostic that sends people to tune the thing that was never wrong.
     uint32_t historyNoClock;
+    /// Backfilled readings the mailbox refused: their (node, metric) pair
+    /// had no slot and the table was full of other metrics.
+    uint32_t historyRefused;
     uint32_t acksSent;
     uint32_t discoverSeen;
     uint32_t discoverBadSig;

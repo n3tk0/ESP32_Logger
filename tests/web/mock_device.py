@@ -47,7 +47,7 @@ STATUS = {
          "skew_s": None},
     ],
     "stats": {"frames": 1528, "malformed": 0, "unknown_node": 3, "replayed": 1,
-              "ring_full": 0, "history_collapsed": 0, "history_no_clock": 2,
+              "ring_full": 0, "history_collapsed": 0, "history_no_clock": 2, "history_refused": 0,
               "acks": 1531,
               "discover_seen": 5, "discover_bad_sig": 1, "paired": 3},
 }

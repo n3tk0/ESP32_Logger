@@ -325,9 +325,15 @@ static void handleIngestPayload(AsyncWebServerRequest* req,
         }
 
         if (backfill) {
-            // There is room — checked above — so this cannot shed anything,
-            // and its return value cannot mean anything but success.
-            remoteIngest.putHistorical(node, metric, value, unit, when);
+            // There is room — checked above — so this cannot shed anything.
+            // It can still be refused: a queued reading names its pair by its
+            // slot in the mailbox, and a pair with none finds it full of other
+            // nodes' metrics. Consumed then, like a live one below, and said.
+            if (remoteIngest.putHistoricalEx(node, metric, value, unit, when) ==
+                RemoteIngest::HistPut::Refused) {
+                rejected++;
+                continue;
+            }
             room--;
             queued++;
         } else if (remoteIngest.put(node, metric, value, unit,

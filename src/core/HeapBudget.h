@@ -71,6 +71,12 @@ public:
     WebUnit& operator=(const WebUnit&) = delete;
     bool ok() const { return _ok; }
     void release();
+    /// A unit if there is one, else an ok() one that is not counted: for a
+    /// reply to a request that has already changed state (a POST that saved,
+    /// toasts that were taken). A busy answer there reports a failure for a
+    /// change that was made, and the page does not ask again. Its reply is
+    /// still built in blocks and refused if the heap has none.
+    static WebUnit orBypass();
 private:
     bool _ok = false;
     bool _counted = false;

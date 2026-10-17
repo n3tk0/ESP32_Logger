@@ -85,8 +85,13 @@ private:
     // Sensor selections: one list per exporter, and the common one in the
     // last slot (DEF_SEL). _selOf[i] says which list exporter i uses.
     static constexpr int DEF_SEL = MAX_EXPORTERS;
-    SensorIdList _sensors[MAX_EXPORTERS + 1]     = {};
-    uint8_t      _sensorCount[MAX_EXPORTERS + 1] = {};   // 0 = all sensors
+    // A list is allocated the first time a config gives it a sensor, and
+    // kept (ExportTask may be reading it while the web task reloads): nine
+    // lists held from boot were 2.4 KB of a C3's heap, and most configs have
+    // none.
+    SensorIdList* _sensors[MAX_EXPORTERS + 1]    = {};
+    uint8_t      _sensorCount[MAX_EXPORTERS + 1] = {};   // 0 = all sensors, SEL_NONE = none
+    static constexpr uint8_t SEL_NONE = 0xFF;   // a list the heap had no room for
     uint8_t      _selOf[MAX_EXPORTERS]           = {};   // i or DEF_SEL
     uint32_t     _nextDueMs[MAX_EXPORTERS]   = {};
     bool         _scheduled[MAX_EXPORTERS]   = {};

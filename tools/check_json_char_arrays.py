@@ -14,7 +14,8 @@ shorter or longer than measureJson() said (2026-10-16). Through a
 document.
 
 The check finds assignments through [], add() and set() calls whose value is
-`<expr>.<field>` or `<expr>-><field>` where <field> is declared somewhere in
+`<expr>.<field>`, `<expr>-><field>` or a bare `_<field>` (a member, inside a
+method) where <field> is declared somewhere in
 src/ as `char <field>[...]`, and fails unless the value goes through
 jsonCopy() (src/utils/JsonCopy.h). jsonCopy() takes only an array, so a
 same-named field that is a pointer or a number fails to compile; such a line,
@@ -38,7 +39,7 @@ def sources():
 
 def array_members(files):
     names = set()
-    decl = re.compile(r"\bchar\s+(\w+)\s*\[[^\]]+\]\s*;")
+    decl = re.compile(r"\bchar\s+(\w+)\s*\[[^\]]+\]\s*(?:=[^;]*|\{[^;]*\})?;")
     for p in files:
         names.update(decl.findall(p.read_text(errors="ignore")))
     return names
@@ -49,7 +50,10 @@ def pattern(names):
     # `[k] = x.f;`  `.add(x.f)`  `.set(x.f)` — the value with nothing around it
     return re.compile(
         r"(?P<head>(?:\]\s*=|\.add\(|\.set\()\s*)"
-        r"(?P<val>[A-Za-z_][\w\[\]\.]*(?:\.|->)(?:" + alt + r"))\b"
+        r"(?P<val>(?:[A-Za-z_](?:[\w\[\]\.]|->)*(?:\.|->)(?:" + alt + r")"
+        # a bare member (`_name`, by this code's convention): inside a const
+        # method it is a const char[N] too
+        r"|(?:" + "|".join(sorted((n for n in names if n.startswith("_")), key=len, reverse=True)) + r")))\b"
         r"(?=\s*[;)])")
 
 

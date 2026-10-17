@@ -404,9 +404,13 @@
       // "Group by sensor": one heading per sensor over its metric cards.
       groupBy:   function (cardId) {
         var src = _ovCardSensor[cardId];
-        return src ? { key: src.id, label: src.id, sub: src.name, icon: "cpu" } : null;
+        // "outside · Remote node", as the Sensors page heads its groups.
+        if (!src) return null;
+        var same = String(src.name || "").toLowerCase() === String(src.id).toLowerCase();
+        return { key: src.id, label: src.id, sub: same ? "" : src.name, icon: "cpu" };
       },
       groupLabel: "iotExt.groupBySensor",
+      toolbarExtra: _ovAutoRefreshControl,
       onEdit:    function () { /* re-apply cached data after render */
         if (_overviewLastData)   _applyOverviewData(_overviewLastData);
         if (_overviewStatusData) ovFillWaterCached(_overviewStatusData);
@@ -417,6 +421,72 @@
     });
 
     populateOverview();
+    _ovAutoRefreshArm();
+  }
+
+  // ── Auto-refresh ───────────────────────────────────────────────────────────
+  // The readings again every so often, chosen while customising, per browser.
+  // Never under 5 s: every round is a request the device answers from a small
+  // heap. Off by default, as the page has always been. A round starts only
+  // once the last one is in, and only while the Overview is the page shown
+  // and the tab is visible.
+  // The same setting drives the Sensors page (sensors.js).
+  var OV_AUTO_KEY = AUTO_REFRESH_KEY;
+  var OV_AUTO_MIN_S = AUTO_REFRESH_MIN_S;
+  var OV_AUTO_CHOICES = [0, 5, 10, 30, 60, 300];
+  var _ovAutoTimer = null, _ovAutoBusy = false, _ovAutoSparkAt = 0;
+  var _ovAutoSeconds = autoRefreshSeconds;
+  function _ovAutoRefreshArm() {
+    if (_ovAutoTimer) { clearTimeout(_ovAutoTimer); _ovAutoTimer = null; }
+    var sec = _ovAutoSeconds();
+    if (!sec) return;
+    _ovAutoTimer = setTimeout(_ovAutoTick, sec * 1000);
+  }
+  function _ovAutoTick() {
+    _ovAutoTimer = null;
+    var shown = (typeof currentPage === "undefined" || currentPage === "overview") &&
+                document.visibilityState !== "hidden";
+    if (!shown || _ovAutoBusy) { _ovAutoRefreshArm(); return; }
+    _ovAutoBusy = true;
+    // The sparklines are an hour wide: asked for again once a minute at most,
+    // and drawn whole (they have already swept in).
+    if (Date.now() - _ovAutoSparkAt >= 60000) {
+      _ovAutoSparkAt = Date.now();
+      [].forEach.call(document.querySelectorAll("#page-overview svg.metric-spark-bg"),
+                      function (svg) { svg.dataset.drawnFor = ""; });
+    }
+    populateOverview(false).then(function () {
+      _ovAutoBusy = false;
+      _ovAutoRefreshArm();
+    }, function () { _ovAutoBusy = false; _ovAutoRefreshArm(); });
+  }
+  function _ovAutoRefreshControl() {
+    var wrap = document.createElement("label");
+    wrap.className = "deck-autorefresh";
+    wrap.title = ieT("iotExt.autoRefreshHint");
+    var sel = document.createElement("select");
+    sel.className = "input";
+    sel.id = "ovAutoRefresh";
+    var cur = _ovAutoSeconds();
+    OV_AUTO_CHOICES.forEach(function (sec) {
+      var o = document.createElement("option");
+      o.value = String(sec);
+      o.textContent = sec === 0 ? ieT("iotExt.autoRefreshOff")
+                    : sec < 60 ? sec + " s" : (sec / 60) + " min";
+      if (sec === cur) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", function () {
+      var v = parseInt(sel.value, 10) || 0;
+      if (v && v < OV_AUTO_MIN_S) v = OV_AUTO_MIN_S;
+      try { localStorage.setItem(OV_AUTO_KEY, String(v)); } catch (e) {}
+      _ovAutoRefreshArm();
+    });
+    var span = document.createElement("span");
+    span.innerHTML = '<span data-icon="refresh-cw"></span> ' + esc(ieT("iotExt.autoRefresh"));
+    wrap.appendChild(span);
+    wrap.appendChild(sel);
+    return wrap;
   }
 
   function _normalizeLatest(data) {
@@ -547,8 +617,19 @@
         });
         items.forEach(function (it) {
           var v = by[it.sensor + "::" + it.metric];
+          // A series left out of the answer is one whose name the device
+          // will not echo (a space, a letter outside ASCII): that one asks
+          // /api/data on its own, as every card did before.
+          if (!Array.isArray(v)) {
+            fetchWithTimeout("/api/data?sensor=" + encodeURIComponent(it.sensor) +
+                "&metric=" + encodeURIComponent(it.metric) + "&from=" + from + "&to=" + to +
+                "&agg=raw&mode=lttb&limit=40", {}, 8000)
+              .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+              .then(it.resolve, it.reject);
+            return;
+          }
           // The shape the drawing below reads, as /api/data gives it.
-          it.resolve({ data: (Array.isArray(v) ? v : []).map(function (x) { return { v: x }; }) });
+          it.resolve({ data: v.map(function (x) { return { v: x }; }) });
         });
       })
       .catch(function (e) { items.forEach(function (it) { it.reject(e); }); });
@@ -585,6 +666,8 @@
         if (ys.length < 2) return;
         var meta = ovMetricMeta(metric);
         var lo = min, hi = max;
+        var span = sparkRange(ys);
+        min = span.lo; max = span.hi;
         // Counts and concentrations start at zero, so a small wobble is not
         // drawn as a cliff (PM2.5 1.5 -> 1.2 filled the whole card).
         if (meta.z && min > 0) min = 0;
@@ -592,14 +675,15 @@
         var stepX = 100 / (ys.length - 1), line = "", area = "M 0,36";
         for (var j = 0; j < ys.length; j++) {
           var x = (j * stepX).toFixed(1);
-          var y = (34 - ((ys[j] - min) / range) * 30).toFixed(1);
+          var y = (34 - sparkK(ys[j], min, range) * 30).toFixed(1);
           line += (j ? " " : "") + x + "," + y;
           area += " L " + x + "," + y;
         }
         area += " L 100,36 Z";
-        svg.innerHTML =
+        // Swept in, oldest to newest, the first time it is shown (sparkDraw, core.js).
+        sparkDraw(svg, "ov:" + key,
           '<path d="' + area + '" fill="currentColor" opacity="0.13"></path>' +
-          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>';
+          '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55" vector-effect="non-scaling-stroke"></polyline>');
         var card = svg.closest ? svg.closest(".ov-metric-card") : null;
         var scale = card && card.querySelector(".ov-spark-scale");
         if (scale) {

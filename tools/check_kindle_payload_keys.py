@@ -106,7 +106,7 @@ def main() -> int:
           'by the Kindle script (%d patterns).' % (len(keys), len(pats)))
 
     flow = open(FLOW, encoding='utf-8').read()
-    body = flow[flow.index('kdFlowPanelKeys(const KdFlow'):]
+    body = flow[flow.index('kdFlowPanelKeysW(const KdFlow'):]
     body = body[:body.index('#undef KDF_K')]
     sent = set(re.findall(r'KDF_[KRT]\(\s*"([A-Z0-9_]+)"', body))
     m = re.search(r'^FLOW_KEYS="([^"]*)"', sh, re.M)

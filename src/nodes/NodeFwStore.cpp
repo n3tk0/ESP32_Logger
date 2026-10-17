@@ -13,6 +13,7 @@
 #include "../core/SdCompat.h"         // sdFs()
 #include "../pipeline/DataPipeline.h" // fsMutex
 #include "../utils/MutexGuard.h"
+#include "../core/LazySlots.h"
 #include "../utils/JsonIO.h"
 
 using nodefw::Kind;
@@ -42,7 +43,9 @@ struct Target {
 };
 
 static Img               s_img[3];   // by nodefw::Kind; [0] unused
-static Target            s_t[NODEFW_MAX_TARGETS];
+// Made when a node is first chosen for a rollout and kept (LazySlots.h): a
+// table of NODEFW_MAX_TARGETS held from boot was 1.5 KB of a C3's heap.
+static LazySlots<Target, NODEFW_MAX_TARGETS> s_t;
 static SemaphoreHandle_t s_mx  = nullptr;
 static volatile uint32_t s_gen = 1;
 
@@ -57,6 +60,10 @@ static bool kindOk(Kind k) { return k == nodefw::KIND_ESP8266 || k == nodefw::KI
 
 static void filePath(char* out, size_t cap, Kind k, const char* ext) {
     snprintf(out, cap, NODEFW_DIR "/%s.%s", nodefw::kindName(k), ext);
+}
+
+static Target* freeT() {
+    return s_t.claim([](const Target& t) { return !t.key[0]; });
 }
 
 static Target* findT(const char* key) {
@@ -163,7 +170,6 @@ void nodeFwBegin() {
             if (f) f.close();
         }
         if (readJson(ROLLOUT, d)) {
-            int n = 0;
             for (int k = nodefw::KIND_ESP8266; k <= nodefw::KIND_ESPNOW_C3; k++) {
                 JsonObjectConst o = d[nodefw::kindName((Kind)k)];
                 s_img[k].attempt = o["attempt"] | 0;
@@ -171,11 +177,13 @@ void nodeFwBegin() {
                 if (!s_img[k].have) continue;
                 for (JsonPairConst kv : o["targets"].as<JsonObjectConst>()) {
                     const uint8_t st = nfr::statusParse(kv.value()["st"] | "");
-                    if (n >= NODEFW_MAX_TARGETS || st == nfr::ST_NONE ||
+                    if (st == nfr::ST_NONE ||
                         nfr::kindOfKey(kv.key().c_str()) != (Kind)k ||
                         strlen(kv.key().c_str()) >= ncr::KEY_CAP)
                         continue;
-                    Target& t = s_t[n++];
+                    Target* tp = freeT();
+                    if (!tp) continue;      // full (or no heap)
+                    Target& t = *tp;
                     snprintf(t.key, sizeof(t.key), "%s", kv.key().c_str());
                     // Progress is RAM only: a download cut by a reboot is
                     // pending again until the node asks.
@@ -461,9 +469,7 @@ int nodeFwApiPost(JsonObjectConst body, JsonDocument& out) {
         auto add = [&](const char* key) {
             if (!keyOk(key, k)) return;   // "all" walks both kinds
             Target* t = findT(key);
-            if (!t)
-                for (Target& f : s_t)
-                    if (!f.key[0]) { t = &f; snprintf(f.key, sizeof(f.key), "%s", key); break; }
+            if (!t && (t = freeT())) snprintf(t->key, sizeof(t->key), "%s", key);
             if (!t) return;               // full: counted out of `targets`
             setSt(*t, nfr::ST_PENDING, nullptr);
             n++;

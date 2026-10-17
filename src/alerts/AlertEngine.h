@@ -115,9 +115,12 @@ private:
     // the seconds-long MQTT publish never holds the alert lock.
     // Sized for the worst case where every rule fires in one evaluate
     // call; in practice 1-2 fire per pass.
+    // The array is evaluate()'s own, on its stack: this points at it while
+    // evaluate() holds _mutex and is null otherwise. A member array of its
+    // own was 576 B of RAM, copied into that stack array on every call.
     static constexpr int PENDING_MQTT_MAX = 8;
-    SensorReading _pendingMqtt[PENDING_MQTT_MAX];
-    int           _pendingMqttCount = 0;
+    SensorReading* _pendingMqtt      = nullptr;
+    int            _pendingMqttCount = 0;
 
     // ---- Helpers ------------------------------------------------------------
     bool  _evalOp(float val, const char* op, float threshold) const;

@@ -1,4 +1,5 @@
 #include "ForecastModule.h"
+#include "../utils/JsonCopy.h"   // jsonCopy
 #include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "ModuleSchemas.h"      // this module's form, gzipped
 
@@ -301,7 +302,7 @@ bool ForecastModule::save(JsonObject cfg) const {
     cfg["provider"]     = (_provider == PROVIDER_OWM) ? "owm" : "open-meteo";
     cfg["lat"]          = _lat;
     cfg["lon"]          = _lon;
-    cfg["api_key"]      = _apiKey;
+    cfg["api_key"]      = jsonCopy(_apiKey);
     cfg["interval_min"] = _intervalMs / 60000UL;
     cfg["outlook"]      = (_outlook == OUTLOOK_DAILY) ? "daily" : "hourly";
     return true;

@@ -185,6 +185,27 @@ function kdSet(id, value) {
   if (el) el.value = String(value);
 }
 
+// The sensor the page is pointed at, chosen in its list even when
+// /api/sensors did not name it (a node that has not reported since a restart,
+// or a list that failed to load): with no option for it the select reads ""
+// and the next Save would put the page back on the default. The built-in
+// name the collector sends for an unset one is the list's "Default".
+function kdSetSensor(id, value, dflt) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  value = value || "";
+  if (value === dflt) value = "";
+  var have = false;
+  for (var i = 0; i < el.options.length; i++) if (el.options[i].value === value) have = true;
+  if (value && !have) {
+    var o = document.createElement("option");
+    o.value = value;
+    o.textContent = kdSensorLabel(value) + " (not reporting)";
+    el.appendChild(o);
+  }
+  el.value = value;
+}
+
 function kdVal(id, fallback) {
   var el = document.getElementById(id);
   return el ? el.value : fallback;
@@ -2150,8 +2171,8 @@ function kindleRender(d) {
   kdSet("kd-insz",  d.in_size || 100);
   kdSet("kd-rulei", d.rule_ink || 0);
   kdSet("kd-rules", d.rule_style || 0);
-  kdSet("kd-outdoor-sensor", d.outdoor_sensor || "");
-  kdSet("kd-indoor-sensor",  d.indoor_sensor || "");
+  kdSetSensor("kd-outdoor-sensor", d.outdoor_sensor, "outdoor");
+  kdSetSensor("kd-indoor-sensor",  d.indoor_sensor,  "indoor");
 
   // THE BADGE IS ABOUT THE DRAWING UNDER IT, which is the 600 px layout these
   // coordinates come from — KINDLE_PAGE_W scales every size in the firmware's
@@ -2410,6 +2431,8 @@ function kindleDefaults() {
   kdSet("kd-insz", "100");
   kdSet("kd-rulei", "0");
   kdSet("kd-rules", "0");
+  kdSet("kd-cha", "0");
+  kdSet("kd-chb", "0");
 
   kdShowInit = 0x1FF;  // KSHOW_ALL, and the clock
   kdBoldInit = 0;
@@ -2432,13 +2455,13 @@ function kindleDefaults() {
 
   kdZones = {
     hero: z(out, "temperature", kdFlags.bold | kdFlags.unit | kdFlags.age),
-    big:  z(out, "humidity",    kdFlags.unit, 1),
+    big:  z(out, "humidity",    kdFlags.unit),
     g1:   z(out, "pressure",    kdFlags.unit | kdFlags.trend),
     g2:   z(out, "dew_point",   kdFlags.unit),
     g3:   none(), g4: none(), g5: none(), g6: none(),
     in1:  z(inn, "temperature", kdFlags.unit | kdFlags.age),
-    in2:  z(inn, "humidity",    kdFlags.unit, 1),
-    in3:  z(inn, "aqi",         kdFlags.unit, 1)
+    in2:  z(inn, "humidity",    kdFlags.unit),
+    in3:  z(inn, "aqi",         kdFlags.unit)
   };
   kdGroups = { out:"", in:"" };
 

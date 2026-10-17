@@ -988,12 +988,22 @@ static void landReading(const char* id, bool newest, const char* metric, float v
         // two ask for opposite things: one wants a bigger queue, this one
         // wants NTP or an RTC.
         s_stats.historyNoClock++;
-    } else if (!remoteIngest.putHistorical(id, metric, value, unit, ts)) {
-        // The queue was full and shed its oldest entry to take this one.
-        // Counted, because a backlog that keeps overflowing means the drain
-        // is too slow for the burst size and that is a tuning fact, not a
-        // mystery.
-        s_stats.historyCollapsed++;
+    } else {
+        switch (remoteIngest.putHistoricalEx(id, metric, value, unit, ts)) {
+        case RemoteIngest::HistPut::Shed:
+            // The queue was full and shed its oldest entry to take this one.
+            // Counted, because a backlog that keeps overflowing means the drain
+            // is too slow for the burst size and that is a tuning fact, not a
+            // mystery.
+            s_stats.historyCollapsed++;
+            break;
+        case RemoteIngest::HistPut::Refused:
+            // No slot for its pair: the mailbox is full of other metrics.
+            s_stats.historyRefused++;
+            break;
+        case RemoteIngest::HistPut::Queued:
+            break;
+        }
     }
 }
 

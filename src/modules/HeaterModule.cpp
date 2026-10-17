@@ -1,4 +1,5 @@
 #include "HeaterModule.h"
+#include "../utils/JsonCopy.h"   // jsonCopy
 #include "../core/LogRing.h"   // Log: Serial + the RTC log ring (/api/log)
 #include "ModuleSchemas.h"      // this module's form, gzipped
 #include "../core/BoardProfiles.h"
@@ -105,10 +106,10 @@ bool HeaterModule::load(JsonObjectConst cfg) {
 bool HeaterModule::save(JsonObject cfg) const {
     cfg["enabled"]       = _enabled;
     cfg["pin"]           = _pin;
-    cfg["tempSensor"]    = _tempSensor;
-    cfg["tempMetric"]    = _tempMetric;
-    cfg["dewSensor"]     = _dewSensor;
-    cfg["dewMetric"]     = _dewMetric;
+    cfg["tempSensor"]    = jsonCopy(_tempSensor);
+    cfg["tempMetric"]    = jsonCopy(_tempMetric);
+    cfg["dewSensor"]     = jsonCopy(_dewSensor);
+    cfg["dewMetric"]     = jsonCopy(_dewMetric);
     cfg["setpointC"]     = _setpointC;
     cfg["hysteresisC"]   = _hysteresisC;
     cfg["dewMarginC"]    = _dewMarginC;

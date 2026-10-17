@@ -299,16 +299,22 @@ struct ChartBmpCtx {
                 if (!hourValid[i] || !hourValid[i+1]) continue;
                 // Interpolate band for this row between hour i and i+1
                 int x0 = hourX[i], x1 = hourX[i+1];
-                for (int x = x0; x <= x1; x++) {
+                auto lerp = [&](const int* v, int x) {
                     float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
-                    int minY = outMinY[i] + (int)(t * (outMinY[i+1] - outMinY[i]));
-                    int maxY = outMaxY[i] + (int)(t * (outMaxY[i+1] - outMaxY[i]));
+                    return v[i] + (int)(t * (v[i+1] - v[i]));
+                };
+                for (int x = x0; x <= x1; x++) {
+                    int minY = lerp(outMinY, x);
+                    int maxY = lerp(outMaxY, x);
                     if (y >= maxY && y <= minY) {
                         // Inside band: fill with #d8d8d8
                         setPixel4(row, x, cssGrey(0xD8));
                     }
-                    // Band outline (#8f8f8f)
-                    if (y == maxY || y == minY) {
+                    // Band outline (#8f8f8f), joined to the next column's, so
+                    // a steep hour is a line and not a column of dots.
+                    const int nx = x < x1 ? x + 1 : x;
+                    if (inSpan(y, maxY, lerp(outMaxY, nx), 0) ||
+                        inSpan(y, minY, lerp(outMinY, nx), 0)) {
                         setPixel4(row, x, cssGrey(0x8F));
                     }
                 }
@@ -327,9 +333,12 @@ struct ChartBmpCtx {
                     // Dash pattern: 7px on, 5px off
                     int phase = (x - x0) % 12;
                     if (phase >= 7) continue;  // gap
-                    float t = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0;
-                    int my = inMeanY[i] + (int)(t * (inMeanY[i+1] - inMeanY[i]));
-                    if (y >= my && y <= my + 1)
+                    auto at = [&](int xx) {
+                        float t = (x1 > x0) ? (float)(xx - x0) / (float)(x1 - x0) : 0;
+                        return inMeanY[i] + (int)(t * (inMeanY[i+1] - inMeanY[i]));
+                    };
+                    const int my = at(x), myN = at(x < x1 ? x + 1 : x);
+                    if (inSpan(y, my, myN, 0) || inSpan(y, my + 1, myN + 1, 0))
                         setPixel4(row, x, cssGrey(0x77));
                 }
             }
@@ -342,13 +351,23 @@ struct ChartBmpCtx {
         for (int i = 0; i < TrendRing::HOURS - 1; i++) {
             if (!hourValid[i] || !hourValid[i+1]) continue;
             int x0 = hourX[i], x1 = hourX[i+1];
+            auto at = [&](int x) {
+                return outMeanY[i] + (x1 > x0 ? (x - x0) * (outMeanY[i+1] - outMeanY[i])
+                                                  / (x1 - x0) : 0);
+            };
             for (int x = x0; x <= x1; x++) {
-                int my = outMeanY[i] + (x1 > x0 ? (x - x0) * (outMeanY[i+1] - outMeanY[i])
-                                                    / (x1 - x0) : 0);
-                if (y >= my - half && y <= my + half)
+                // From this column's height to the next one's: a rise steeper
+                // than a pixel a column is still one unbroken line.
+                if (inSpan(y, at(x), at(x < x1 ? x + 1 : x), half))
                     setPixel4(row, x, palIdx);
             }
         }
+    }
+
+    /// Whether row `y` is on the run from height `a` to `b`, `half` px either side.
+    static bool inSpan(int y, int a, int b, int half) {
+        const int lo = a < b ? a : b, hi = a < b ? b : a;
+        return y >= lo - half && y <= hi + half;
     }
 
     // Set a single pixel in a 4-bit packed row buffer.

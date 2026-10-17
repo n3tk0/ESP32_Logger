@@ -350,7 +350,41 @@ static void test_second_line_on_its_own_scale() {
     CHECK_EQ(ln.R, 559);
 }
 
+// A steep hour is one unbroken line: every drawn column touches the next one.
+// Hours that swing the whole range across a few columns used to draw a column
+// of dots per hour, a pixel or three each, with white between them.
+static void test_steep_line_is_unbroken() {
+    ChartBmpCtx c;
+    fillCtx(c, false);
+    for (int i = 0; i < TrendRing::HOURS; i++) {
+        const float v = (i & 1) ? 30.0f : 0.0f;
+        c.tOut[i].count = 1; c.tOut[i].min = c.tOut[i].max = c.tOut[i].sum = v;
+    }
+    c.lineOnly = true;
+    c.init(200, 64);
+    std::vector<int> lo(200, 1000), hi(200, -1);
+    std::vector<uint8_t> row(c.rowBytes);
+    for (int y = 0; y < 64; y++) {
+        c.renderRow(row.data(), y);
+        for (int x = 0; x < 200; x++) {
+            const uint8_t v = (x & 1) ? (row[x / 2] & 0x0F) : (row[x / 2] >> 4);
+            if (v != 15) { if (y < lo[x]) lo[x] = y; if (y > hi[x]) hi[x] = y; }
+        }
+    }
+    int pairs = 0, broken = 0;
+    for (int x = 0; x + 1 < 200; x++) {
+        if (hi[x] < 0 || hi[x + 1] < 0) continue;
+        pairs++;
+        const int top = lo[x] > lo[x + 1] ? lo[x] : lo[x + 1];
+        const int bot = hi[x] < hi[x + 1] ? hi[x] : hi[x + 1];
+        if (top > bot + 1) broken++;
+    }
+    CHECK(pairs > 150);
+    CHECK_EQ(broken, 0);
+}
+
 int main() {
+    RUN(test_steep_line_is_unbroken);
     RUN(test_second_line_on_its_own_scale);
     RUN(test_line_only);
     RUN(test_line_only_inverted);

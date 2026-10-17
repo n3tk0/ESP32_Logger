@@ -143,7 +143,9 @@
       rows.push(currentRow);
     }
 
-    // Third pass: position cards with equalized row heights
+    // Third pass: position cards with equalized row heights. Every card in a
+    // row takes the tallest one's height, a fixed-height card too (its chip
+    // sets the least it gets), so a row never ends in a ragged edge.
     var cumTop = 0;
     rows.forEach(function (row) {
       var maxH = 0;
@@ -151,7 +153,7 @@
       row.forEach(function (p) {
         p.slot.style.left   = (p.col * (colW + GAP)) + "px";
         p.slot.style.top    = cumTop + "px";
-        p.slot.style.height = (p.fixed ? p.height : maxH) + "px";
+        p.slot.style.height = maxH + "px";
       });
       cumTop += maxH + GAP;
     });
@@ -281,6 +283,9 @@
     // When on, live mode gathers each group's cards behind one heading row,
     // groups in the order their first card has; the saved order is untouched.
     var groupBy = typeof opts.groupBy === "function" ? opts.groupBy : null;
+    // toolbarExtra() -> an element shown in the toolbar while customising
+    // (the Overview's auto-refresh), or null.
+    var toolbarExtra = typeof opts.toolbarExtra === "function" ? opts.toolbarExtra : null;
 
     var cards = loadCards(pageId, defaults, registry);
     var grouped = groupBy ? loadFlag(pageId, "group") : false;
@@ -392,6 +397,8 @@
           editing = false; renderToolbar(); render(); editingHooks(false);
         });
         toolbarSlot.appendChild(badge);
+        var extra = toolbarExtra ? toolbarExtra() : null;
+        if (extra) toolbarSlot.appendChild(extra);
         if (grp) toolbarSlot.appendChild(grp);
         toolbarSlot.appendChild(reset);
         toolbarSlot.appendChild(done);

@@ -166,7 +166,8 @@ void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
         MutexGuard g(_mutex, pdMS_TO_TICKS(5));
         if (!g.isLocked()) return;
 
-        _pendingMqttCount = 0;   // start with empty staging slot
+        _pendingMqtt      = stagedMqtt;   // _dispatch stages straight into it
+        _pendingMqttCount = 0;
 
         for (int i = 0; i < _ruleCount; i++) {
             Rule& rule = _rules[i];
@@ -197,13 +198,10 @@ void AlertEngine::evaluate(const SensorReading& r, uint32_t nowTs) {
             }
         }
 
-        // Snapshot pending alerts to a stack-local. No second reset needed:
-        // _pendingMqttCount was zeroed at the top of this locked block, so the
-        // next evaluate() already starts fresh.
         stagedCount = _pendingMqttCount;
         if (stagedCount > PENDING_MQTT_MAX) stagedCount = PENDING_MQTT_MAX;
-        memcpy(stagedMqtt, _pendingMqtt,
-               (size_t)stagedCount * sizeof(SensorReading));
+        _pendingMqtt      = nullptr;    // the array goes out of scope with this call
+        _pendingMqttCount = 0;
     } // _mutex released
 
 #ifdef EXPORT_MQTT_ENABLED
@@ -243,7 +241,7 @@ void AlertEngine::_dispatch(const Rule& rule, float val, uint32_t ts) {
         // (seconds-long TLS network I/O while holding the alert mutex
         // blocks every other evaluate() and risks deadlock if the
         // exporter ever takes its own lock).
-        if (_pendingMqttCount < PENDING_MQTT_MAX) {
+        if (_pendingMqtt && _pendingMqttCount < PENDING_MQTT_MAX) {
             SensorReading& ar = _pendingMqtt[_pendingMqttCount++];
             memset(&ar, 0, sizeof(ar));
             strncpy(ar.sensorId,   rule.id,   sizeof(ar.sensorId)   - 1);
@@ -343,7 +341,7 @@ void AlertEngine::toJson(JsonDocument& doc) const {
         JsonObject expr = o["expr"].to<JsonObject>();
         expr["sensor"]     = jsonCopy(rule.sensor);
         expr["metric"]     = jsonCopy(rule.metric);
-        expr["op"]         = rule.op;
+        expr["op"]         = jsonCopy(rule.op);
         expr["value"]      = rule.threshold;
         expr["duration_s"] = rule.duration_s;
 
@@ -433,7 +431,7 @@ bool AlertEngine::_save() const {
         JsonObject expr = o["expr"].to<JsonObject>();
         expr["sensor"]     = jsonCopy(rule.sensor);
         expr["metric"]     = jsonCopy(rule.metric);
-        expr["op"]         = rule.op;
+        expr["op"]         = jsonCopy(rule.op);
         expr["value"]      = rule.threshold;
         expr["duration_s"] = rule.duration_s;
 
