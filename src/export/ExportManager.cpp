@@ -5,6 +5,8 @@
 #include "../utils/MutexGuard.h"
 #include <stdlib.h>
 #include <string.h>
+#include <memory>
+#include <new>
 #include <time.h>
 #include "../utils/JsonIO.h"
 #include "../core/HeapWatch.h"   // HeapActivity
@@ -495,20 +497,30 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
     spoolPath(path, exp->getName());
     if (!_spoolFS->exists(path)) { _setSpoolOff(idx, 0); return true; }
 
+    // The batch (EXPORT_SPOOL_BATCH readings, ~1.4 KB) is on the heap, not
+    // this task's stack: the send below runs TLS on top of it, and the C3's
+    // Export stack is sized from the live sends (setup.h). No heap: the
+    // spool stays as it is and is tried again on the next interval.
+    std::unique_ptr<SensorReading[]> batch(new (std::nothrow) SensorReading[EXPORT_SPOOL_BATCH]);
+    if (!batch) {
+        Log.printf("[ExportManager] no heap for a spool batch of '%s', kept\n", exp->getName());
+        return false;
+    }
+
     File f = _spoolFS->open(path, FILE_READ);
     if (!f) return true;
     const uint32_t size = f.size();
     // The file was replaced since (see _spoolBatch): start it from the top.
     if (_spoolOff[idx] > size || _spoolOff[idx] % sizeof(SensorReading)) _setSpoolOff(idx, 0);
 
-    SensorReading batch[EXPORT_SPOOL_BATCH];
     size_t count = 0;
     // Whole records left after the offset. When there are some and none
     // could be read, LittleFS failed (seek/read): try again next time; only
     // a spool with nothing left in it (or a torn tail) is removed below.
     const bool left = size - _spoolOff[idx] >= sizeof(SensorReading);
     if (f.seek(_spoolOff[idx])) {
-        const size_t got = f.read(reinterpret_cast<uint8_t*>(batch), sizeof(batch));
+        const size_t got = f.read(reinterpret_cast<uint8_t*>(batch.get()),
+                                  EXPORT_SPOOL_BATCH * sizeof(SensorReading));
         count = got / sizeof(SensorReading);   // a torn tail record is dropped
     }
     f.close();
@@ -539,7 +551,7 @@ bool ExportManager::_drainSpool(int idx, IExporter* exp) {
         HeavyLease lease;    // no web reply alongside a TLS session (HeapBudget.h)
         g_taskHeartbeat[TASK_IDX_EXPORT] = millis();
         exp->clearThrottle();
-        ok = exp->send(batch, count);          // false on a 429 too
+        ok = exp->send(batch.get(), count);    // false on a 429 too
         // Sent but unanswered: most likely stored, so move past it instead
         // of sending the same batch again next time (see _sendWithRetry).
         if (!ok && exp->unconfirmed()) ok = true;

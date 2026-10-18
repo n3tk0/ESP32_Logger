@@ -185,7 +185,7 @@ with sync_playwright() as p:
                   f = c.querySelector('.s-foot > span').getBoundingClientRect();
             return { dl: sv.left - r.left, dr: r.right - sv.right, db: r.bottom - sv.bottom,
                      footIn: f.top >= sv.top && f.bottom <= sv.bottom && f.left >= sv.left }; })""")
-    check(geo and all(g["dl"] <= 1.5 and g["dr"] <= 1.5 and g["db"] <= 1.5 for g in geo),
+    check(geo and all(g["dl"] <= 0.5 and g["dr"] <= 0.5 and g["db"] <= 1.5 for g in geo),
           "Sensors sparks run edge to edge and down to the card's bottom (%s)" % geo[:2])
     check(geo and all(g["footIn"] for g in geo), "the age sits inside the graph's area")
     first = pg3.evaluate("""() => { const p = document.querySelector('#sensors-grid svg.s-spark polyline');
