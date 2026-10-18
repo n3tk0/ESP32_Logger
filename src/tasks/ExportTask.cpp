@@ -31,9 +31,10 @@ void exportTaskFunc(void* /*param*/) {
         // reasons that both end in a crash otherwise:
         //
         //   Stack. It runs WiFiClientSecure + HTTPClient + getString() + a
-        //   JSON parse. STACK_EXPORT_TASK is 8192 and is commented "WiFi +
-        //   TLS + JSON serialisation" precisely for this shape of work;
-        //   STACK_PROCESS_TASK is 6144 and would likely abort on the canary.
+        //   JSON parse. STACK_EXPORT_TASK (8 KB, 6 KB on the C3 from measured
+        //   use, setup.h) is sized for this work on top of the exporters';
+        //   ProcessingTask's 6 KB already carries its own (alerts, MQTT TLS)
+        //   and would likely abort on the canary with both.
         //
         //   Watchdog. It blocks. Every task stamps a heartbeat at the top of
         //   its loop and TaskManager reboots the device after MAX_SILENCE_MS

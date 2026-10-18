@@ -381,7 +381,15 @@
 #  endif
 #endif
 #ifndef STACK_EXPORT_TASK
-#  define STACK_EXPORT_TASK      8192   // WiFi + TLS + JSON serialisation
+// WiFi + TLS + JSON serialisation: the exporters' sends and the forecast
+// fetch (ForecastModule::tick). On the C3, 21.5 h of openSenseMap posts and
+// forecast fetches left 4.6 KB of 8 KB unused (/api/diag, boot #73), so 6 KB
+// keeps ~2.5 KB of margin and gives 2 KB back to the heap.
+#  if defined(CONFIG_IDF_TARGET_ESP32C3)
+#    define STACK_EXPORT_TASK    6144
+#  else
+#    define STACK_EXPORT_TASK    8192
+#  endif
 #endif
 
 // R28 / AUDIT 5.5: compile-time DRAM budget guard.  ESP32-C3 has 400 KB SRAM
