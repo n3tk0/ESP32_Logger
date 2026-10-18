@@ -555,7 +555,9 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
    Overview; the reading's age sits inside its filled area on a chip of the
    card's own colour, so it reads over the line and the fill alike. */
 .sensor { overflow:hidden; padding-bottom:0; }
-.sensor .s-spark { display:block; width:calc(100% + 28px); height:58px; color:var(--accent); margin:auto -14px 0; }
+/* 1px past each side of the padding box (clipped by the card): on a card at a
+   fractional x the graph otherwise stops a pixel short of the right edge. */
+.sensor .s-spark { display:block; width:calc(100% + 30px); height:58px; color:var(--accent); margin:auto -15px 0; }
 .sensor .s-foot {
   position:absolute; left:10px; bottom:7px; z-index:1;
   display:flex; justify-content:space-between; align-items:center;
