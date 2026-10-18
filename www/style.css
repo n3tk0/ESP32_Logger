@@ -1281,9 +1281,11 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
 /* ── Background sparkline behind Overview metric tiles ──
    Mirrors the Sensors-page card look: a faint filled graph anchored to the
    bottom of the card, with the value/label text floating on top. */
+/* 1px past each side (the card clips it): on a card at a fractional x the
+   graph otherwise stops a pixel short of the right edge (as .s-spark). */
 .metric-spark-bg {
-  position:absolute; left:0; right:0; bottom:0;
-  width:100%; height:62%;
+  position:absolute; left:-1px; right:-1px; bottom:0;
+  width:calc(100% + 2px); height:62%;
   color:var(--accent);
   pointer-events:none; z-index:0;
 }
@@ -1292,7 +1294,7 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
    below it (in flow, not behind the number). */
 .ov-metric-card .ov-metric-value { font-size:32px; }
 .ov-metric-card > .ov-card-spark {
-  position:static; display:block; width:100%;
+  position:static; display:block; width:calc(100% + 2px); margin:0 -1px;
   flex:1 1 0; height:auto; min-height:34px;
 }
 /* Keep card text above the background graph */

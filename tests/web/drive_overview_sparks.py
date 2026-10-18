@@ -109,6 +109,14 @@ with sync_playwright() as p:
             (by[s.style.top] = by[s.style.top] || []).push(s.offsetHeight); });
         return Object.values(by).filter(h => Math.max(...h) - Math.min(...h) > 1); }""")
     check(not ragged, "Overview cards in a row are one height (%s)" % ragged[:2])
+    # Past the padding box by a pixel on each side (clipped by the card), so a
+    # card at a fractional x shows no pale column at its right edge.
+    edges = pg.evaluate("""() => [...document.querySelectorAll('#overview-deck svg.metric-spark-bg')]
+        .filter(s => s.getBoundingClientRect().width).map(s => {
+            const c = s.closest('.card, .kpi').getBoundingClientRect(), r = s.getBoundingClientRect();
+            return [+(r.left - c.left).toFixed(2), +(c.right - r.right).toFixed(2)]; })""")
+    check(edges and all(l <= 0.5 and r <= 0.5 for l, r in edges),
+          "Overview sparks reach both edges of their card (%s)" % edges[:3])
     asked_data = sorted(parse_qs(urlparse(u).query).get("metric", [""])[0] for u in datas)
     check(asked_data == ["pressure"] * sum(1 for k in drawn if k.endswith("::pressure")),
           "/api/data only for the series left out (%s)" % asked_data)
