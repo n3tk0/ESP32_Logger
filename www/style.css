@@ -1500,6 +1500,25 @@ select.input { appearance:none; background-image:url("data:image/svg+xml;utf8,<s
   height: 100% !important;
 }
 .uplot { font: 12px system-ui, sans-serif; }
+
+/* Sensors page chart: controls row, reset button, navigator under the chart. */
+.sc-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.sc-toolbar > select, .sc-toolbar > span { flex: 0 1 auto; }
+.sc-wrap { position: relative; }
+.sc-reset { position: absolute; top: 4px; right: 8px; z-index: 3;
+  padding: 2px 10px; font-size: .8rem; }
+.sc-reset[hidden], .sc-nav[hidden] { display: none; }
+.sc-nav { position: relative; height: 56px; margin-top: 6px; touch-action: none;
+  user-select: none; -webkit-user-select: none; }
+.sc-nav-win { position: absolute; top: 0; bottom: 0; cursor: grab;
+  background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 3px; }
+.sc-nav-win:active { cursor: grabbing; }
+.sc-nav-h { position: absolute; top: 0; bottom: 0; width: 14px; cursor: ew-resize; }
+.sc-nav-h::after { content: ""; position: absolute; top: 30%; bottom: 30%; left: 5px;
+  width: 4px; border-radius: 2px; background: var(--accent); }
+.sc-nav-h[data-edge="l"] { left: -8px; }
+.sc-nav-h[data-edge="r"] { right: -8px; }
 .u-legend { color: var(--text); }
 .u-tooltip { position: absolute; pointer-events: none; padding: 4px 8px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 4px;

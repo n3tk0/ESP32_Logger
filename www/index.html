@@ -702,7 +702,10 @@
         <div class="card" style="margin-top:1rem">
           <div class="card-head">
             <span><span data-icon="line-chart"></span> <span data-i18n="sensorsPage.chartTitle">Sensor chart</span></span>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          </div>
+          <!-- The chart's controls: their own row, so a phone wraps them under
+               the title instead of squeezing the title beside them. -->
+          <div class="sc-toolbar">
               <select id="sc-sensor" class="input" style="width:auto" data-change="sensorChartLoad">
                 <option value="" data-i18n="sensorsPage.optSensor">— select sensor —</option>
               </select>
@@ -714,22 +717,30 @@
                 <option value="21600" data-i18n="sensorsPage.range6h">Last 6h</option>
                 <option value="86400" selected data-i18n="sensorsPage.range24h">Last 24h</option>
                 <option value="604800" data-i18n="sensorsPage.range7d">Last 7d</option>
+                <option value="custom" data-i18n="sensorsPage.rangeCustom">Period…</option>
               </select>
+              <span id="sc-custom" style="display:none;gap:4px;align-items:center">
+                <input type="date" id="sc-from" class="input" style="width:auto" data-change="sensorChartLoad"
+                       data-i18n-title="sensorsPage.rangeFrom" title="From">
+                <span>–</span>
+                <input type="date" id="sc-to" class="input" style="width:auto" data-change="sensorChartLoad"
+                       data-i18n-title="sensorsPage.rangeTo" title="To">
+              </span>
               <select id="sc-agg" class="input" style="width:auto" data-change="sensorChartLoad">
                 <option value="5m" data-i18n="sensorsPage.agg5m">5 min</option>
                 <option value="1h" data-i18n="sensorsPage.agg1h">1 hour</option>
                 <option value="1d" data-i18n="sensorsPage.agg1d">1 day</option>
                 <option value="raw" data-i18n="sensorsPage.aggRaw">Raw</option>
               </select>
-            </div>
           </div>
           <!-- CURRENT value + stats row -->
           <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:10px 16px 0;flex-wrap:wrap;gap:8px">
             <div>
-              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-family:var(--mono)" data-i18n="sensorsPage.currentLabel">Current</div>
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-family:var(--mono)" id="sc-current-lbl" data-i18n="sensorsPage.currentLabel">Current</div>
               <div id="sc-current" style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--text)">—</div>
             </div>
-            <div id="sc-stats" style="display:flex;gap:16px;font-size:11px;color:var(--text-3);font-family:var(--mono);padding-bottom:4px">
+            <div id="sc-stats" style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11px;color:var(--text-3);font-family:var(--mono);padding-bottom:4px">
+              <span id="sc-scope" hidden data-i18n="sensorsPage.statsZoomed" style="color:var(--accent)">In view:</span>
               <span><span data-i18n="sensorsPage.statMin">Min</span> <span id="sc-min" style="color:var(--text)">—</span></span>
               <span><span data-i18n="sensorsPage.statAvg">Avg</span> <span id="sc-avg" style="color:var(--text)">—</span></span>
               <span><span data-i18n="sensorsPage.statMax">Max</span> <span id="sc-max" style="color:var(--text)">—</span></span>
@@ -747,7 +758,17 @@
             </select>
           </div>
           <div class="card-body" style="padding:8px">
-            <div class="chart-container" style="max-height:320px"><div id="sensorChart"></div></div>
+            <!-- The chart, its reset button (shown while zoomed) and, under it,
+                 the navigator: the whole period with the shown window marked,
+                 to drag and stretch with a mouse or a finger. -->
+            <div class="sc-wrap">
+              <button type="button" id="sc-reset" class="btn sc-reset" hidden data-click="sensorChartReset"><span data-i18n="sensorsPage.zoomReset">↺ Whole period</span></button>
+              <div id="sensorChart"></div>
+              <div id="sc-nav" class="sc-nav" hidden data-i18n-title="sensorsPage.navHint" title="Drag the window to move, its edges to zoom; double-click for the whole period">
+                <div id="sc-nav-plot"></div>
+                <div id="sc-nav-win" class="sc-nav-win"><span class="sc-nav-h" data-edge="l"></span><span class="sc-nav-h" data-edge="r"></span></div>
+              </div>
+            </div>
             <div id="sc-msg" style="font-size:.8rem;color:var(--text-3);margin-top:4px"></div>
           </div>
         </div>
