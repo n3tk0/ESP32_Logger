@@ -2624,7 +2624,9 @@ check "$?" "a label's width is counted in characters, in any language"
   menu_open main
   # Five slots of 120 px, and "Stay awake" is ten characters: at the 28 px this
   # bar asks for by default that is 140 px of type in a 120 px slot.
-  big=$(grep -o 'px=[0-9]*' "$FBINK_LOG" | sort -t= -k2 -n | tail -1 | cut -d= -f2)
+  # Not `sort -t=`: the Rust sort on Ubuntu 26.04 runners reads that as an
+  # empty separator and fails.
+  big=$(grep -o 'px=[0-9]*' "$FBINK_LOG" | cut -d= -f2 | sort -n | tail -1)
   [ -n "$big" ] || exit 1
   [ "$big" -le 30 ] || { echo "px=$big in a 120px slot" >&2; exit 2; }
   exit 0 )
