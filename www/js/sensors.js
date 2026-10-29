@@ -867,12 +867,324 @@ function _scSeries(sid, metric, from, to, agg, progress) {
     return {
       agg: _scBucketName(a.sec), mode: mode, count: a.pts.length, noDate: res[1].noDate,
       otherMode: res[1].otherMode, cut: res[1].cut, live: live,
+      // The points before bucketing, and the bucket asked for: a zoom
+      // buckets its window afresh from them.
+      raw: pts, sec0: SC_BUCKET_SEC[agg] || 0,
       data: a.pts.map(function (p) { return { ts: p.ts, v: p.v, unit: unit }; }),
     };
   });
 }
 
 var _scLoadSeq = 0;
+
+// ── Zoom, reset and the navigator ──
+// _scView holds what a load brought: each series' points before bucketing,
+// and the window shown (lo..hi) within the whole of them (fullLo..fullHi).
+// A zoom — dragged on the chart or with the navigator's window — buckets
+// the window afresh from those points, so a day out of a month gets its
+// own detail, and the stats are the window's. Nothing is asked of the
+// device.
+var _scView = null;
+var _scNav = null;
+var _scSyncing = false;
+var _scRaf = 0, _scWant = null;
+var SC_MIN_WINDOW = 600;                // the narrowest window, seconds
+
+// The chart's data for lo..hi: each series' points in it, bucketed by the
+// bucket asked for (wider when that gives more than SC_MAX_POINTS), the
+// overlay put on the primary's times.
+function _scFrame(v, lo, hi) {
+  function cut(d) {
+    return _scAggregate(d.raw.filter(function (p) { return p.ts >= lo && p.ts <= hi; }),
+                        d.sec0, d.mode);
+  }
+  var a1 = cut(v.d1);
+  var f = {
+    xs: a1.pts.map(function (p) { return p.ts; }),
+    y1: a1.pts.map(function (p) { return p.v; }),
+    y2: null, sec: a1.sec,
+  };
+  if (v.d2) {
+    var a2 = cut(v.d2), p2 = a2.pts, j = 0;
+    // Nearest overlay point, within twice the wider bucket.
+    var maxDist = 2 * Math.max(a1.sec, a2.sec, (hi - lo) / Math.max(1, f.xs.length));
+    f.y2 = f.xs.map(function (t) {
+      while (j + 1 < p2.length && Math.abs(p2[j + 1].ts - t) <= Math.abs(p2[j].ts - t)) j++;
+      return p2.length && Math.abs(p2[j].ts - t) <= maxDist ? p2[j].v : null;
+    });
+  }
+  return f;
+}
+
+function _scData(f) {
+  return f.y2 ? [f.xs, f.y1, f.y2] : [f.xs, f.y1];
+}
+
+function _scZoomed(v) {
+  return v.lo > v.fullLo + 1 || v.hi < v.fullHi - 1;
+}
+
+// Stats, message, reset button and navigator window for the frame shown.
+function _scApply(f) {
+  var v = _scView, zoomed = _scZoomed(v);
+  var fmt = function (x) {
+    return x != null ? (Math.round(x * 10) / 10) + (v.unit1 ? " " + v.unit1 : "") : "—";
+  };
+  var mn = Infinity, mx = -Infinity, sum = 0, n = 0;
+  f.y1.forEach(function (x) {
+    if (x == null) return;
+    if (x < mn) mn = x;
+    if (x > mx) mx = x;
+    sum += x; n++;
+  });
+  var set = function (id, t) { var el = document.getElementById(id); if (el) el.textContent = t; };
+  set("sc-min", n ? fmt(mn) : "—");
+  set("sc-avg", n ? fmt(sum / n) : "—");
+  set("sc-max", n ? fmt(mx) : "—");
+  set("sc-pts", String(f.xs.length));
+  set("sc-msg", _scBucketName(f.sec) + v.tail);
+  var scope = document.getElementById("sc-scope");
+  if (scope) scope.hidden = !zoomed;
+  var reset = document.getElementById("sc-reset");
+  if (reset) reset.hidden = !zoomed;
+  _scNavPlace();
+}
+
+// Show lo..hi (clamped to the data, SC_MIN_WINDOW at least): bucket it,
+// redraw, and let the y axis fit what is shown. One redraw per frame
+// however fast a drag goes.
+function _scSetWindow(lo, hi) {
+  var v = _scView;
+  if (!v || !sensorChart) return;
+  var full = v.fullHi - v.fullLo;
+  var span = Math.min(full, Math.max(SC_MIN_WINDOW, hi - lo));
+  if (hi - lo < span) { var mid = (lo + hi) / 2; lo = mid - span / 2; hi = mid + span / 2; }
+  if (lo < v.fullLo) { hi += v.fullLo - lo; lo = v.fullLo; }
+  if (hi > v.fullHi) { lo -= hi - v.fullHi; hi = v.fullHi; }
+  v.lo = Math.max(v.fullLo, lo);
+  v.hi = hi;
+  _scNavPlace();
+  _scWant = [v.lo, v.hi];
+  if (_scRaf) return;
+  _scRaf = requestAnimationFrame(function () {
+    _scRaf = 0;
+    var w = _scWant, u = sensorChart;
+    if (!u || !w || _scView !== v) return;
+    var f = _scFrame(v, w[0], w[1]);
+    _scSyncing = true;
+    try {
+      u.batch(function () {
+        u.setData(_scData(f), true);
+        u.setScale("x", { min: w[0], max: w[1] });
+      });
+    } finally {
+      _scSyncing = false;
+    }
+    _scApply(f);
+  });
+}
+
+function sensorChartReset() {
+  var v = _scView;
+  if (v) _scSetWindow(v.fullLo, v.fullHi);
+}
+
+// The navigator's window over the shown part of the whole.
+function _scNavPlace() {
+  var v = _scView, u = _scNav, win = document.getElementById("sc-nav-win");
+  if (!v || !u || !win) return;
+  var x0 = u.over.offsetLeft;
+  var l = u.valToPos(v.lo, "x"), r = u.valToPos(v.hi, "x");
+  if (!isFinite(l) || !isFinite(r)) return;
+  win.style.left = (x0 + l) + "px";
+  win.style.width = Math.max(6, r - l) + "px";
+}
+
+// Drag the window to move it, its edges to stretch it; a press beside it
+// moves it there; a double click shows the whole. Pointer events, so a
+// finger works as a mouse does.
+function _scNavBind() {
+  var box = document.getElementById("sc-nav");
+  if (!box || box._scBound) return;
+  box._scBound = true;
+  var drag = null;
+  box.addEventListener("pointerdown", function (e) {
+    var v = _scView, u = _scNav;
+    if (!v || !u) return;
+    var edge = e.target.getAttribute && e.target.getAttribute("data-edge");
+    var perPx = (v.fullHi - v.fullLo) / Math.max(1, u.over.clientWidth);
+    if (!edge && !e.target.closest(".sc-nav-win")) {
+      // Beside the window: centre it there, then drag it from there.
+      var at = u.posToVal(e.clientX - u.over.getBoundingClientRect().left, "x");
+      var half = (v.hi - v.lo) / 2;
+      _scSetWindow(at - half, at + half);
+    }
+    drag = { mode: edge || "move", x: e.clientX, lo: v.lo, hi: v.hi, perPx: perPx };
+    box.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  box.addEventListener("pointermove", function (e) {
+    if (!drag) return;
+    var dt = (e.clientX - drag.x) * drag.perPx;
+    if (drag.mode === "l") _scSetWindow(Math.min(drag.lo + dt, drag.hi - SC_MIN_WINDOW), drag.hi);
+    else if (drag.mode === "r") _scSetWindow(drag.lo, Math.max(drag.hi + dt, drag.lo + SC_MIN_WINDOW));
+    else _scSetWindow(drag.lo + dt, drag.hi + dt);
+  });
+  var end = function () { drag = null; };
+  box.addEventListener("pointerup", end);
+  box.addEventListener("pointercancel", end);
+  box.addEventListener("dblclick", sensorChartReset);
+}
+
+function _scDraw() {
+  var v = _scView, ctx = document.getElementById("sensorChart");
+  if (!v || !ctx) return;
+  if (sensorChart) { sensorChart.destroy(); sensorChart = null; }
+  if (_scNav) { _scNav.destroy(); _scNav = null; }
+  var width = ctx.clientWidth || 600;
+  var narrow = width < 480;
+  var f = _scFrame(v, v.lo, v.hi);
+
+  var series = [
+    { label: spT("timeLabel", "Time"), value: _scLegendTime },
+    {
+      label: _scSeriesLabel(v.sid, v.metric, v.unit1),
+      stroke: "#275673",
+      fill: "rgba(39,86,115,0.08)",
+      width: 2,
+      points: { show: f.xs.length <= 100 },
+      scale: "y",
+    },
+  ];
+  if (f.y2) {
+    series.push({
+      label: _scSeriesLabel(v.sid2, v.metric2, v.unit2),
+      stroke: "#e67e22",
+      width: 2,
+      dash: [5, 3],
+      points: { show: f.xs.length <= 100 },
+      scale: "y2",
+    });
+  }
+
+  // The series names carry the units; on a phone the Y axis gives its
+  // label's width to the plot.
+  var MT = window.MetricText || {};
+  var axisLbl = function (m, u) {
+    if (narrow) return null;
+    var uu = MT.unit ? MT.unit(m, u) : u;
+    return (MT.label ? MT.label(m) : m) + (uu ? ", " + uu : "");
+  };
+  var axes = [
+    { values: _scAxisValues, size: 50 },
+    { scale: "y", label: axisLbl(v.metric, v.unit1) },
+  ];
+  if (f.y2) {
+    axes.push({ scale: "y2", side: 1, grid: { show: false }, label: axisLbl(v.metric2, v.unit2) });
+  }
+
+  ctx.innerHTML = "";
+  _scSyncing = true;
+  try {
+    sensorChart = new uPlot({
+      width: width,
+      height: narrow ? 240 : 300,
+      scales: { x: { time: true }, y: {}, y2: {} },
+      series: series,
+      axes: axes,
+      legend: { show: true },
+      cursor: {
+        sync: { key: "sensors" },
+        // A double click shows the whole period (uPlot's own goes back to
+        // the data in the window, which after a zoom is the window).
+        bind: { dblclick: function () { return function () { sensorChartReset(); return null; }; } },
+      },
+      hooks: {
+        // The x scale is the window, not the buckets' own extent (a bucket
+        // starts before its first reading): set once the chart is up.
+        ready: [function (u) {
+          _scSyncing = true;
+          try { u.setScale("x", { min: v.lo, max: v.hi }); } finally { _scSyncing = false; }
+          u._scReady = true;
+        }],
+        // A drag on the chart zooms it: the window is bucketed afresh. What
+        // uPlot sets on its own before it is ready, and the window being
+        // set again, are not a zoom.
+        setScale: [function (u, key) {
+          if (key !== "x" || _scSyncing || !u._scReady || u.scales.x.min == null) return;
+          var w = _scView;
+          if (w && Math.abs(u.scales.x.min - w.lo) < 1 && Math.abs(u.scales.x.max - w.hi) < 1) return;
+          _scSetWindow(u.scales.x.min, u.scales.x.max);
+        }],
+      },
+    }, _scData(f), ctx);
+  } finally {
+    _scSyncing = false;
+  }
+
+  // The navigator: the whole period as bucketed for the whole, its plot
+  // lined up under the chart's.
+  var box = document.getElementById("sc-nav"), host = document.getElementById("sc-nav-plot");
+  if (box && host) {
+    box.hidden = false;
+    host.innerHTML = "";
+    var pr = uPlot.pxRatio || 1, bb = sensorChart.bbox;
+    var padL = bb.left / pr, padR = Math.max(0, width - (bb.left + bb.width) / pr);
+    var whole = _scAggregate(v.d1.raw, v.d1.sec0, v.d1.mode).pts;
+    _scNav = new uPlot({
+      width: width, height: 56,
+      padding: [4, padR, 4, padL],
+      legend: { show: false },
+      cursor: { show: false, drag: { x: false, y: false } },
+      select: { show: false },
+      scales: { x: { time: true, min: v.fullLo, max: v.fullHi } },
+      axes: [{ show: false }, { show: false }],
+      hooks: { ready: [function () { _scNavPlace(); }] },   // its scale is set by then
+      series: [{}, { stroke: "#275673", fill: "rgba(39,86,115,0.12)", width: 1, points: { show: false } }],
+    }, [whole.map(function (p) { return p.ts; }), whole.map(function (p) { return p.v; })], host);
+    _scNavBind();
+  }
+  _scApply(f);
+}
+
+// ── The chart's time axis, on the device's clock ──
+// The rows are the device's wall time: the axis and the legend show that
+// time, 24-hour, day.month, whatever zone and locale the browser has.
+function _scWall(ts) {
+  var off = _scDeviceOffset(ts);
+  if (off === null) off = -new Date(ts * 1000).getTimezoneOffset() * 60;
+  var d = new Date((ts + off) * 1000);
+  function p2(n) { return (n < 10 ? "0" : "") + n; }
+  return { hm: p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes()),
+           dm: p2(d.getUTCDate()) + "." + p2(d.getUTCMonth() + 1),
+           y: d.getUTCFullYear(), midnight: !d.getUTCHours() && !d.getUTCMinutes() };
+}
+
+// Tick labels: day.month for day steps; hours, with the day under the first
+// tick of each day.
+function _scAxisValues(u, splits, axisIdx, space, incr) {
+  var prev = "";
+  return splits.map(function (ts) {
+    var w = _scWall(ts), day = w.dm !== prev;
+    prev = w.dm;
+    if (incr >= 86400) return w.dm;
+    return day ? w.hm + "\n" + w.dm : w.hm;
+  });
+}
+
+function _scLegendTime(u, ts) {
+  if (ts == null) return "--";
+  var w = _scWall(ts);
+  return w.dm + "." + w.y + " " + w.hm;
+}
+
+// "Indoor · Temperature, °C": the names the sensor cards use.
+function _scSeriesLabel(sid, metric, unit) {
+  var MT = window.MetricText || {};
+  var s = ((_sensorsCache && _sensorsCache.sensors) || []).find(function (x) { return x.id === sid; });
+  var u = MT.unit ? MT.unit(metric, unit) : unit;
+  return ((s && s.name) || sid) + " · " + (MT.label ? MT.label(metric) : metric) + (u ? ", " + u : "");
+}
 
 // ── A period between two days ──
 // The days are the device's (its zone and summer time, as the rows are),
@@ -943,7 +1255,7 @@ function sensorChartLoad(ev) {
   var edited = ev && ev.target ? ev.target.id : "";
   if ((edited === "sc-from" || edited === "sc-to") && !_scDayOk(ev.target.value)) return;
   var period = _scRange(now, edited);      // also shows or hides the day fields
-  var from = period.from, to = period.to, range = to - from;
+  var from = period.from, to = period.to;
 
   if (!sid) return;
 
@@ -986,151 +1298,60 @@ function sensorChartLoad(ev) {
         if (msg) msg.textContent = spT("noDataPeriod", "No data for selected period.") +
           (d1 && d1.noDate ? " " + spT("historyNeedsDate", "History needs the Date field in the data log.") : "") +
           (period.note ? " " + period.note : "");
+        _scView = null;
+        if (sensorChart) { sensorChart.destroy(); sensorChart = null; }
+        if (_scNav) { _scNav.destroy(); _scNav = null; }
+        ["sc-nav", "sc-reset", "sc-scope"].forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) el.hidden = true;
+        });
         return;
       }
 
       var unit1 = d1.data[0].unit || "";
-      var unit2 = d2 && d2.data && d2.data.length > 0 ? (d2.data[0].unit || "") : "";
-      var hasDual = d2 && d2.data && d2.data.length > 0;
+      var hasDual = !!(d2 && d2.data && d2.data.length > 0);
+      var unit2 = hasDual ? (d2.data[0].unit || "") : "";
 
-      // Build unified timestamp labels from primary series
-      var labels = d1.data.map(function (pt) {
-        return new Date(pt.ts * 1000).toLocaleTimeString();
-      });
-      var values1 = d1.data.map(function (pt) { return pt.v; });
-
-      // For the secondary series, align data by timestamp to primary labels
-      var values2 = [];
-      if (hasDual) {
-        // Build a lookup map from ts -> value for secondary
-        var tsMap = {};
-        d2.data.forEach(function (pt) { tsMap[pt.ts] = pt.v; });
-
-        // For each primary timestamp, find the closest secondary point
-        values2 = d1.data.map(function (pt) {
-          if (tsMap[pt.ts] !== undefined) return tsMap[pt.ts];
-          // Find nearest secondary point within ±bucket window
-          var closest = null, bestDist = Infinity;
-          d2.data.forEach(function (p2) {
-            var dist = Math.abs(p2.ts - pt.ts);
-            if (dist < bestDist) { bestDist = dist; closest = p2.v; }
-          });
-          // Only include if within 2x the aggregation window
-          var maxDist = range / labels.length * 2;
-          return bestDist <= maxDist ? closest : null;
-        });
-      }
-
-      // Compute and display CURRENT / Min / Avg / Max / Pts stats
-      var fmt = function(v) { return v != null ? (Math.round(v * 10) / 10) + (unit1 ? " " + unit1 : "") : "—"; };
-      var lastVal = values1[values1.length - 1];
-      var minVal = Infinity, maxVal = -Infinity, sumVal = 0, cntVal = 0;
-      for (var vi = 0; vi < values1.length; vi++) {
-        var vv = values1[vi];
-        if (vv == null) continue;
-        if (vv < minVal) minVal = vv;
-        if (vv > maxVal) maxVal = vv;
-        sumVal += vv; cntVal++;
-      }
-      var avgVal = cntVal ? sumVal / cntVal : null;
+      // Current: the series' last value, whatever the zoom. A period in
+      // the past has no current value: its last one is named so.
+      var last = d1.data[d1.data.length - 1].v;
       var elCur = document.getElementById("sc-current");
-      var elMin = document.getElementById("sc-min");
-      var elAvg = document.getElementById("sc-avg");
-      var elMax = document.getElementById("sc-max");
-      var elPts = document.getElementById("sc-pts");
-      if (elCur) elCur.textContent = fmt(lastVal);
-      // A period in the past has no current value: its last one is named so.
+      if (elCur) elCur.textContent = Math.round(last * 10) / 10 + (unit1 ? " " + unit1 : "");
       var elCurLbl = document.getElementById("sc-current-lbl");
       if (elCurLbl) {
         var lblKey = d1.live ? "currentLabel" : "lastInPeriod";
         elCurLbl.setAttribute("data-i18n", "sensorsPage." + lblKey);   // kept on a language switch
         elCurLbl.textContent = spT(lblKey, d1.live ? "Current" : "Last in period");
       }
-      if (elMin) elMin.textContent = minVal !== Infinity ? fmt(minVal) : "—";
-      if (elAvg) elAvg.textContent = fmt(avgVal);
-      if (elMax) elMax.textContent = maxVal !== -Infinity ? fmt(maxVal) : "—";
-      if (elPts) elPts.textContent = d1.count !== undefined ? d1.count : "—";
 
-      // The bucket and how it was combined — the data log column's own
-      // choice (Settings → Data log), which is where it is changed.
-      var infoStr = d1.agg + " · " + datalogAggLabel(d1.mode).toLowerCase();
+      // What follows the bucket in the message: how the series are combined
+      // (the data log column's own choice, Settings → Data log) and why rows
+      // may be missing.
+      var tail = " · " + datalogAggLabel(d1.mode).toLowerCase();
       if (hasDual) {
-        infoStr += spT("plusOverlay", " + overlay");
+        tail += spT("plusOverlay", " + overlay");
         // The overlay is combined by ITS column's mode, which can differ.
-        if (d2.mode !== d1.mode) infoStr += " (" + datalogAggLabel(d2.mode).toLowerCase() + ")";
+        if (d2.mode !== d1.mode) tail += " (" + datalogAggLabel(d2.mode).toLowerCase() + ")";
       }
       if (d1.otherMode || (d2 && d2.otherMode))
-        infoStr += " · " + spT("historyOtherMode", "Rows logged with another aggregation are not shown.");
-      if (d1.noDate) infoStr += " · " + spT("historyNeedsDate", "History needs the Date field in the data log.");
+        tail += " · " + spT("historyOtherMode", "Rows logged with another aggregation are not shown.");
+      if (d1.noDate) tail += " · " + spT("historyNeedsDate", "History needs the Date field in the data log.");
       if (d1.cut || (d2 && d2.cut))
-        infoStr += " · " + spT("historyCut", "Only the newest {n} files are read.", { n: SC_MAX_ARCHIVED });
-      if (period.note) infoStr += " · " + period.note;
-      if (msg) msg.textContent = infoStr;
+        tail += " · " + spT("historyCut", "Only the newest {n} files are read.", { n: SC_MAX_ARCHIVED });
+      if (period.note) tail += " · " + period.note;
 
-      var ctx = document.getElementById("sensorChart");
-      if (!ctx) return;
-
-      function render() {
-        if (sensorChart) { sensorChart.destroy(); sensorChart = null; }
-
-        // uPlot wants epoch-seconds for time scale; convert from API ts.
-        var xs = d1.data.map(function (pt) { return pt.ts; });
-
-        var series = [
-          { label: spT("timeLabel", "Time") },
-          {
-            label: sid + " / " + metric + (unit1 ? " (" + unit1 + ")" : ""),
-            stroke: "#275673",
-            fill: "rgba(39,86,115,0.08)",
-            width: 2,
-            points: { show: d1.data.length <= 100 },
-            scale: "y",
-          },
-        ];
-        var seriesData = [xs, values1];
-
-        if (hasDual) {
-          series.push({
-            label: sid2 + " / " + metric2 + (unit2 ? " (" + unit2 + ")" : ""),
-            stroke: "#e67e22",
-            width: 2,
-            dash: [5, 3],
-            points: { show: d2.data.length <= 100 },
-            scale: "y2",
-          });
-          seriesData.push(values2);
-        }
-
-        var axes = [
-          {},
-          { scale: "y", label: metric + (unit1 ? " (" + unit1 + ")" : "") },
-        ];
-        if (hasDual) {
-          axes.push({
-            scale: "y2",
-            side: 1,
-            grid: { show: false },
-            label: metric2 + (unit2 ? " (" + unit2 + ")" : ""),
-          });
-        }
-
-        ctx.innerHTML = "";
-        sensorChart = new uPlot({
-          width: ctx.clientWidth || 600,
-          height: ctx.clientHeight || 320,
-          scales: { x: { time: true }, y: {}, y2: {} },
-          series: series,
-          axes: axes,
-          legend: { show: true },
-          cursor: { sync: { key: "sensors" } },
-        }, seriesData, ctx);
+      var lo = d1.raw[0].ts, hi = d1.raw[d1.raw.length - 1].ts;
+      if (hasDual) {
+        lo = Math.min(lo, d2.raw[0].ts);
+        hi = Math.max(hi, d2.raw[d2.raw.length - 1].ts);
       }
-
-      if (typeof uPlot === "undefined") {
-        dbLoadUPlot(render);
-      } else {
-        render();
-      }
+      _scView = {
+        d1: d1, d2: hasDual ? d2 : null, unit1: unit1, unit2: unit2, tail: tail,
+        sid: sid, metric: metric, sid2: sid2, metric2: metric2,
+        fullLo: lo, fullHi: hi, lo: lo, hi: hi,
+      };
+      if (typeof uPlot === "undefined") dbLoadUPlot(_scDraw);
+      else _scDraw();
     })
     .catch(function (e) {
       if (msg) msg.textContent = spT("errorPrefix", "Error: {e}", { e: e });
@@ -2364,6 +2585,7 @@ registerHandlers({
   sensorsFilter: sensorsFilter,
   sensorsPrint: sensorsPrint,
   sensorChartLoad: sensorChartLoad,
+  sensorChartReset: sensorChartReset,
   clToggleSensor: clToggleSensor,
   clRemoveSensor: clRemoveSensor,
   clEditSensor: clEditSensor,
