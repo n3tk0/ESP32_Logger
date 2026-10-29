@@ -334,7 +334,7 @@ with sync_playwright() as p:
     # Last month's day: its own file, and nothing else — not today's file,
     # not yesterday's, and not the ring.
     old_day = dev(NOW - int(40.5 * 86400)).strftime("%Y-%m-%d")
-    n_dl, n_data = len(downloads), len(data_reqs)
+    n0, n_data = len(downloads), len(data_reqs)
     # Changing From to last month moves To along (31 days at most), so the
     # same day is then set in To.
     pg.fill("#sc-from", old_day)
@@ -342,6 +342,7 @@ with sync_playwright() as p:
     t = pg.input_value("#sc-to")
     want_to = (dev(NOW - int(40.5 * 86400)) + timedelta(days=30)).strftime("%Y-%m-%d")
     check(t == want_to, f"an early From moves To to 31 days after it ({t}, want {want_to})")
+    n_dl = len(downloads)
     pg.fill("#sc-to", old_day)
     pg.wait_for_timeout(2000)
     new_dl = downloads[n_dl:]
@@ -350,12 +351,29 @@ with sync_playwright() as p:
           f"last month's day is read from its file ({pg.locator('#sc-max').inner_text()})")
     check(pg.locator("#sc-min").inner_text().startswith("30"),
           "and only from its file")
-    check(all("%s.txt" % lm.strftime("%Y-%m") in d for d in new_dl),
-          f"only that file is downloaded ({new_dl})")
+    old_file = "/logs/dev_datalog_%s.txt" % lm.strftime("%Y-%m")
+    check(old_file in downloads[n0:], f"its file is downloaded ({downloads[n0:]})")
+    check(all(d == old_file for d in new_dl), f"and only that file ({new_dl})")
+    check(pg.locator("#sc-current-lbl").inner_text().lower().startswith("last"),
+          f"its last value is not called current ({pg.locator('#sc-current-lbl').inner_text()!r})")
     check(len(data_reqs) == n_data,
           f"a period in the past does not ask for the ring ({data_reqs[n_data:]})")
     pts = pg.locator("#sc-pts").inner_text()
     check(pts.isdigit() and 1 <= int(pts) <= 24, f"one day's hours at most ({pts})")
+
+    print("\nA year still being typed is not a day:")
+    n_dl = len(downloads)
+    t_before = pg.input_value("#sc-to")
+    f_before = pg.input_value("#sc-from")
+    pg.evaluate("""() => { const f = document.getElementById('sc-from');
+        f.value = '0002-10-28'; f.dispatchEvent(new Event('change', {bubbles: true})); }""")
+    pg.wait_for_timeout(500)
+    check(pg.input_value("#sc-to") == t_before,
+          f"To is left alone while From reads year 2 ({pg.input_value('#sc-to')})")
+    check(len(downloads) == n_dl, "and nothing is loaded for it")
+    pg.evaluate("(v) => { document.getElementById('sc-from').value = v; }", f_before)
+    got = pg.evaluate("() => [_scDayAdd('2026-10-28', 30), _scDayAdd('2024-02-28', 1)]")
+    check(got == ["2026-11-27", "2024-02-29"], f"days are added on the calendar ({got})")
 
     print("\nA period longer than 31 days is held to 31:")
     pg.fill("#sc-to", today)
@@ -376,8 +394,10 @@ with sync_playwright() as p:
     pg.screenshot(path=os.environ.get("SHOT", "/tmp/sc-period.png"),
                   clip={"x": 0, "y": 0, "width": 1400, "height": 1000}, full_page=True)
     pg.select_option("#sc-range", "86400")
-    pg.wait_for_timeout(500)
+    pg.wait_for_timeout(1500)
     check(not pg.locator("#sc-custom").is_visible(), "a fixed range hides the day fields")
+    check(pg.locator("#sc-current-lbl").inner_text().lower().startswith("current"),
+          "and the last value is current again")
 
     errors = [c for c in console if c[0] in ("error", "pageerror")
               and "404" not in c[1] and "Failed to load resource" not in c[1]]

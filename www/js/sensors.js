@@ -433,7 +433,8 @@ function sensorsFilter() {
 // log file, and the files rotation moved aside that can still hold rows of
 // the range, and puts the ring's readings after them.
 
-var _scLogCache = {};                   // storage|path -> { size, text }
+var _scLogCache = {};                   // storage|path -> { size, text }, oldest first
+var SC_CACHE_MAX_CHARS = 8 * 1024 * 1024;   // what the page keeps of the files it read
 var _scLogInflight = {};                // storage|path -> Promise<text>
 var _scDlQueue = [], _scDlActive = 0;
 var SC_DL_PARALLEL = 2;                 // the web server's connection pool is tiny
@@ -447,6 +448,19 @@ function _scDlNext() {
     var job = _scDlQueue.shift();
     _scDlActive++;
     job().finally(function () { _scDlActive--; _scDlNext(); });
+  }
+}
+
+// The cache keeps the files read last, up to SC_CACHE_MAX_CHARS: a few
+// month-long periods would otherwise keep every file they read.
+function _scCachePut(key, size, text) {
+  delete _scLogCache[key];
+  _scLogCache[key] = { size: size, text: text };
+  var keys = Object.keys(_scLogCache), total = 0, i;
+  for (i = 0; i < keys.length; i++) total += _scLogCache[keys[i]].text.length;
+  for (i = 0; i < keys.length - 1 && total > SC_CACHE_MAX_CHARS; i++) {
+    total -= _scLogCache[keys[i]].text.length;
+    delete _scLogCache[keys[i]];
   }
 }
 
@@ -466,7 +480,7 @@ function _scLogText(path, size, storage) {
           if (!r.ok) throw new Error("HTTP " + r.status);
           return r.text();
         })
-        .then(function (t) { _scLogCache[key] = { size: size, text: t }; resolve(t); })
+        .then(function (t) { _scCachePut(key, size, t); resolve(t); })
         .catch(function () { resolve(""); })
         .finally(function () { delete _scLogInflight[key]; });
     });
@@ -538,8 +552,8 @@ function _scDirOf(path) {
   return i > 0 ? path.substring(0, i) : "/";
 }
 
-// The data log files that can hold rows between `from` and `to`, newest
-// first. A file starts where the one moved aside before it ends, so a file
+// { files, cut }: the data log files that can hold rows between `from` and
+// `to`, newest first, and whether older ones were left out (SC_MAX_ARCHIVED). A file starts where the one moved aside before it ends, so a file
 // whose predecessor ends after `to` is left out: a period in the past reads
 // its own days, not every file up to today.
 // Only the log's own folder is listed: a recursive listing walks the whole
@@ -576,15 +590,18 @@ function _scLogFiles(from, to) {
         var start = i ? archived[i - 1].end : -Infinity;
         if (f.end >= from && start <= to) out.push(f);
       });
-      var curStart = archived.length ? archived[archived.length - 1].end : -Infinity;
-      if (cur && curStart <= to) out.push(cur);
       out.reverse();
-      return out.slice(0, SC_MAX_ARCHIVED + (cur && curStart <= to ? 1 : 0)).map(function (f) {
-        f.storage = storage;
-        return f;
-      });
+      var cut = out.length > SC_MAX_ARCHIVED;
+      out = out.slice(0, SC_MAX_ARCHIVED);
+      // The active file, for a period up to now whatever its start says: a
+      // size rotation names the file by the device's clock, which can be a
+      // little ahead of the browser's.
+      var curStart = archived.length ? archived[archived.length - 1].end : -Infinity;
+      if (cur && (curStart <= to || to >= Math.floor(Date.now() / 1000) - 60)) out.unshift(cur);
+      out.forEach(function (f) { f.storage = storage; });
+      return { files: out, cut: cut };
     })
-    .catch(function () { return []; });
+    .catch(function () { return { files: [], cut: false }; });
 }
 
 // A row's Date field as [y, m, d], or null. The row's own separators decide
@@ -715,21 +732,21 @@ function _scLogHistory(sid, metric, from, to, progress) {
   var dateFormat = +dl.dateFormat;
   var lg = (window.CFG && CFG.logger) || {};
   var winSec = +lg.aggregationIntervalSec || 60;
-  var stats = { noDate: false, otherMode: false };
-  return _scLogFiles(from, to).then(function (files) {
-    var done = 0;
-    if (progress && files.length > 1) progress(0, files.length);
+  var stats = { noDate: false, otherMode: false, cut: false };
+  return _scLogFiles(from, to).then(function (lf) {
+    var files = lf.files, done = 0;
+    stats.cut = lf.cut;
+    if (progress) progress(0, files.length);
     return Promise.all(files.map(function (f) {
       return _scLogText(f.path, f.size, f.storage).then(function (t) {
-        done++;
-        if (progress && files.length > 1) progress(done, files.length);
+        if (progress) progress(++done, files.length);
         return _scParseLog(t, want, from, to, dateFormat, winSec, stats);
       });
     }));
   }).then(function (lists) {
     var all = [].concat.apply([], lists);
     all.sort(function (a, b) { return a.ts - b.ts; });
-    return { pts: all, noDate: stats.noDate, otherMode: stats.otherMode };
+    return { pts: all, noDate: stats.noDate, otherMode: stats.otherMode, cut: stats.cut };
   });
 }
 
@@ -836,7 +853,7 @@ function _scSeries(sid, metric, from, to, agg, progress) {
     .then(function (r) { return r.ok ? r.json() : null; })
     .catch(function () { return null; });
   var hist = _scLogHistory(sid, metric, from, to, progress)
-    .catch(function () { return { pts: [], noDate: false, otherMode: false }; });
+    .catch(function () { return { pts: [], noDate: false, otherMode: false, cut: false }; });
   return Promise.all([ring, hist]).then(function (res) {
     var rd = (res[0] && res[0].data) || [];
     var unit = rd.length ? (rd[0].unit || "") : "";
@@ -849,7 +866,7 @@ function _scSeries(sid, metric, from, to, agg, progress) {
     var a = _scAggregate(pts, SC_BUCKET_SEC[agg] || 0, mode);
     return {
       agg: _scBucketName(a.sec), mode: mode, count: a.pts.length, noDate: res[1].noDate,
-      otherMode: res[1].otherMode,
+      otherMode: res[1].otherMode, cut: res[1].cut, live: live,
       data: a.pts.map(function (p) { return { ts: p.ts, v: p.v, unit: unit }; }),
     };
   });
@@ -872,8 +889,15 @@ function _scDayStart(day, plus) {
 }
 
 function _scDayAdd(day, n) {
-  var d = new Date(Date.UTC(+day.substring(0, 4), +day.substring(5, 7) - 1, +day.substring(8, 10) + n));
+  var d = new Date(Date.UTC(2000, +day.substring(5, 7) - 1, +day.substring(8, 10) + n));
+  d.setUTCFullYear(d.getUTCFullYear() - 2000 + +day.substring(0, 4));
   return d.toISOString().substring(0, 10);
+}
+
+// A day field holds a day the chart can use: Chrome reports a change while
+// a year is still being typed (0002-10-28), and that is not one.
+function _scDayOk(day) {
+  return /^(\d{4})-\d{2}-\d{2}$/.test(day || "") && +day.substring(0, 4) >= 2000;
 }
 
 // { from, to, note } from the range select: the last N seconds, or the two
@@ -890,8 +914,8 @@ function _scRange(now, edited) {
   }
   var fEl = document.getElementById("sc-from"), tEl = document.getElementById("sc-to");
   var today = _scDayOf(now), note = "";
-  var f = (fEl && fEl.value) || _scDayAdd(today, -1);
-  var t = (tEl && tEl.value) || today;
+  var f = fEl && _scDayOk(fEl.value) ? fEl.value : _scDayAdd(today, -1);
+  var t = tEl && _scDayOk(tEl.value) ? tEl.value : today;
   if (t > today) t = today;
   if (f > today) f = today;
   var byFrom = edited === "sc-from";
@@ -917,6 +941,7 @@ function sensorChartLoad(ev) {
   var msg = document.getElementById("sc-msg");
   var now = Math.floor(Date.now() / 1000);
   var edited = ev && ev.target ? ev.target.id : "";
+  if ((edited === "sc-from" || edited === "sc-to") && !_scDayOk(ev.target.value)) return;
   var period = _scRange(now, edited);      // also shows or hides the day fields
   var from = period.from, to = period.to, range = to - from;
 
@@ -937,13 +962,19 @@ function sensorChartLoad(ev) {
 
   // Primary (and optionally secondary) series: data log history + ring.
   var myLoad = ++_scLoadSeq;
-  var progress = function (done, total) {
-    if (myLoad === _scLoadSeq && msg)
-      msg.textContent = spT("loadingFiles", "Loading the data log… {done}/{total} files",
-                            { done: done, total: total });
+  // Files in, over both series: shown once there is more than one.
+  var prog = [[0, 0], [0, 0]];
+  var progress = function (i) {
+    return function (done, total) {
+      prog[i] = [done, total];
+      var d = prog[0][0] + prog[1][0], n = prog[0][1] + prog[1][1];
+      if (myLoad === _scLoadSeq && msg && n > 1)
+        msg.textContent = spT("loadingFiles", "Loading the data log… {done}/{total} files",
+                              { done: d, total: n });
+    };
   };
-  var fetches = [_scSeries(sid, metric, from, to, agg, progress)];
-  if (sid2 && metric2) fetches.push(_scSeries(sid2, metric2, from, to, agg));
+  var fetches = [_scSeries(sid, metric, from, to, agg, progress(0))];
+  if (sid2 && metric2) fetches.push(_scSeries(sid2, metric2, from, to, agg, progress(1)));
 
   Promise.all(fetches)
     .then(function (results) {
@@ -1008,6 +1039,13 @@ function sensorChartLoad(ev) {
       var elMax = document.getElementById("sc-max");
       var elPts = document.getElementById("sc-pts");
       if (elCur) elCur.textContent = fmt(lastVal);
+      // A period in the past has no current value: its last one is named so.
+      var elCurLbl = document.getElementById("sc-current-lbl");
+      if (elCurLbl) {
+        var lblKey = d1.live ? "currentLabel" : "lastInPeriod";
+        elCurLbl.setAttribute("data-i18n", "sensorsPage." + lblKey);   // kept on a language switch
+        elCurLbl.textContent = spT(lblKey, d1.live ? "Current" : "Last in period");
+      }
       if (elMin) elMin.textContent = minVal !== Infinity ? fmt(minVal) : "—";
       if (elAvg) elAvg.textContent = fmt(avgVal);
       if (elMax) elMax.textContent = maxVal !== -Infinity ? fmt(maxVal) : "—";
@@ -1024,6 +1062,8 @@ function sensorChartLoad(ev) {
       if (d1.otherMode || (d2 && d2.otherMode))
         infoStr += " · " + spT("historyOtherMode", "Rows logged with another aggregation are not shown.");
       if (d1.noDate) infoStr += " · " + spT("historyNeedsDate", "History needs the Date field in the data log.");
+      if (d1.cut || (d2 && d2.cut))
+        infoStr += " · " + spT("historyCut", "Only the newest {n} files are read.", { n: SC_MAX_ARCHIVED });
       if (period.note) infoStr += " · " + period.note;
       if (msg) msg.textContent = infoStr;
 
