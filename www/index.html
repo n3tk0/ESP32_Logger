@@ -714,7 +714,15 @@
                 <option value="21600" data-i18n="sensorsPage.range6h">Last 6h</option>
                 <option value="86400" selected data-i18n="sensorsPage.range24h">Last 24h</option>
                 <option value="604800" data-i18n="sensorsPage.range7d">Last 7d</option>
+                <option value="custom" data-i18n="sensorsPage.rangeCustom">Period…</option>
               </select>
+              <span id="sc-custom" style="display:none;gap:4px;align-items:center">
+                <input type="date" id="sc-from" class="input" style="width:auto" data-change="sensorChartLoad"
+                       data-i18n-title="sensorsPage.rangeFrom" title="From">
+                <span>–</span>
+                <input type="date" id="sc-to" class="input" style="width:auto" data-change="sensorChartLoad"
+                       data-i18n-title="sensorsPage.rangeTo" title="To">
+              </span>
               <select id="sc-agg" class="input" style="width:auto" data-change="sensorChartLoad">
                 <option value="5m" data-i18n="sensorsPage.agg5m">5 min</option>
                 <option value="1h" data-i18n="sensorsPage.agg1h">1 hour</option>

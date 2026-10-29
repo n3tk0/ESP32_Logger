@@ -17,6 +17,9 @@ TWO REPORTS
 This serves a data log with a day of rows, an archived file from yesterday
 and one from last month (which must not be read), and checks both.
 
+3. A period between two days (Period…, From/To, 31 days at most): last
+   month's day reads its own file only, and not the ring.
+
     python3 tests/web/mock_device.py 8765 &
     python3 tests/web/drive_sensor_chart.py
 """
@@ -309,6 +312,72 @@ with sync_playwright() as p:
     check(len(downloads) == n_before, "unchanged files are not downloaded again")
     pts = pg.locator("#sc-pts").inner_text()
     check(pts.isdigit() and int(pts) <= 250, f"at most 250 points drawn ({pts})")
+
+    print("\nA period between two days:")
+    data_reqs = []
+    pg.on("request", lambda r: data_reqs.append(r.url) if "/api/data" in r.url else None)
+    pg.select_option("#sc-sensor", "env_indoor")
+    pg.wait_for_timeout(500)
+    pg.select_option("#sc-metric", "temperature")
+    pg.select_option("#sc-agg", "1h")
+    pg.select_option("#sc-range", "custom")
+    pg.wait_for_timeout(1500)
+    check(pg.locator("#sc-custom").is_visible(), "Period… shows the two day fields")
+    today = dev(NOW).strftime("%Y-%m-%d")
+    yesterday = dev(NOW - 86400).strftime("%Y-%m-%d")
+    check(pg.input_value("#sc-from") == yesterday and pg.input_value("#sc-to") == today,
+          f"they start at yesterday → today, the device's days "
+          f"({pg.input_value('#sc-from')} → {pg.input_value('#sc-to')})")
+    cur = float(pg.locator("#sc-current").inner_text().split()[0])
+    check(21 < cur <= 22, f"a period up to today joins the ring's readings ({cur})")
+
+    # Last month's day: its own file, and nothing else — not today's file,
+    # not yesterday's, and not the ring.
+    old_day = dev(NOW - int(40.5 * 86400)).strftime("%Y-%m-%d")
+    n_dl, n_data = len(downloads), len(data_reqs)
+    # Changing From to last month moves To along (31 days at most), so the
+    # same day is then set in To.
+    pg.fill("#sc-from", old_day)
+    pg.wait_for_timeout(300)
+    t = pg.input_value("#sc-to")
+    want_to = (dev(NOW - int(40.5 * 86400)) + timedelta(days=30)).strftime("%Y-%m-%d")
+    check(t == want_to, f"an early From moves To to 31 days after it ({t}, want {want_to})")
+    pg.fill("#sc-to", old_day)
+    pg.wait_for_timeout(2000)
+    new_dl = downloads[n_dl:]
+    print("  downloads:", new_dl, "| msg:", pg.locator("#sc-msg").inner_text())
+    check(pg.locator("#sc-max").inner_text().startswith("30"),
+          f"last month's day is read from its file ({pg.locator('#sc-max').inner_text()})")
+    check(pg.locator("#sc-min").inner_text().startswith("30"),
+          "and only from its file")
+    check(all("%s.txt" % lm.strftime("%Y-%m") in d for d in new_dl),
+          f"only that file is downloaded ({new_dl})")
+    check(len(data_reqs) == n_data,
+          f"a period in the past does not ask for the ring ({data_reqs[n_data:]})")
+    pts = pg.locator("#sc-pts").inner_text()
+    check(pts.isdigit() and 1 <= int(pts) <= 24, f"one day's hours at most ({pts})")
+
+    print("\nA period longer than 31 days is held to 31:")
+    pg.fill("#sc-to", today)
+    pg.wait_for_timeout(2000)
+    f = pg.input_value("#sc-from")
+    want = (dev(NOW) - timedelta(days=30)).strftime("%Y-%m-%d")
+    check(f == want, f"a late To moves From to 31 days before it, To included ({f}, want {want})")
+    msg = pg.locator("#sc-msg").inner_text()
+    check("31" in msg, f"and the chart says why ({msg!r})")
+    pg.fill("#sc-from", today)
+    pg.wait_for_timeout(300)
+    check(pg.input_value("#sc-to") == today, "From set after To moves To along")
+    pg.fill("#sc-to", yesterday)
+    pg.wait_for_timeout(1500)
+    check(pg.input_value("#sc-from") == yesterday and pg.input_value("#sc-to") == yesterday,
+          f"To set before From moves From along "
+          f"({pg.input_value('#sc-from')} → {pg.input_value('#sc-to')})")
+    pg.screenshot(path=os.environ.get("SHOT", "/tmp/sc-period.png"),
+                  clip={"x": 0, "y": 0, "width": 1400, "height": 1000}, full_page=True)
+    pg.select_option("#sc-range", "86400")
+    pg.wait_for_timeout(500)
+    check(not pg.locator("#sc-custom").is_visible(), "a fixed range hides the day fields")
 
     errors = [c for c in console if c[0] in ("error", "pageerror")
               and "404" not in c[1] and "Failed to load resource" not in c[1]]
